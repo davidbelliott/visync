@@ -1,10 +1,8 @@
 import * as THREE from 'three';
-import { Tesseract } from 'highdim.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { Tesseract } from './highdim.js';
 
 var cur_scene_idx = 0;
-const cam_persp = new THREE.PerspectiveCamera( 75, 1, 0.1, 10000 );
-const cam_orth = new THREE.OrthographicCamera( -8, 8, 8, -8, -8, 1000);
 
 //var canvas = null;
 //var renderer = null;
@@ -32,85 +30,6 @@ function playNote(osc_idx, frequency) {
     oscs[osc_idx].start();
 }
 
-class BoxDef {
-    constructor(coords, dims) {
-        this.coords = coords;
-        this.dims = dims;
-    }
-    create() {
-        let geometry = new THREE.BoxGeometry(...this.dims);
-        let wireframe = new THREE.EdgesGeometry(geometry);
-        const wireframe_mat = new THREE.LineBasicMaterial( { color: "yellow", linewidth: 1 } );
-        let mesh = new THREE.LineSegments(wireframe, wireframe_mat);
-        mesh.position.set(...this.coords);
-        return mesh;
-    }
-}
-
-class LineDef {
-    constructor(coords) {
-        this.coords = coords;
-    }
-    create() {
-        const line_mat = new THREE.LineBasicMaterial({color: "yellow"});
-        const points = [];
-        for (const i in this.coords) {
-            points.push(new THREE.Vector3(...(this.coords[i])));
-        }
-        const geom = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geom, line_mat);
-        return line;
-    }
-}
-
-const RobotParts = {
-    TORSO: 0,
-    LEGS: [1, 2],
-    HEAD: 3,
-    HANDS: [4, 5],
-    FEET: [6, 7],
-    ARMS: [8, 9],
-    EYES: 10,
-    MAX: 11
-}
-
-class Robot {
-    constructor(parent_obj, position) {
-        let cube_defs = Array(RobotParts.MAX);
-        cube_defs[RobotParts.TORSO] = new BoxDef([0, 1, 0], [3, 2, 1]);
-        cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -1, 0],
-            [0.5, 1.5, 1.0]);
-        cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -1, 0],
-            [0.5, 1.5, 1.0]);
-        cube_defs[RobotParts.HEAD] = new BoxDef([0, 2.75, 0], [2.0, 1.0, 2.0]);
-        cube_defs[RobotParts.HANDS[0]] = new BoxDef([-1.25, 1.5, 2.75], [0.5, 1, 1]);
-        cube_defs[RobotParts.HANDS[1]] = new BoxDef([1.25, 1.5, 2.75], [0.5, 1, 1]);
-        cube_defs[RobotParts.FEET[0]] = new BoxDef([-0.75, -2, 0], [1.5, 0.5, 2.0]);
-        cube_defs[RobotParts.FEET[1]] = new BoxDef([0.75, -2, 0], [1.5, 0.5, 2.0]);
-        cube_defs[RobotParts.ARMS[0]] = new BoxDef([-1.75, 1.5, 1.75], [0.5, 0.5, 2.0]);
-        cube_defs[RobotParts.ARMS[1]] = new BoxDef([1.75, 1.5, 1.75], [0.5, 0.5, 2.0]);
-        cube_defs[RobotParts.EYES] = new BoxDef([0, 2.75, 0.875], [1.5, 0.25, 0.25]);
-
-        let offset = [0, -1, 0];
-        for (let i in cube_defs) {
-            for (let j in offset) {
-                cube_defs[i].coords[j] += offset[j];
-            }
-        }
-
-        this.cube_defs = cube_defs;
-        this.obj = new THREE.Group();
-        this.meshes = Array(RobotParts.MAX);
-
-        for (let i in cube_defs) {
-            let mesh = cube_defs[i].create();
-            this.obj.add(mesh);
-            this.meshes[i] = mesh;
-        }
-        this.obj.position.copy(position);
-        parent_obj.add(this.obj);
-    }
-}
 
 const demo = {
     robots: [],
@@ -142,46 +61,7 @@ let curr_tesseract_scale = 0;
 let curr_man_scale = 0;
 let curr_arm_rot = 0;
 
-function init_demo(scene) {
-    demo.all_group = new THREE.Group();
-    demo.robot_group = new THREE.Group();
-    demo.anaman_group = new THREE.Group();
-    demo.tesseract_group = new THREE.Group();
 
-    demo.tesseract = new Tesseract(demo.tesseract_group, 4);
-    demo.tesseract_group.position.set(0, 0.5, 2.75);
-    demo.all_group.add(demo.tesseract_group);
-
-    for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-            let position = new THREE.Vector3((i - 1) * curr_spacing, 0,
-                (j - 1) * curr_spacing);
-            demo.robots.push(new Robot(demo.robot_group, position));
-        }
-    }
-    demo.all_group.add(demo.robot_group);
-    scene.add(demo.all_group);
-
-    let loader = new GLTFLoader();
-    loader.load( 'static/obj/anaman.glb', function ( gltf ) {
-        const wireframe_mat = new THREE.LineBasicMaterial( { color: "cyan", linewidth: 1 } );
-        for (var i in gltf.scene.children) {
-            let edges = new THREE.EdgesGeometry(gltf.scene.children[i].geometry, 30);
-            let mesh = new THREE.LineSegments(edges, wireframe_mat);
-            demo.anaman_group.add(mesh);
-            demo.anaman_group.position.set(0, 2.15, -0.2);
-            demo.anaman_group.scale.set(2.0, 2.0, 2.0);
-            demo.anaman_group.rotation.set(Math.PI / 2.0, 0, 0);
-        }
-	demo.all_group.add(demo.anaman_group);
-    }, undefined, function ( error ) {
-            console.error( error );
-    } );
-
-    cam_persp.position.set(0, 0, 8);
-    cam_orth.position.set(0, 0, 8);
-    return [Channels.MAX, cam_persp];
-}
 
 function rand_int(max) {
     return Math.floor(Math.random() * max);
@@ -197,23 +77,6 @@ function arr_eq(a, b) {
         }
     }
     return true;
-}
-
-function lerp(curr, target, coeff) {
-    if (target > curr) {
-        if (Math.abs(target - curr) > coeff) {
-            curr += coeff;
-        } else {
-            curr = target;
-        }
-    } else if (target < curr) {
-        if (Math.abs(target - curr) > coeff) {
-            curr -= coeff;
-        } else {
-            curr = target;
-        }
-    }
-    return curr;
 }
 
 var start_rot = [0, 0];

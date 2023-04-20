@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-
-import { LightningStrike } from 'three/examples/jsm/geometries/LightningStrike.js';
-import { LightningStorm } from 'three/examples/jsm/objects/LightningStorm.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { LightningStrike } from 'three/examples/jsm/geometries/LightningStrike.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+
+import { Tesseract } from './highdim.js';
 
 window.addEventListener("load", init);
 
@@ -15,6 +15,15 @@ var clock = null;
 
 var scenes = null;
 var cur_scene_idx = 0;
+
+
+function lerp_scalar(start, target, frac) {
+    return start + (target - start) * frac;
+}
+
+function ease(x) {
+    return (1 - Math.cos(Math.PI * x)) / 2 * Math.sign(x);
+}
 
 class Queue {
     constructor() {
@@ -45,18 +54,16 @@ class Queue {
 
 
 function createOutline( scene, camera, objectsArray, visibleColor ) {
+    const outlinePass = new OutlinePass( new THREE.Vector2( window.innerWidth, window.innerHeight ), scene, camera, objectsArray );
+    outlinePass.edgeStrength = 2.5;
+    outlinePass.edgeGlow = 0.7;
+    outlinePass.edgeThickness = 2.8;
+    outlinePass.visibleEdgeColor = visibleColor;
+    outlinePass.hiddenEdgeColor.set( 0 );
+    composer.addPass( outlinePass );
 
-				const outlinePass = new OutlinePass( new THREE.Vector2( window.innerWidth, window.innerHeight ), scene, camera, objectsArray );
-				outlinePass.edgeStrength = 2.5;
-				outlinePass.edgeGlow = 0.7;
-				outlinePass.edgeThickness = 2.8;
-				outlinePass.visibleEdgeColor = visibleColor;
-				outlinePass.hiddenEdgeColor.set( 0 );
-				composer.addPass( outlinePass );
-
-				return outlinePass;
-
-			}
+    return outlinePass;
+}
 
 function change_scene(scene_idx) {
     scenes[cur_scene_idx].deactivate();
@@ -65,7 +72,6 @@ function change_scene(scene_idx) {
 }
 
 function keydown(e) {
-    console.log(e.key);
     const num = parseInt(e.key);
     if (!isNaN(num) && scenes != null) {
         const scene_idx = Math.min(num % 10, scenes.length - 1);
@@ -80,14 +86,13 @@ function init() {
     scenes = [
         new VisOpening("Kazakh Player Mode Presents", "Vain Oblations", "", 0),
         new Tracers(),
-        new HomeBackground()];
+        new HomeBackground(),
+        new HyperRobot()];
     document.addEventListener('keydown', keydown);
-    change_scene(1);
+    change_scene(2);
     animate();
     const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
     socket.addEventListener('message', function(event) {
-        console.log("recv msg");
-        console.log(event.data);
         const tokens = event.data.split(":");
         const t = parseFloat(tokens[0]);
         const action = tokens[1];
@@ -98,11 +103,9 @@ function init() {
             scenes[cur_scene_idx].handle_beat();
             const time_now = Date.now() / 1000;
             const latency = time_now - t;
-            console.log(latency);
             socket.send(tokens[0]);
         }
     });
-    console.log("initialized");
 }
 
 const ASPECT_RATIO = 1.5;
@@ -135,6 +138,56 @@ function make_wireframe_cube() {
     return ls
 }
 
+function make_wireframe_circle(radius, segments, color) {
+    // Make a wireframe circle using THREE.js and return it
+    const geometry = new THREE.CircleGeometry(radius, segments);
+    const edges_geom = new THREE.EdgesGeometry(geometry);
+
+    const wireframe_mat = new THREE.LineBasicMaterial({
+        transparent: true,
+        opacity: 1.0,
+        color: color,
+        linewidth: LINE_WIDTH});
+
+    const circle = new THREE.LineSegments(edges_geom, wireframe_mat);
+    //const circle = new THREE.Mesh(edges_geom, wireframe_mat);
+    return circle;
+}
+
+function createWireframeCircle(radius, segments, color) {
+  // Create a geometry for the circle
+  const circleGeometry = new THREE.CircleGeometry(radius, segments);
+
+  // Remove the face and fill materials from the geometry
+  //circleGeometry.faces.splice(0, circleGeometry.faces.length);
+  //circleGeometry.faceVertexUvs[0].splice(0, circleGeometry.faceVertexUvs[0].length);
+
+  // Create a line segments geometry from the circle geometry
+  const wireframeGeometry = new THREE.EdgesGeometry(circleGeometry);
+
+  // Create a material for the wireframe
+  const wireframeMaterial = new THREE.LineBasicMaterial({ color: color });
+
+  // Create the wireframe mesh
+  const wireframeMesh = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+
+  // Return the wireframe mesh
+  return wireframeMesh;
+}
+
+function make_wireframe_sphere(radius) {
+    const geometry = new THREE.SphereGeometry(radius, 32, 32);
+    const edges_geom = new THREE.EdgesGeometry(geometry);
+    const wireframe_mat = new THREE.LineBasicMaterial({
+        transparent: true,
+        opacity: 1.0,
+        color: new THREE.Color(GRID_COLOR),
+        linewidth: LINE_WIDTH} );
+
+    const ls = new THREE.LineSegments(edges_geom, wireframe_mat);
+    return ls
+}
+
 function make_wireframe_special() {
     const geometry = new THREE.TorusKnotGeometry(3, 1, 100, 16);
     //const edges_geom = new THREE.EdgesGeometry(geometry);
@@ -155,6 +208,7 @@ function make_wireframe_special() {
     return ls
 }
 
+
 function make_point_cloud() {
     const geometry = new THREE.TorusGeometry(10, 3, 16, 100);
     const material = new THREE.PointsMaterial({
@@ -167,16 +221,40 @@ function make_point_cloud() {
     return new THREE.Points( geometry, material );
 }
 
-function update_camera_aspect(camera, aspect) {
+
+function update_persp_camera_aspect(camera, aspect) {
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
 }
+
+function update_orth_camera_aspect(camera, aspect, frustum_size) {
+    camera.left = -frustum_size * aspect / 2;
+    camera.right = frustum_size * aspect / 2;
+    camera.top = frustum_size / 2;
+    camera.bottom = -frustum_size / 2;
+    camera.updateProjectionMatrix();
+}
+
 
 function rand_int(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min) + min); //The maximum is exclusive and the minimum is inclusive
 }
+
+
+function arr_eq(a, b) {
+    if (a.length != b.length) {
+        return false;
+    }
+    for (const i in a) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 
 class VisScene {
     constructor() {
@@ -205,6 +283,11 @@ class VisScene {
     handle_beat() {
 
     }
+
+    handle_resize(width, height) {
+        const aspect = width / height;
+        update_persp_camera_aspect(this.camera, aspect);
+    }
 }
 
 class VisOpening extends VisScene {
@@ -226,7 +309,6 @@ class VisOpening extends VisScene {
     }
 
     activate() {
-        console.log("activating");
         const overlay = document.getElementById("overlay");
         overlay.style.display = 'none';
         for (const [i, id] of this.all_html_elements.entries()) {
@@ -294,18 +376,14 @@ class Tracers extends VisScene {
         this.cam_vel = new THREE.Vector3();
         this.num_traces = 6;
         this.trace_spacing = 2;
-        this.buffers = [];
 
         this.min_base_scale = 1.0;
         this.max_base_scale = 1.5;
         this.base_scale = this.min_base_scale;
 
 
+        this.recreate_buffers(window.innerWidth, window.innerHeight);
 
-        for (let i = 0; i < this.num_traces * this.trace_spacing; i++) {
-            this.buffers.push(new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {}));
-        }
-        this.cur_buffer_idx = 0;
         this.cube_positions = [];
         const BOUND = 1;
         for (let i = 0; i < 2; i++) {
@@ -381,10 +459,10 @@ class Tracers extends VisScene {
         }
         this.vbo_scene.add(this.cubes_group);
 
-        this.ls = make_wireframe_special();
+        this.ls = make_wireframe_sphere(10);
         this.ls.material.color.copy(new THREE.Color("gray"));
         this.ls.renderOrder = -1;
-        //this.vbo_scene.add(this.ls);
+        this.vbo_scene.add(this.ls);
         this.pc = make_point_cloud();
         this.pc.position.copy(this.camera.position);
         //this.vbo_scene.add(this.pc);
@@ -411,7 +489,7 @@ class Tracers extends VisScene {
         this.has_started = false;
 
         const aspect = window.innerWidth / window.innerHeight;
-        update_camera_aspect(this.vbo_camera, aspect);
+        update_persp_camera_aspect(this.vbo_camera, aspect);
 
         {
             this.scene = new THREE.Scene();
@@ -463,8 +541,22 @@ class Tracers extends VisScene {
         }
     }
 
+    recreate_buffers(width, height) {
+        this.buffers = [];
+        for (let i = 0; i < this.num_traces * this.trace_spacing; i++) {
+            this.buffers.push(new THREE.WebGLRenderTarget(width, height, {}));
+        }
+        this.cur_buffer_idx = 0;
+    }
+
     handle_beat() {
         this.base_scale = this.max_base_scale;
+    }
+
+    handle_resize(width, height) {
+        const aspect = width / height;
+        update_persp_camera_aspect(this.vbo_camera, aspect);
+        this.recreate_buffers(width, height);
     }
 
     anim_frame(dt) {
@@ -587,7 +679,7 @@ class HomeBackground extends VisScene {
         this.has_started = false;
 
         const aspect = window.innerWidth / window.innerHeight;
-        update_camera_aspect(this.camera, aspect);
+        update_persp_camera_aspect(this.camera, aspect);
     }
 
     anim_frame(dt) {
@@ -618,13 +710,420 @@ class HomeBackground extends VisScene {
     }
 }
 
+class GeomDef {
+    constructor(coords, children=new Map()) {
+        this.coords = coords;
+        this.children = children;
+        this.mesh = null;
+    }
+
+    create() {
+        const group = new THREE.Group();
+        for (const [i, c] of this.children) {
+            group.add(c.create());
+        }
+        this.mesh = group;
+        this.mesh.position.set(...this.coords);
+        return this.mesh;
+    }
+}
+
+class BoxDef extends GeomDef {
+    constructor(coords, dims, children=new Map()) {
+        super(coords, children);
+        this.dims = dims;
+    }
+    create() {
+        super.create();
+        let geometry = new THREE.BoxGeometry(...this.dims);
+        let wireframe = new THREE.EdgesGeometry(geometry);
+        const wireframe_mat = new THREE.LineBasicMaterial( { color: "yellow", linewidth: 1 } );
+        this.mesh.add(new THREE.LineSegments(wireframe, wireframe_mat));
+
+        const inner_dims = [...this.dims];
+        for (const i in inner_dims) {
+            inner_dims[i] *= 0.97;
+        }
+        const fill_mat = new THREE.MeshBasicMaterial( { color: "black" } );
+        const inner_geom = new THREE.BoxGeometry(...inner_dims);
+        this.mesh.add(new THREE.Mesh(inner_geom, fill_mat));
+
+        return this.mesh;
+    }
+}
+
+
+class LineDef extends GeomDef {
+    constructor(coords, children=new Map()) {
+        super(coords, children);
+        this.coords = coords;
+    }
+    create() {
+        super.create();
+        const line_mat = new THREE.LineBasicMaterial({color: "yellow"});
+        const points = [];
+        for (const i in this.coords) {
+            points.push(new THREE.Vector3(...(this.coords[i])));
+        }
+        const geom = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geom, line_mat);
+        this.mesh.add(line);
+        return this.mesh;
+    }
+}
+
+
+const RobotParts = {
+    TORSO: 0,
+    LEGS: [1, 2],
+    HEAD: 3,
+    HANDS: [4, 5],
+    FEET: [6, 7],
+    ARMS: [8, 9],
+    EYES: 10,
+    MAX: 11
+}
+
+
+class Robot {
+    constructor(parent_obj, position) {
+        this.obj = new THREE.Group();
+        this.meshes = Array(RobotParts.MAX);
+
+        this.cube_defs = new Map();
+        this.cube_defs[RobotParts.HANDS[0]] = new BoxDef([-1.25, 0.5, 2.75], [0.5, 1, 1]);
+        this.cube_defs[RobotParts.HANDS[1]] = new BoxDef([1.25, 0.5, 2.75], [0.5, 1, 1]);
+        this.cube_defs[RobotParts.ARMS[0]] = new BoxDef([-1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
+        this.cube_defs[RobotParts.ARMS[1]] = new BoxDef([1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
+        this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
+            [0.5, 1.5, 1.0]);
+        this.cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -2, 0],
+            [0.5, 1.5, 1.0]);
+        this.cube_defs[RobotParts.EYES] = new BoxDef([0, 0, 1.125], [1.5, 0.25, 0.25]);
+
+
+        this.cube_defs[RobotParts.HANDS[0]] = new BoxDef([-1.25, 0.5, 2.75], [0.5, 1, 1]);
+        this.cube_defs[RobotParts.HANDS[1]] = new BoxDef([1.25, 0.5, 2.75], [0.5, 1, 1]);
+        this.cube_defs[RobotParts.ARMS[0]] = new BoxDef([-1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
+        this.cube_defs[RobotParts.ARMS[1]] = new BoxDef([1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
+        this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
+            [0.5, 1.5, 1.0]);
+        this.cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -2, 0],
+            [0.5, 1.5, 1.0]);
+        this.cube_defs[RobotParts.EYES] = new BoxDef([0, 0, 1.125], [1.5, 0.25, 0.25]);
+
+        const head_children = new Map([
+            [RobotParts.EYES, this.cube_defs[RobotParts.EYES]]]);
+
+        this.cube_defs[RobotParts.HEAD] = new BoxDef([0, 1.75, 0], [2.0, 1.0, 2.0],
+            head_children);
+
+        const torso_children = new Map([
+            [RobotParts.HEAD, this.cube_defs[RobotParts.HEAD]],
+            [RobotParts.HANDS[0], this.cube_defs[RobotParts.HANDS[0]]],
+            [RobotParts.HANDS[1], this.cube_defs[RobotParts.HANDS[1]]],
+            [RobotParts.ARMS[0], this.cube_defs[RobotParts.ARMS[0]]],
+            [RobotParts.ARMS[1], this.cube_defs[RobotParts.ARMS[1]]],
+            [RobotParts.LEGS[0], this.cube_defs[RobotParts.LEGS[0]]],
+            [RobotParts.LEGS[1], this.cube_defs[RobotParts.LEGS[1]]]]);
+
+        this.cube_defs[RobotParts.TORSO] = new BoxDef([0, 1, 0], [3, 2, 1], torso_children);
+
+        this.cube_defs[RobotParts.FEET[0]] = new BoxDef([-0.75, -2, 0], [1.5, 0.5, 2.0]);
+        this.cube_defs[RobotParts.FEET[1]] = new BoxDef([0.75, -2, 0], [1.5, 0.5, 2.0]);
+
+        const offset = [0, -1, 0];
+        for (const i of [RobotParts.TORSO, RobotParts.FEET[0], RobotParts.FEET[1]]) {
+            for (const j in offset) {
+                this.cube_defs[i].coords[j] += offset[j];
+            }
+        }
+
+
+        for (const i of [RobotParts.TORSO, RobotParts.FEET[0], RobotParts.FEET[1]]) {
+            let mesh = this.cube_defs[i].create();
+            this.obj.add(mesh);
+            this.meshes[i] = mesh;
+        }
+        this.obj.position.copy(position);
+        parent_obj.add(this.obj);
+    }
+}
+
+
+class HyperRobot extends VisScene {
+    constructor() {
+        super();
+
+        const aspect = window.innerWidth / window.innerHeight;
+        this.frustum_size = 16;
+        this.cam_persp = new THREE.PerspectiveCamera( 75, 1, 0.1, 10000 );
+        this.cam_orth = new THREE.OrthographicCamera(
+            -this.frustum_size * aspect / 2,
+            this.frustum_size * aspect / 2,
+            this.frustum_size / 2,
+            -this.frustum_size / 2, -8, 1000);
+        this.scene = new THREE.Scene();
+        this.move_clock = new THREE.Clock(false);
+        this.half_beat_clock = new THREE.Clock(false);
+        this.beat_clock = new THREE.Clock(false);
+
+        this.beat_idx = 0;
+
+        this.start_rot = [0, 0];
+        this.target_rot = [0, 0];
+        this.rot = [0, 512 / 2];
+
+        this.robots = [];
+        this.circles = [];
+
+        this.all_group = new THREE.Group();
+        this.robot_group = new THREE.Group();
+        this.circle_group = new THREE.Group();
+        this.anaman_group = new THREE.Group();
+        this.tesseract_group = new THREE.Group();
+
+        this.tesseract = new Tesseract(this.tesseract_group, 4);
+        this.tesseract_group.position.set(0, 0.5, 2.75);
+        //this.all_group.add(this.tesseract_group);
+
+        this.curr_spacing = 3;
+
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                let position = new THREE.Vector3((i - 1) * this.curr_spacing, 0,
+                    (j - 1) * this.curr_spacing);
+                this.robots.push(new Robot(this.robot_group, position));
+
+                const circle = make_wireframe_circle(6, 32, new THREE.Color("cyan"));
+                circle.position.copy(position);
+                //circle.position.z += 1.2;   // foot forward offset
+                circle.rotation.x = Math.PI / 2.0;
+                this.circles.push(circle);
+                this.circle_group.add(circle);
+
+            }
+        }
+        // position circle group right below feet
+        this.circle_group.position.y = -3.26;
+
+        this.all_group.add(this.circle_group);
+        this.all_group.add(this.robot_group);
+
+
+        this.circle_scale_base = 0.1;
+        this.circle_scale_max = 1.0;
+
+        this.scene.add(this.all_group);
+
+        /*let loader = new GLTFLoader();
+        loader.load( 'static/obj/anaman.glb', function ( gltf ) {
+            const wireframe_mat = new THREE.LineBasicMaterial( { color: "cyan", linewidth: 1 } );
+            for (var i in gltf.scene.children) {
+                let edges = new THREE.EdgesGeometry(gltf.scene.children[i].geometry, 30);
+                let mesh = new THREE.LineSegments(edges, wireframe_mat);
+                this.anaman_group.add(mesh);
+                this.anaman_group.position.set(0, 2.15, -0.2);
+                this.anaman_group.scale.set(2.0, 2.0, 2.0);
+                this.anaman_group.rotation.set(Math.PI / 2.0, 0, 0);
+            }
+            this.all_group.add(this.anaman_group);
+        }, undefined, function ( error ) {
+                console.error( error );
+        } );*/
+
+        this.cam_persp.position.set(0, 0, 8);
+        this.cam_orth.position.set(0, 0, 8);
+
+        this.camera = this.cam_orth;
+        //this.camera = this.cam_persp;
+
+        update_orth_camera_aspect(this.cam_orth, aspect, this.frustum_size);
+        update_persp_camera_aspect(this.cam_persp, aspect);
+    }
+
+    handle_resize(width, height) {
+        const aspect = width / height;
+        update_orth_camera_aspect(this.cam_orth, aspect, this.frustum_size);
+        update_persp_camera_aspect(this.cam_persp, aspect);
+    }
+
+    is_foot_forward(side_idx, t) {
+        const t_period = 1.0 / 4.0;
+        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % 4;
+        return (pos_idx == 1 || pos_idx == 2);
+    }
+
+    get_foot_shuffle_offset(side_idx, t) {
+        // get shuffle offset for this side as an array [x, y, z]
+        // side_idx: 0 for left, 1 for right
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
+            [0, ease(Math.max(0, 1 - dt / t_mov)), ease(Math.min(1, dt / t_mov))],
+            [0, 0, ease(Math.max(0, 1 - dt / t_mov))],
+            [0, 0, ease(Math.max(-1, -dt / t_mov))]];
+        /*const pos_idx = (Math.floor(t / t_period) +
+            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
+        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % position_options.length;
+        return position_options[pos_idx];
+    }
+
+    get_body_shuffle_offset(t) {
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            ease(Math.min(1, dt / t_mov)),
+            ease(Math.max(0, 1 - dt / t_mov))];
+        /*const pos_idx = (Math.floor(t / t_period) +
+            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
+        const pos_idx = Math.floor(t / t_period) % position_options.length;
+        return position_options[pos_idx] * 0.8;
+    }
+
+    handle_beat() {
+        this.beat_clock.start();
+        if (this.beat_idx % 2 == 0) {
+            // half-note beat
+            this.half_beat_clock.start();
+            this.circle_group.position.x = 0.75;
+        } else {
+            this.circle_group.position.x = -0.75;
+        }
+        this.beat_idx++;
+        const snap_mult = 64;
+        if (rand_int(0, 4) == 0) {//(song_beat != song_beat_prev && song_beat % 2 == 0 || paused) {// && rand_int(0, 2) == 0) {
+            // if close enough, can clear the existing movement to start a new one
+            if (this.go_to_target) {
+                const manhattan_dist = Math.abs(this.target_rot[0] - this.rot[0]) +
+                    Math.abs(this.target_rot[1] - this.rot[1]);
+                if (manhattan_dist <= 8) {
+                    this.go_to_target = false;
+                }
+            }
+            // if done moving to target, start a new movement
+            if (!this.go_to_target) {
+                for (var i = 0; i < 2; i++) {
+                    this.start_rot[i] = Math.round(this.rot[i] / snap_mult) * snap_mult;
+                }
+                let motion_idx = rand_int(0, 8);   // -1, 0, 1 about 2 axes, but no 0, 0
+                if (motion_idx > 3) {
+                    motion_idx += 1;            // make it 0-8 (9 options) for ease
+                }
+                let rot_dirs = [motion_idx % 3 - 1, Math.floor(motion_idx / 3) - 1];
+                this.target_rot = [(Math.round(this.start_rot[0] / snap_mult) + rot_dirs[0]) * snap_mult,
+                    (Math.round(this.start_rot[1] / snap_mult) + rot_dirs[1]) * snap_mult];
+                this.go_to_target = true;
+                this.move_clock.start();
+                //console.log(`go to target: ${this.target_rot} from ${this.start_rot}`);
+            }
+        }
+    }
+
+
+    anim_frame(dt) {
+        const bpm = 120;
+
+
+        const div = 512;    // # of divisions per pi radians
+        const float_rate = 1;
+        const track_rate = 2;
+        const beats_per_sec = bpm / 60;
+
+        this.tesseract.rot_xw -= 0.05;
+        this.tesseract.update_geom();
+
+
+        if (this.go_to_target) {
+            const num_beats_to_lerp = 1.0;
+            let elapsed = this.move_clock.getElapsedTime();
+            for (var i = 0; i < 2; i++) {
+                const full_time = 1.0 / beats_per_sec * num_beats_to_lerp;
+                const ang_vel = (this.target_rot[i] - this.start_rot[i]) * 1.0 / full_time;
+                const sign_before = Math.sign(this.target_rot[i] - this.rot[i]);
+                this.rot[i] = this.start_rot[i] + ang_vel * elapsed;
+                const sign_after = Math.sign(this.target_rot[i] - this.rot[i]);
+                if (sign_after != sign_before) {
+                    this.rot[i] = this.target_rot[i];
+                }
+            }
+            if (arr_eq(this.rot, this.target_rot)) {
+                /*for (var i = 0; i < 2; i++) {
+                    rot[i] = target_rot[i];
+                }*/
+                this.go_to_target = false;
+            }
+        }
+
+
+        let half_beat_time = this.half_beat_clock.getElapsedTime() * beats_per_sec / 2.0;
+        let furthest_forward_z_touching_ground = null;
+        for (let side = 0; side < 2; side++) {
+            const shuffle_offset = this.get_foot_shuffle_offset(side, half_beat_time);
+            const body_offset = this.get_body_shuffle_offset(half_beat_time);
+            this.robots.forEach((robot, i) => {
+                const leg = robot.cube_defs[RobotParts.TORSO].children.get(
+                    RobotParts.LEGS[side]).mesh;
+
+                const foot_base_y = robot.cube_defs[RobotParts.FEET[side]].coords[1];
+                const foot_base_z = robot.cube_defs[RobotParts.FEET[side]].coords[2];
+                const leg_base_y = robot.cube_defs[RobotParts.LEGS[side]].coords[1];
+                const leg_base_z = robot.cube_defs[RobotParts.LEGS[side]].coords[2];
+                const leg_base_height = robot.cube_defs[RobotParts.LEGS[side]].dims[1];
+
+                const leg_scale_y = 1 + (body_offset - shuffle_offset[1]) / leg_base_height;
+                const leg_offset_y = (1 - leg_scale_y) * leg_base_height / 2;//shuffle_offset[1] - body_offset;
+                robot.meshes[RobotParts.FEET[side]].position.y = foot_base_y + shuffle_offset[1];
+                robot.meshes[RobotParts.FEET[side]].position.z = foot_base_z + shuffle_offset[2];
+                leg.position.y = leg_base_y + leg_offset_y;
+                leg.position.z = leg_base_z + shuffle_offset[2];
+                leg.scale.y = leg_scale_y;
+
+                const torso_base_y = robot.cube_defs[RobotParts.TORSO].coords[1];
+                robot.meshes[RobotParts.TORSO].position.y = torso_base_y + body_offset;
+            });
+            if (shuffle_offset[1] == 0 && 
+                (shuffle_offset[2] > furthest_forward_z_touching_ground || 
+                furthest_forward_z_touching_ground === null)) {
+                // if this is the furthest-forward side touching the ground,
+                // track it with the circles
+                furthest_forward_z_touching_ground = shuffle_offset[2];
+            }
+        }
+        this.circle_group.position.z = furthest_forward_z_touching_ground;
+
+        let beat_time = this.beat_clock.getElapsedTime() * beats_per_sec;
+        this.circle_scale = lerp_scalar(this.circle_scale_base, this.circle_scale_max, beat_time);
+        for (const circle of this.circles) {
+            circle.scale.setScalar(this.circle_scale);
+            circle.material.opacity = 1.0 - beat_time;
+        }
+
+        this.all_group.rotation.x = this.rot[0] * Math.PI / div;
+        this.all_group.rotation.y = this.rot[1] * Math.PI / div;
+
+    }
+}
+
+
+
+
+
+function resize_canvas_and_camera(width, height) {
+    const aspect = width / height;
+    if (scenes != null) {
+        scenes[cur_scene_idx].handle_resize(width, height);
+    }
+    renderer.setSize(width, height);
+}
+
 function on_window_resize() {
-	const aspect = window.innerWidth / window.innerHeight;
-	if (scenes != null) {
-            update_camera_aspect(scenes[cur_scene_idx].camera, aspect);
-            console.log(aspect);
-	}
-	renderer.setSize(window.innerWidth, window.innerHeight);
+    resize_canvas_and_camera(window.innerWidth, window.innerHeight);
 }
 
 function init_gfx() {

@@ -1,4 +1,4 @@
-import * as THREE from '/static/js/three.js/build/three.module.min.js';
+import * as THREE from 'three';
 
 export class Tesseract {
     constructor(parent_obj, size) {

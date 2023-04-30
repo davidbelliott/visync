@@ -129,7 +129,7 @@ function make_wireframe_cube() {
 
     const ls = new THREE.LineSegments(edges_geom, wireframe_mat);
 
-    const frac = 0.99;
+    const frac = 0.98;
     const fill_geometry = new THREE.BoxGeometry(frac, frac, frac);
     const mat = new THREE.MeshBasicMaterial({
         color: new THREE.Color('black')});
@@ -177,6 +177,19 @@ function createWireframeCircle(radius, segments, color) {
 
 function make_wireframe_sphere(radius) {
     const geometry = new THREE.SphereGeometry(radius, 32, 32);
+    const edges_geom = new THREE.EdgesGeometry(geometry);
+    const wireframe_mat = new THREE.LineBasicMaterial({
+        transparent: true,
+        opacity: 1.0,
+        color: new THREE.Color(GRID_COLOR),
+        linewidth: LINE_WIDTH} );
+
+    const ls = new THREE.LineSegments(edges_geom, wireframe_mat);
+    return ls
+}
+
+function make_wireframe_polyhedron(radius, detail) {
+    const geometry = new THREE.IcosahedronGeometry(radius, detail);
     const edges_geom = new THREE.EdgesGeometry(geometry);
     const wireframe_mat = new THREE.LineBasicMaterial({
         transparent: true,
@@ -377,9 +390,8 @@ class Tracers extends VisScene {
         this.num_traces = 6;
         this.trace_spacing = 2;
 
-        this.min_base_scale = 1.0;
-        this.max_base_scale = 1.5;
-        this.base_scale = this.min_base_scale;
+        this.beat_idx = 0;
+        this.beat_clock = new THREE.Clock(false);
 
 
         this.recreate_buffers(window.innerWidth, window.innerHeight);
@@ -459,7 +471,7 @@ class Tracers extends VisScene {
         }
         this.vbo_scene.add(this.cubes_group);
 
-        this.ls = make_wireframe_sphere(10);
+        this.ls = make_wireframe_polyhedron(15, 3);
         this.ls.material.color.copy(new THREE.Color("gray"));
         this.ls.renderOrder = -1;
         this.vbo_scene.add(this.ls);
@@ -549,8 +561,19 @@ class Tracers extends VisScene {
         this.cur_buffer_idx = 0;
     }
 
+    get_cube_scale(t) {
+        const min_base_scale = 1;
+        const max_base_scale = 1.5;
+
+        return 4 * (t - 0.5) ** 2 * (max_base_scale - min_base_scale) + 
+            min_base_scale;
+    }
+
     handle_beat() {
-        this.base_scale = this.max_base_scale;
+        this.beat_idx++;
+        if (this.beat_idx % 2 == 0) {
+            this.beat_clock.start();
+        }
     }
 
     handle_resize(width, height) {
@@ -560,10 +583,13 @@ class Tracers extends VisScene {
     }
 
     anim_frame(dt) {
+        const bpm = 120;
+        const beats_per_sec = bpm / 60 / 2;
+        let beat_time = this.beat_clock.getElapsedTime() * beats_per_sec;
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
-            cube.scale.setScalar(this.base_scale);
+            cube.scale.setScalar(this.get_cube_scale(beat_time));
         }
 
         for (const rp of this.ray_params) {
@@ -593,7 +619,6 @@ class Tracers extends VisScene {
         for (const ls of this.lightning_strikes) {
             ls.update(this.elapsed_time);
         }
-        this.base_scale += (this.min_base_scale - this.base_scale) * SCALE_LERP_RATE * dt;
     }
 
     render(renderer) {
@@ -791,10 +816,16 @@ class Robot {
         this.meshes = Array(RobotParts.MAX);
 
         this.cube_defs = new Map();
-        this.cube_defs[RobotParts.HANDS[0]] = new BoxDef([-1.25, 0.5, 2.75], [0.5, 1, 1]);
-        this.cube_defs[RobotParts.HANDS[1]] = new BoxDef([1.25, 0.5, 2.75], [0.5, 1, 1]);
-        this.cube_defs[RobotParts.ARMS[0]] = new BoxDef([-1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
-        this.cube_defs[RobotParts.ARMS[1]] = new BoxDef([1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
+        for (const side of [0, 1]) {
+            const sign = (2 * side - 1);
+            this.cube_defs[RobotParts.HANDS[side]] = new BoxDef([sign * -0.5, 0, 1], [0.5, 1, 1]);
+            const arm_children = new Map([
+                [RobotParts.HANDS[side], this.cube_defs[RobotParts.HANDS[side]]]
+            ]);
+            this.cube_defs[RobotParts.ARMS[side]] = new BoxDef([sign * 1.75, 0.5, 1.75], [0.5, 0.5, 2.0],
+                arm_children);
+        }
+
         this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
             [0.5, 1.5, 1.0]);
         this.cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -2, 0],
@@ -802,10 +833,6 @@ class Robot {
         this.cube_defs[RobotParts.EYES] = new BoxDef([0, 0, 1.125], [1.5, 0.25, 0.25]);
 
 
-        this.cube_defs[RobotParts.HANDS[0]] = new BoxDef([-1.25, 0.5, 2.75], [0.5, 1, 1]);
-        this.cube_defs[RobotParts.HANDS[1]] = new BoxDef([1.25, 0.5, 2.75], [0.5, 1, 1]);
-        this.cube_defs[RobotParts.ARMS[0]] = new BoxDef([-1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
-        this.cube_defs[RobotParts.ARMS[1]] = new BoxDef([1.75, 0.5, 1.75], [0.5, 0.5, 2.0]);
         this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
             [0.5, 1.5, 1.0]);
         this.cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -2, 0],
@@ -820,8 +847,6 @@ class Robot {
 
         const torso_children = new Map([
             [RobotParts.HEAD, this.cube_defs[RobotParts.HEAD]],
-            [RobotParts.HANDS[0], this.cube_defs[RobotParts.HANDS[0]]],
-            [RobotParts.HANDS[1], this.cube_defs[RobotParts.HANDS[1]]],
             [RobotParts.ARMS[0], this.cube_defs[RobotParts.ARMS[0]]],
             [RobotParts.ARMS[1], this.cube_defs[RobotParts.ARMS[1]]],
             [RobotParts.LEGS[0], this.cube_defs[RobotParts.LEGS[0]]],
@@ -986,6 +1011,20 @@ class HyperRobot extends VisScene {
         return position_options[pos_idx] * 0.8;
     }
 
+    get_arms_pump_offset(t) {
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            ease(Math.min(1, dt / t_mov)),
+            ease(Math.max(0, 1 - dt / t_mov))];
+        /*const pos_idx = (Math.floor(t / t_period) +
+            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
+        const pos_idx = Math.floor(t / t_period) % position_options.length;
+        return position_options[pos_idx] * 0.6;
+    }
+
     handle_beat() {
         this.beat_clock.start();
         if (this.beat_idx % 2 == 0) {
@@ -1066,6 +1105,7 @@ class HyperRobot extends VisScene {
         for (let side = 0; side < 2; side++) {
             const shuffle_offset = this.get_foot_shuffle_offset(side, half_beat_time);
             const body_offset = this.get_body_shuffle_offset(half_beat_time);
+            const arms_offset = this.get_arms_pump_offset(half_beat_time);
             this.robots.forEach((robot, i) => {
                 const leg = robot.cube_defs[RobotParts.TORSO].children.get(
                     RobotParts.LEGS[side]).mesh;
@@ -1086,6 +1126,11 @@ class HyperRobot extends VisScene {
 
                 const torso_base_y = robot.cube_defs[RobotParts.TORSO].coords[1];
                 robot.meshes[RobotParts.TORSO].position.y = torso_base_y + body_offset;
+
+                const arm_base_y = robot.cube_defs[RobotParts.ARMS[side]].coords[1];
+                const arm = robot.cube_defs[RobotParts.TORSO].children.get(
+                    RobotParts.ARMS[side]).mesh;
+                arm.position.y = arm_base_y + arms_offset;
             });
             if (shuffle_offset[1] == 0 && 
                 (shuffle_offset[2] > furthest_forward_z_touching_ground || 

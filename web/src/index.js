@@ -6,6 +6,10 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 
 import { Tesseract } from './highdim.js';
 
+
+import css_normalize from "./normalize.css";
+import css_style from "./style.css";
+
 window.addEventListener("load", init);
 
 var router = null;

@@ -3,9 +3,10 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { LightningStrike } from 'three/examples/jsm/geometries/LightningStrike.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
-
 import { Tesseract } from './highdim.js';
-
+import { VisScene } from './vis_scene.js';
+import { GantryScene } from './gantry_scene.js';
+import { lerp_scalar, ease } from './util.js';
 
 import css_normalize from "./normalize.css";
 import css_style from "./style.css";
@@ -20,14 +21,6 @@ var clock = null;
 var scenes = null;
 var cur_scene_idx = 0;
 
-
-function lerp_scalar(start, target, frac) {
-    return start + (target - start) * frac;
-}
-
-function ease(x) {
-    return (1 - Math.cos(Math.PI * x)) / 2 * Math.sign(x);
-}
 
 class Queue {
     constructor() {
@@ -89,11 +82,12 @@ function init() {
     init_gfx();
     scenes = [
         new VisOpening("Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+        new GantryScene(),
         new Tracers(),
         new HomeBackground(),
         new HyperRobot()];
     document.addEventListener('keydown', keydown);
-    change_scene(2);
+    change_scene(1);
     animate();
     const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
     socket.addEventListener('message', function(event) {
@@ -112,7 +106,6 @@ function init() {
     });
 }
 
-const ASPECT_RATIO = 1.5;
 const BG_COLOR = 'black';
 const LINE_WIDTH = 1;
 const POINT_SIZE = 2.0
@@ -273,45 +266,11 @@ function arr_eq(a, b) {
 }
 
 
-class VisScene {
-    constructor() {
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, ASPECT_RATIO, 0.1, 4000);
-        this.yscale = 1.0;
-    }
-
-    activate() {
-    }
-
-    deactivate() {
-    }
-
-    anim_frame(dt) {
-    }
-
-    render(renderer) {
-        renderer.render(this.scene, this.camera);
-    }
-
-    handle_key(key) {
-
-    }
-
-    handle_beat() {
-
-    }
-
-    handle_resize(width, height) {
-        const aspect = width / height;
-        update_persp_camera_aspect(this.camera, aspect);
-    }
-}
-
 class VisOpening extends VisScene {
     constructor(pretitle, title, subtitle, start_stage) {
         super();
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, ASPECT_RATIO, 0.1, 4000);
+        this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.start_stage = start_stage;
         this.stage = 0;
         this.html_elements = [];
@@ -387,7 +346,7 @@ class Tracers extends VisScene {
         super();
 
         this.vbo_scene = new THREE.Scene();
-        this.vbo_camera = new THREE.PerspectiveCamera(45, ASPECT_RATIO, 0.1, 4000);
+        this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.vbo_camera.position.set(0, 0, 5);
         //this.vbo_camera = new THREE.OrthographicCamera(-8, 8, -8, 8);
         this.cam_vel = new THREE.Vector3();
@@ -668,7 +627,7 @@ class HomeBackground extends VisScene {
 
 
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, ASPECT_RATIO, 0.1, 4000);
+        this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.camera.position.set(0, 0, 10);
         //this.camera = new THREE.OrthographicCamera(-8, 8, -8, 8);
         this.cam_vel = new THREE.Vector3();
@@ -1158,8 +1117,6 @@ class HyperRobot extends VisScene {
 
     }
 }
-
-
 
 
 

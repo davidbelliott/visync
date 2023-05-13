@@ -21,13 +21,13 @@ function create_instanced_cube(dims, color) {
 }
 
 class Gantry {
-    constructor(parent_obj, width) {
+    constructor(parent_obj, cubes_arr, width) {
         this.State = {
                 Sweeping: 0,
                 Pounding: 1
         }
 
-        const start_pos = new THREE.Vector3(0, 4, 0);
+        const start_pos = new THREE.Vector3(0, 6, 0);
 
         this.state = this.State.Sweeping;
         this.move_clock = new THREE.Clock(false);
@@ -49,36 +49,53 @@ class Gantry {
         this.x_beam.position.copy(start_pos);
         this.x_beam.position.x = 0;
         parent_obj.add(this.x_beam);
+
+        this.cubes_arr = cubes_arr;
     }
 
     anim_frame(dt) {
         const bpm = 120;
-        const beats_per_sec = bpm / 60 / 4 * 4;
-        let frac = Math.min(1, this.move_clock.getElapsedTime() / beats_per_sec);
+        const beats_per_sec = bpm / 60;
 
+        if (this.state == this.State.Sweeping) {
+            let frac = Math.min(1, this.move_clock.getElapsedTime() * beats_per_sec / 4);
 
-        let cur_seg = 0;
-        let frac_seg = frac;
-        let start_offset = new THREE.Vector3(0, 0, 0);
-        let end_offset = start_offset.clone();
-        this.time_waypoints.every((t, i) => {
-            if (t >= frac || i == this.time_waypoints.length - 1) {
-                cur_seg = i;
-                frac_seg = frac / t;
-                end_offset.copy(start_offset);
-                end_offset.add(this.segments[i]);
-                return false;
+            let cur_seg = 0;
+            let frac_seg = frac;
+            let start_offset = new THREE.Vector3(0, 0, 0);
+            let end_offset = start_offset.clone();
+            this.time_waypoints.every((t, i) => {
+                if (t >= frac || i == this.time_waypoints.length - 1) {
+                    cur_seg = i;
+                    frac_seg = frac / t;
+                    end_offset.copy(start_offset);
+                    end_offset.add(this.segments[i]);
+                    return false;
+                }
+                start_offset.add(this.segments[i]);
+                frac -= t;
+                return true;
+            });
+            start_offset.lerp(end_offset, frac_seg);
+            start_offset.add(this.start_sweep_pos);
+            this.set_cube_pos_with_beams(start_offset);
+        } else if (this.state == this.State.Pounding) {
+            const pounds_per_beat = 2;
+            let frac = this.move_clock.getElapsedTime() * beats_per_sec * pounds_per_beat;
+            frac = (-1) ** Math.floor(frac) * (frac - Math.floor(frac));
+            if (frac < 0) {
+                frac += 1;
             }
-            start_offset.add(this.segments[i]);
-            frac -= t;
-            return true;
-        });
-        start_offset.lerp(end_offset, frac_seg);
-        start_offset.add(this.start_sweep_pos);
-        this.set_cube_pos_with_beams(start_offset);
+            frac *= frac;
+            const start_y = this.base_y;
+            const end_y = 3.5;
+            this.cube.position.y = lerp_scalar(start_y, end_y, frac);
+        }
     }
 
-    set_cube_target_pos(pos) {
+    set_cube_target_idx(i, j) {
+        const pos = this.cubes_arr[i][j].position;
+        this.target_indices = [i, j];
         this.end_sweep_pos.copy(pos);
         this.end_sweep_pos.y = this.base_y;
         this.start_sweep_pos.copy(this.cube.position);
@@ -153,8 +170,9 @@ export class GantryScene extends VisScene {
 
 
 
-        const center_offset = -(this.num_cubes_per_side * this.cube_base_size + 
-            (this.num_cubes_per_side - 1) * this.cube_base_spacing) / 2;
+        const width = this.num_cubes_per_side * this.cube_base_size + 
+            (this.num_cubes_per_side - 1) * this.cube_base_spacing;
+        const center_offset = -(width - this.cube_base_size) / 2;
         for (let i = 0; i < this.num_cubes_per_side; i++) {
             const cube_row = [];
             const target_scale_row = [];
@@ -176,7 +194,7 @@ export class GantryScene extends VisScene {
             this.target_scales.push(target_scale_row);
         }
         
-        this.gantry = new Gantry(this.cubes_group, center_offset * 2);
+        this.gantry = new Gantry(this.cubes_group, this.cubes, width);
 
         this.base_group.rotation.x = Math.PI / 8.0;
         this.base_group.rotation.y = Math.PI / 4.0;
@@ -196,8 +214,9 @@ export class GantryScene extends VisScene {
 
     anim_frame(dt) {
         const bpm = 120;
-        const beats_per_sec = bpm / 60 / 2;
-        let beat_time = Math.min(1, 4 * this.beat_clock.getElapsedTime() * beats_per_sec);
+        const beats_per_sec = bpm / 60;
+        const cube_moves_per_beat = 4;
+        let beat_time = Math.min(1, this.gantry.move_clock.getElapsedTime() * beats_per_sec * cube_moves_per_beat);
 
 
         this.cubes_group.position.z += this.drift_vel * dt;
@@ -230,22 +249,36 @@ export class GantryScene extends VisScene {
     handle_beat() {
         this.beat_idx++;
         //if (this.beat_idx % 2 == 0) {
-            this.beat_clock.start();
-            for (let i = 0; i < this.num_cubes_per_side; i++) {
-                for (let j = 0; j < this.num_cubes_per_side; j++) {
-                    this.starting_scales[i][j] = this.target_scales[i][j];
-                    const target_scale = Math.random() < 0.25 ? 2 : 1.0;
-                    this.target_scales[i][j] = target_scale;
-                }
-            }
+        this.beat_clock.start();
         //}
         if (this.beat_idx % 4 == 0) {
-            const cube_idx_i = Math.floor(Math.random() * this.num_cubes_per_side);
-            const cube_idx_j = Math.floor(Math.random() * this.num_cubes_per_side);
-            this.gantry.set_cube_target_pos(this.cubes[cube_idx_i][cube_idx_j].position);
-            this.marker_cube.position.copy(this.cubes[cube_idx_i][cube_idx_j].position);
-            this.marker_cube.position.y = 2;
-            this.gantry.move_clock.start();
+            const cube_idx_i = Math.floor((0.5 + Math.random()) / 2 * this.num_cubes_per_side);
+            const cube_idx_j = Math.floor((0.5 + Math.random()) / 2 * this.num_cubes_per_side);
+            console.log(`${cube_idx_i}, ${cube_idx_j}`);
+            //.this.gantry.set_cube_target_pos(this.cubes[cube_idx_i][cube_idx_j].position);
+
+            if (this.gantry.state == this.gantry.State.Sweeping) {
+                this.gantry.set_cube_pos_with_beams(this.gantry.end_sweep_pos);
+                this.gantry.state = this.gantry.State.Pounding;
+                this.gantry.move_clock.start();
+            } else if (this.gantry.state == this.gantry.State.Pounding) {
+                for (let i = 0; i < this.num_cubes_per_side; i++) {
+                    for (let j = 0; j < this.num_cubes_per_side; j++) {
+                        this.starting_scales[i][j] = this.target_scales[i][j];
+                        let target_scale = 1;//Math.random() < 0.25 ? 2 : 1.0;
+                        /*if (this.gantry.end_sweep_pos == this.cubes[i][j].position) {
+                            target_scale = 2;
+                        }*/
+                        this.target_scales[i][j] = target_scale;
+                    }
+                }
+                this.gantry.state = this.gantry.State.Sweeping;
+                this.target_scales[cube_idx_i][cube_idx_j] = 2;
+                this.gantry.set_cube_target_idx(cube_idx_i, cube_idx_j);
+                this.marker_cube.position.copy(this.cubes[cube_idx_i][cube_idx_j].position);
+                this.marker_cube.position.y = 2;
+                this.gantry.move_clock.start();
+            }
         }
     }
 }

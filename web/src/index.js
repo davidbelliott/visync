@@ -1,3 +1,5 @@
+"use strict";
+
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -6,7 +8,15 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { Tesseract } from './highdim.js';
 import { VisScene } from './vis_scene.js';
 import { GantryScene } from './gantry_scene.js';
-import { lerp_scalar, ease } from './util.js';
+
+import {
+    lerp_scalar,
+    ease,
+    update_persp_camera_aspect,
+    update_orth_camera_aspect,
+    rand_int,
+    arr_eq
+} from './util.js';
 
 import css_normalize from "./normalize.css";
 import css_style from "./style.css";
@@ -20,6 +30,10 @@ var clock = null;
 
 var scenes = null;
 var cur_scene_idx = 0;
+
+
+const MSG_TYPE_SYNC = 0;
+const MSG_TYPE_BEAT = 1;
 
 
 class Queue {
@@ -47,6 +61,11 @@ class Queue {
     get is_empty() {
         return this.length === 0;
     }
+}
+
+
+const env = {
+    bpm: 120,
 }
 
 
@@ -81,28 +100,29 @@ function keydown(e) {
 function init() {
     init_gfx();
     scenes = [
-        new VisOpening("Kazakh Player Mode Presents", "Vain Oblations", "", 0),
-        new GantryScene(),
-        new Tracers(),
-        new HomeBackground(),
-        new HyperRobot()];
+        new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+        new GantryScene(env),
+        new Tracers(env),
+        new HomeBackground(env),
+        new HyperRobot(env)];
     document.addEventListener('keydown', keydown);
     change_scene(1);
     animate();
     const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
-    socket.addEventListener('message', function(event) {
-        const tokens = event.data.split(":");
-        const t = parseFloat(tokens[0]);
-        const action = tokens[1];
-        const data = tokens[2];
+    socket.addEventListener('message', function(e) {
+        const msg = JSON.parse(e.data);
+        const type = msg.msg_type;
 
-        if (action == "beat") {
+        if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
-            scenes[cur_scene_idx].handle_beat();
-            const time_now = Date.now() / 1000;
-            const latency = time_now - t;
-            socket.send(tokens[0]);
+            scenes[cur_scene_idx].handle_sync(msg.t, msg.bpm, msg.beat);
+            env.bpm = msg.bpm;
+        } else if (type == MSG_TYPE_BEAT) {
+            scenes[cur_scene_idx].handle_beat(msg.t, msg.channel);
         }
+        const time_now = Date.now() / 1000;
+        const latency = time_now - msg.t;
+        socket.send(latency);
     });
 }
 
@@ -231,44 +251,9 @@ function make_point_cloud() {
     return new THREE.Points( geometry, material );
 }
 
-
-function update_persp_camera_aspect(camera, aspect) {
-    camera.aspect = aspect;
-    camera.updateProjectionMatrix();
-}
-
-function update_orth_camera_aspect(camera, aspect, frustum_size) {
-    camera.left = -frustum_size * aspect / 2;
-    camera.right = frustum_size * aspect / 2;
-    camera.top = frustum_size / 2;
-    camera.bottom = -frustum_size / 2;
-    camera.updateProjectionMatrix();
-}
-
-
-function rand_int(min, max) {
-    min = Math.ceil(min);
-    max = Math.floor(max);
-    return Math.floor(Math.random() * (max - min) + min); //The maximum is exclusive and the minimum is inclusive
-}
-
-
-function arr_eq(a, b) {
-    if (a.length != b.length) {
-        return false;
-    }
-    for (const i in a) {
-        if (a[i] != b[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
-
 class VisOpening extends VisScene {
-    constructor(pretitle, title, subtitle, start_stage) {
-        super();
+    constructor(env, pretitle, title, subtitle, start_stage) {
+        super(env);
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.start_stage = start_stage;
@@ -342,8 +327,8 @@ function Transition( sceneA, sceneB ) {
 }
 
 class Tracers extends VisScene {
-    constructor() {
-        super();
+    constructor(env) {
+        super(env);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -532,7 +517,7 @@ class Tracers extends VisScene {
             min_base_scale;
     }
 
-    handle_beat() {
+    handle_beat(t, channel) {
         this.beat_idx++;
         if (this.beat_idx % 2 == 0) {
             this.beat_clock.start();
@@ -546,8 +531,7 @@ class Tracers extends VisScene {
     }
 
     anim_frame(dt) {
-        const bpm = 120;
-        const beats_per_sec = bpm / 60 / 2;
+        const beats_per_sec = this.env.bpm / 60 / 2;
         let beat_time = this.beat_clock.getElapsedTime() * beats_per_sec;
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
@@ -619,8 +603,8 @@ class Tracers extends VisScene {
 }
 
 class HomeBackground extends VisScene {
-    constructor() {
-        super();
+    constructor(env) {
+        super(env);
         this.min_base_scale = 2.0;
         this.max_base_scale = 3.0;
         this.base_scale = this.min_base_scale;
@@ -693,7 +677,7 @@ class HomeBackground extends VisScene {
         this.base_scale += (this.min_base_scale - this.base_scale) * SCALE_LERP_RATE * dt;
     }
 
-    handle_beat() {
+    handle_beat(t, channel) {
         this.base_scale = this.max_base_scale;
     }
 }
@@ -840,8 +824,8 @@ class Robot {
 
 
 class HyperRobot extends VisScene {
-    constructor() {
-        super();
+    constructor(env) {
+        super(env);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 16;
@@ -930,12 +914,6 @@ class HyperRobot extends VisScene {
         update_persp_camera_aspect(this.cam_persp, aspect);
     }
 
-    handle_resize(width, height) {
-        const aspect = width / height;
-        update_orth_camera_aspect(this.cam_orth, aspect, this.frustum_size);
-        update_persp_camera_aspect(this.cam_persp, aspect);
-    }
-
     is_foot_forward(side_idx, t) {
         const t_period = 1.0 / 4.0;
         const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % 4;
@@ -988,7 +966,7 @@ class HyperRobot extends VisScene {
         return position_options[pos_idx] * 0.6;
     }
 
-    handle_beat() {
+    handle_beat(t, channel) {
         this.beat_clock.start();
         if (this.beat_idx % 2 == 0) {
             // half-note beat
@@ -1029,13 +1007,10 @@ class HyperRobot extends VisScene {
 
 
     anim_frame(dt) {
-        const bpm = 120;
-
-
         const div = 512;    // # of divisions per pi radians
         const float_rate = 1;
         const track_rate = 2;
-        const beats_per_sec = bpm / 60;
+        const beats_per_sec = this.env.bpm / 60;
 
         this.tesseract.rot_xw -= 0.05;
         this.tesseract.update_geom();

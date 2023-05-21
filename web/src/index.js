@@ -21,20 +21,18 @@ import {
 import css_normalize from "./normalize.css";
 import css_style from "./style.css";
 
-window.addEventListener("load", init);
 
-var router = null;
 const SCALE_LERP_RATE = 5;
-
-var clock = null;
-
-var scenes = null;
-var cur_scene_idx = 0;
-
-
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
 
+var context = null;
+
+const env = {
+    bpm: 120,
+}
+
+window.addEventListener("load", init);
 
 class Queue {
     constructor() {
@@ -64,11 +62,6 @@ class Queue {
 }
 
 
-const env = {
-    bpm: 120,
-}
-
-
 function createOutline( scene, camera, objectsArray, visibleColor ) {
     const outlinePass = new OutlinePass( new THREE.Vector2( window.innerWidth, window.innerHeight ), scene, camera, objectsArray );
     outlinePass.edgeStrength = 2.5;
@@ -81,33 +74,11 @@ function createOutline( scene, camera, objectsArray, visibleColor ) {
     return outlinePass;
 }
 
-function change_scene(scene_idx) {
-    scenes[cur_scene_idx].deactivate();
-    cur_scene_idx = scene_idx;
-    scenes[cur_scene_idx].activate();
-}
-
-function keydown(e) {
-    const num = parseInt(e.key);
-    if (!isNaN(num) && scenes != null) {
-        const scene_idx = Math.min(num % 10, scenes.length - 1);
-        change_scene(scene_idx);
-    } else {
-        scenes[cur_scene_idx].handle_key(e.key);
-    }
-}
-
 function init() {
-    init_gfx();
-    scenes = [
-        new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
-        new GantryScene(env),
-        new Tracers(env),
-        new HomeBackground(env),
-        new HyperRobot(env)];
-    document.addEventListener('keydown', keydown);
+    context = new GraphicsContext();
+    document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    change_scene(1);
+    context.change_scene(1);
     animate();
 }
 
@@ -119,10 +90,10 @@ function connect() {
 
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
-            scenes[cur_scene_idx].handle_sync(msg.t, msg.bpm, msg.beat);
+            context.handle_sync(msg.t, msg.bpm, msg.beat);
             env.bpm = msg.bpm;
         } else if (type == MSG_TYPE_BEAT) {
-            scenes[cur_scene_idx].handle_beat(msg.t, msg.channel);
+            context.handle_beat(msg.t, msg.channel);
         }
         const time_now = Date.now() / 1000;
         const latency = time_now - msg.t;
@@ -1111,38 +1082,78 @@ class HyperRobot extends VisScene {
 }
 
 
+class GraphicsContext {
+    constructor() {
+        this.tracers = false;
+        this.clock = new THREE.Clock(true);
+        this.scenes = [
+            new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new GantryScene(env),
+            new Tracers(env),
+            new HomeBackground(env),
+            new HyperRobot(env)
+        ];
+        this.cur_scene_idx = 0;
 
-function resize_canvas_and_camera(width, height) {
-    const aspect = width / height;
-    if (scenes != null) {
-        scenes[cur_scene_idx].handle_resize(width, height);
-    }
-    renderer.setSize(width, height);
-}
-
-function on_window_resize() {
-    resize_canvas_and_camera(window.innerWidth, window.innerHeight);
-}
-
-function init_gfx() {
-        clock = new THREE.Clock(true);
 	canvas = document.getElementById('canvas');
-	renderer = new THREE.WebGLRenderer({ "canvas": canvas, "antialias": false });
-	renderer.setClearColor(BG_COLOR);
-	renderer.setPixelRatio(window.devicePixelRatio);
-        composer = new EffectComposer( renderer );
-	on_window_resize();
-        window.addEventListener('resize', on_window_resize);
+	this.renderer = new THREE.WebGLRenderer({ "canvas": canvas, "antialias": false });
+	this.renderer.setClearColor(BG_COLOR);
+	this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.composer = new EffectComposer(this.renderer);
+	this.on_window_resize();
+        window.addEventListener('resize', () => { this.on_window_resize(); });
+    }
+
+    anim_frame() {
+        let dt = this.clock.getDelta();
+        for (const scene of this.scenes) {
+            scene.anim_frame(dt);
+        }
+    }
+
+    render() {
+        //renderer.autoClearColor = false;
+        //renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
+        this.scenes[this.cur_scene_idx].render(this.renderer);
+    }
+
+    on_window_resize() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const aspect = width / height;
+        this.scenes[this.cur_scene_idx].handle_resize(width, height);
+        this.renderer.setSize(width, height);
+    }
+
+
+    change_scene(scene_idx) {
+        this.scenes[this.cur_scene_idx].deactivate();
+        this.cur_scene_idx = scene_idx;
+        this.scenes[this.cur_scene_idx].activate();
+    }
+
+    keydown(e) {
+        const num = parseInt(e.key);
+        if (!isNaN(num)) {
+            const scene_idx = Math.min(num % 10, this.scenes.length - 1);
+            this.change_scene(scene_idx);
+        } else {
+            this.scenes[this.cur_scene_idx].handle_key(e.key);
+        }
+    }
+
+    handle_sync(t, bpm, beat) {
+        this.scenes[this.cur_scene_idx].handle_sync(t, bpm, beat);
+    }
+
+    handle_beat(t, channel) {
+        this.scenes[this.cur_scene_idx].handle_beat(t, channel);
+    }
 }
 
 
 function animate() {
-    let dt = clock.getDelta();
-    if (scenes != null) {
-        for (const scene of scenes) {
-            scene.anim_frame(dt);
-        }
-        scenes[cur_scene_idx].render(renderer);
-    }
+    context.anim_frame();
+    context.render();
     window.requestAnimationFrame(animate);
 }

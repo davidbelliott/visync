@@ -2,6 +2,7 @@ from enum import Enum
 import logging
 import json
 import time
+import sys
 from websocket_server import WebsocketServer
 WS_PORT = 8080
 
@@ -75,15 +76,14 @@ def send_msg(server, msg):
     print(msg)
     server.send_message_to_all(msg)
 
-def send_fake_measure(server):
-    bpm = 120
+def send_fake_measure(server, bpm):
     sixteenths_dur = 60.0 / bpm / 4.0
     for i in range(16):
         t = time.time()
         if i % 4 == 0:
             msg = MsgSync(t, bpm, i // 4).to_json()
             send_msg(server, msg)
-        if i in [0, 11]:
+        if i in [14, 4, 8]:
             msg = MsgBeat(t, 0).to_json()
             send_msg(server, msg)
         time.sleep(sixteenths_dur)
@@ -109,6 +109,6 @@ server.set_fn_message_received(recv)
 server.run_forever(True)
 #listen_fifo(server)
 
-bpm = 120.0
+bpm = int(sys.argv[1])
 seconds_per_beat = 60.0 / bpm
-call_periodically(seconds_per_beat * 4, send_fake_measure, (server,))
+call_periodically(seconds_per_beat * 4, send_fake_measure, (server, bpm))

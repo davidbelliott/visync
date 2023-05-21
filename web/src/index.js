@@ -106,8 +106,12 @@ function init() {
         new HomeBackground(env),
         new HyperRobot(env)];
     document.addEventListener('keydown', keydown);
+    connect();
     change_scene(1);
     animate();
+}
+
+function connect() {
     const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
@@ -123,6 +127,19 @@ function init() {
         const time_now = Date.now() / 1000;
         const latency = time_now - msg.t;
         socket.send(latency);
+    });
+
+    socket.addEventListener('close', function(e) {
+        // Try to reconnect after 1 second
+        console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+        setTimeout(function() {
+            connect();
+        }, 1000);
+    });
+
+    socket.addEventListener('error', function(e) {
+        console.log('Socket encountered error: ', e.message, 'Closing socket');
+        socket.close();
     });
 }
 

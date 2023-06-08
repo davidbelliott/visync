@@ -9,6 +9,62 @@ import {
     arr_eq
 } from './util.js';
 
+
+class Spark extends THREE.Object3D {
+    constructor(size, color, axes) {
+        super();
+        this.material = new THREE.LineBasicMaterial( { color: color } );
+        const lines = [
+            [-1, -1, 1, 1],
+            [-1, 1, 1, -1],
+            [-1.25, 0, 1.25, 0]];
+        for (const line of lines) {
+            const points = [];
+            for (let i = 0; i < 2; i++) {
+                const point = [0, 0, 0];
+                point[axes[0]] = line[i * 2] * size;
+                point[axes[1]] = line[i * 2 + 1] * size;
+                points.push(new THREE.Vector3().fromArray(point));
+            }
+            const geometry = new THREE.BufferGeometry().setFromPoints( points );
+            const l = new THREE.Line( geometry, this.material );
+            this.add(l);
+        }
+        this.velocity = new THREE.Vector3();
+        this.acceleration = new THREE.Vector3();
+        this.flicker_frames = 3;
+        this.cur_frame = 0;
+        this.active = true;
+    }
+
+    anim_frame(dt, camera) {
+        if (this.active) {
+            this.cur_frame++;
+            const dv = this.acceleration.clone();
+            dv.multiplyScalar(dt);
+            this.velocity.add(dv);
+
+            const dx = this.velocity.clone();
+            dx.multiplyScalar(dt);
+            this.position.add(dx);
+
+            this.visible = true;
+            this.visible = (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
+            this.quaternion.copy(camera.quaternion);
+            if (this.parent != null) {
+                const group_quat = new THREE.Quaternion();
+                this.parent.getWorldQuaternion(group_quat);
+                group_quat.conjugate();
+                this.quaternion.premultiply(group_quat);
+            }
+        } else {
+            this.cur_frame = 0;
+            this.visible = false;
+        }
+    }
+}
+
+
 function create_instanced_cube(dims, color) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);
@@ -42,8 +98,9 @@ class Gantry {
         this.base_y = start_pos.y;
         this.paddle_base_y = -1.0;
         this.paddle_start_y = this.paddle_base_y;
+        this.paddle_end_y = (1.5 + 0.5) - this.base_y;
 
-        this.pound_motion_beats = 0.25;
+        this.pound_movement_beats = 0.5;
 
         this.parent_obj = parent_obj;
         this.clock = new THREE.Clock(false);
@@ -122,9 +179,9 @@ class Gantry {
 
         // Pounding
         {
-            const t = this.pound_clock.getElapsedTime() * beats_per_sec / this.pound_motion_beats;
+            const t = this.pound_clock.getElapsedTime() * beats_per_sec / this.pound_movement_beats;
             let start_y = this.paddle_start_y;
-            let end_y = -4.0;
+            let end_y = this.paddle_end_y;
             const frac = (1 - Math.abs(Math.min(2, Math.max(0, t)) - 1)) ** 2;
             this.paddle.position.y = lerp_scalar(start_y, end_y, frac);
         }
@@ -178,9 +235,9 @@ class Gantry {
         return segments;
     }
 
-    start_pound() {
+    start_pound(sparks) {
         const beats_per_sec = this.env.bpm / 60;
-        /*if (this.pound_clock.getElapsedTime() * beats_per_sec < 2 * this.pound_motion_beats) {
+        /*if (this.pound_clock.getElapsedTime() * beats_per_sec < 2 * this.pound_movement_beats) {
             // has not fully returned to top position
             this.paddle_start_y = this.paddle.position.y;
         } else {
@@ -188,9 +245,15 @@ class Gantry {
         }*/
         this.pound_clock.start();
         setTimeout(() => {
-            this.parent_scene.add_excitation(new THREE.Vector3(
-                this.mover.position.x, 0, this.mover.position.z));
-        }, 1000 / beats_per_sec * this.pound_motion_beats);
+            if (sparks) {
+                const sparks_origin = this.mover.position.clone();
+                sparks_origin.y = 1.5;
+                this.parent_scene.create_sparks(sparks_origin, 5, 25, "white");
+            } else {
+                this.parent_scene.add_excitation(new THREE.Vector3(
+                    this.mover.position.x, 0, this.mover.position.z));
+            }
+        }, 1000 / beats_per_sec * this.pound_movement_beats);
     }
 }
 
@@ -217,6 +280,15 @@ export class GantryScene extends VisScene {
         this.base_group = new THREE.Group();
         this.cubes_group = new THREE.Group();
         this.cubes = [];
+        this.sparks = [];
+        this.max_num_sparks = 64;
+        this.cur_spark_idx = 0;
+        for (let i = 0; i < this.max_num_sparks; i++) {
+            const s = new Spark(0.3, "white", [0, 1]);
+            s.active = false;
+            this.cubes_group.add(s);
+            this.sparks.push(s);
+        }
 
         this.starting_scales = [];
         this.target_scales = [];
@@ -238,10 +310,11 @@ export class GantryScene extends VisScene {
 
         this.target_rot_y = 0;      // integer multiples of PI / 16
         this.start_rot_y = 0;       // integer multiples of PI / 16
+        this.rotation_movement_beats = 8;
 
         this.start_zoom = 1;
         this.target_zoom = 1;
-
+        this.zoom_movement_beats = 1;
 
 
         const width = this.num_cubes_per_side * this.cube_base_size + 
@@ -256,7 +329,7 @@ export class GantryScene extends VisScene {
                     j * (this.cube_base_size + this.cube_base_spacing) + center_offset,
                     0,
                     i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
-                const cube_mesh = create_instanced_cube(Array(3).fill(this.cube_base_size), "cyan");
+                const cube_mesh = create_instanced_cube(Array(3).fill(this.cube_base_size), "magenta");
                 cube_mesh.position.copy(position);
                 cube_row.push(cube_mesh);
                 starting_scale_row.push(1);
@@ -301,15 +374,15 @@ export class GantryScene extends VisScene {
         this.cubes_group.position.z += this.drift_vel * dt;
 
         // Y rotation
-        const rotation_movement_beats = 4;
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedTime() * beats_per_sec / rotation_movement_beats));
-        this.base_group.rotation.y = Math.PI *
-            (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 16.0);
-
+        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedTime() * beats_per_sec / this.rotation_movement_beats));
+        this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
+        const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
+        const end_color = new THREE.Color((this.target_rot_y % 2 == 0 ? "magenta" : "blue"));
+        const cur_color = new THREE.Color();
+        cur_color.lerpColors(start_color, end_color, rot_frac);
 
         // Zoom
-        const zoom_movement_beats = 1;
-        const zoom_frac = Math.min(1, this.zoom_clock.getElapsedTime() * beats_per_sec / zoom_movement_beats);
+        const zoom_frac = Math.min(1, this.zoom_clock.getElapsedTime() * beats_per_sec / this.zoom_movement_beats);
         const new_zoom = ease(lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac));
         if (new_zoom != this.cam_orth.zoom) {
             this.cam_orth.zoom = new_zoom;
@@ -334,6 +407,10 @@ export class GantryScene extends VisScene {
             for (const i in this.excitations) {
                 this.excitations[i].position.z += max_offset;
             }
+
+            for (const s of this.sparks) {
+                s.position.z += max_offset;
+            }
         }
         const elapsed_time = this.clock.getElapsedTime();
         const elapsed_beats = elapsed_time * beats_per_sec;
@@ -350,15 +427,20 @@ export class GantryScene extends VisScene {
                     const cube_pos = this.cubes[i][j].position.clone();
                     cube_pos.y = 0;
                     const x = cube_pos.distanceTo(e.position);
-                    y_offset -= Math.sin(Math.max(0, Math.min(2 * Math.PI,
+                    y_offset -= 2 * Math.sin(Math.max(0, Math.min(2 * Math.PI,
                         -0.3 * x + 2 * Math.PI * t))) * Math.exp(-0.5 * t);
                 }
                 this.cubes[i][j].position.y = y_offset;
+                this.cubes[i][j].material.color.copy(cur_color);
             }
         }
 
         for (const g of this.gantries) {
             g.anim_frame(dt);
+        }
+
+        for (const s of this.sparks) {
+            s.anim_frame(dt, this.cam_orth);
         }
     }
 
@@ -369,6 +451,7 @@ export class GantryScene extends VisScene {
         //}
         const elapsed_time = this.clock.getElapsedTime();
         const mid_range_cubes = 6;  // target middle 8 rows
+        const beats_per_sec = this.env.bpm / 60;
 
         if (beat % 2 == 0) {
             this.moving_gantry_idx = Math.floor(beat / 2);
@@ -376,9 +459,9 @@ export class GantryScene extends VisScene {
             let min_i = Math.floor(this.num_cubes_per_side / 2 + mid_range_cubes / 2 * (this.moving_gantry_idx - 1));
             let max_i = min_i + Math.floor(mid_range_cubes / 2);
 
-            if (this.moving_gantry_idx == 1) {
-                min_i += 1; // hack to avoid collisions due to drifting
-                max_i += 1;
+            if (this.moving_gantry_idx == 0) {
+                min_i -= 1; // hack to avoid collisions due to drifting
+                max_i -= 1;
             }
 
             const min_j = Math.floor(this.num_cubes_per_side / 2 - mid_range_cubes / 2);
@@ -391,14 +474,14 @@ export class GantryScene extends VisScene {
             this.gantries[this.moving_gantry_idx].move_clock.start();
         }
         if (beat == 0) {
-            if (rand_int(0, 8) == 0) {
+            console.log(this.rot_clock.getElapsedTime() * beats_per_sec);
+            if (rand_int(0, 4) == 0 && (
+                    (!this.rot_clock.running) ||
+                    (this.rot_clock.getElapsedTime() * beats_per_sec > this.rotation_movement_beats))) {
+
                 console.log("rotation change");
                 this.start_rot_y = this.target_rot_y;
-                if (this.target_rot_y == 0) {
-                    this.target_rot_y = rand_int(-2, 2);
-                } else {
-                    this.target_rot_y = 0;
-                }
+                this.target_rot_y += rand_int(0, 2) * 2 - 1;
                 this.rot_clock.start();
             }
             if (rand_int(0, 8) == 0) {
@@ -414,8 +497,9 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 0) {
-            this.gantries[this.pounding_gantry_idx].start_pound();
+        if (channel == 0 || channel == 1) {
+            console.log(`BEAT: ${channel}, ${t}`);
+            this.gantries[this.pounding_gantry_idx].start_pound(channel == 1);
         }
     }
 
@@ -426,5 +510,26 @@ export class GantryScene extends VisScene {
         excitation.init_time = t;
         excitation.position.copy(pos);
         excitation.position.y = 0;
+    }
+
+    create_sparks(pos, num, avg_vel, color) {
+        for (let i = 0; i < 16; i++) {
+            /*const vel = new THREE.Vector3(
+                Math.random() - 0.5,
+                Math.random() * 0.5,
+                Math.random() - 0.5);*/
+            //vel.normalize();
+            const vel = new THREE.Vector3(1, 0.5, 0);
+
+            vel.applyEuler(new THREE.Euler(0, Math.PI / 8 * i, 0));
+            vel.multiplyScalar(avg_vel);
+            this.sparks[this.cur_spark_idx].active = true;
+            this.sparks[this.cur_spark_idx].position.copy(pos);
+            this.sparks[this.cur_spark_idx].velocity = vel;
+            this.sparks[this.cur_spark_idx].acceleration.set(0, -40, 0);
+            this.sparks[this.cur_spark_idx].material.color.set(color);
+
+            this.cur_spark_idx = (this.cur_spark_idx + 1) % this.max_num_sparks;
+        }
     }
 }

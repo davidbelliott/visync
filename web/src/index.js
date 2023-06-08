@@ -119,10 +119,6 @@ const LINE_WIDTH = 1;
 const POINT_SIZE = 2.0
 const GRID_COLOR = 'white';
 
-var canvas = null;
-var renderer = null;
-var composer = null;
-
 function make_wireframe_cube() {
     const geometry = new THREE.BoxGeometry( 1, 1, 1 );
     const edges_geom = new THREE.EdgesGeometry(geometry);
@@ -505,7 +501,7 @@ class Tracers extends VisScene {
             min_base_scale;
     }
 
-    handle_beat(t, channel) {
+    handle_sync(t, bpm, beat) {
         this.beat_idx++;
         if (this.beat_idx % 2 == 0) {
             this.beat_clock.start();
@@ -954,11 +950,12 @@ class HyperRobot extends VisScene {
         return position_options[pos_idx] * 0.6;
     }
 
-    handle_beat(t, channel) {
+    handle_sync(t, bpm, beat) {
         this.beat_clock.start();
         if (this.beat_idx % 2 == 0) {
             // half-note beat
             this.half_beat_clock.start();
+            console.log(`HALF BEAT: ${t}`);
             this.circle_group.position.x = 0.75;
         } else {
             this.circle_group.position.x = -0.75;
@@ -1095,13 +1092,77 @@ class GraphicsContext {
         ];
         this.cur_scene_idx = 0;
 
-	canvas = document.getElementById('canvas');
-	this.renderer = new THREE.WebGLRenderer({ "canvas": canvas, "antialias": false });
+	this.canvas = document.getElementById('canvas');
+	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
 	this.renderer.setClearColor(BG_COLOR);
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.composer = new EffectComposer(this.renderer);
-	this.on_window_resize();
+
+        // Plane in orthographic view with custom shaders for tracers
+        {
+            this.num_traces = 1;
+            this.trace_spacing = 1;
+            this.trace_persistence = 0;
+
+            this.scene = new THREE.Scene();
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            this.camera = new THREE.OrthographicCamera( width / - 2, width / 2, height / 2, height / - 2, - 10, 10 );
+            this.blend_material = new THREE.ShaderMaterial( {
+                    uniforms: {
+                            t1: { value: null },
+                            t2: { value: null },
+                            t3: { value: null },
+                            t4: { value: null },
+                            t5: { value: null },
+                            t6: { value: null },
+                            ratio: {
+                                    value: 0.0
+                            },
+                    },
+                    vertexShader: [
+                        'varying vec2 vUv;',
+                        'void main() {',
+                        'vUv = vec2( uv.x, uv.y );',
+                        'gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );',
+                        '}'
+                    ].join( '\n' ),
+                    fragmentShader: [
+                        'uniform float ratio;',
+                        'uniform sampler2D t1;',
+                        'uniform sampler2D t2;',
+                        'uniform sampler2D t3;',
+                        'uniform sampler2D t4;',
+                        'uniform sampler2D t5;',
+                        'uniform sampler2D t6;',
+                        'varying vec2 vUv;',
+                        'void main() {',
+                        '	vec4 texel1 = texture2D( t1, vUv );',
+                        '	vec4 texel2 = texture2D( t2, vUv );',
+                        '	vec4 texel3 = texture2D( t3, vUv );',
+                        '	vec4 texel4 = texture2D( t4, vUv );',
+                        '	vec4 texel5 = texture2D( t5, vUv );',
+                        '	vec4 texel6 = texture2D( t6, vUv );',
+                        '	gl_FragColor = max(texel1, ratio * max(texel2, ratio * max(texel3, ratio * max(texel4, ratio * max(texel5, ratio * texel6)))));',
+                        '}'
+                    ].join( '\n' )
+            } );
+            const geometry = new THREE.PlaneGeometry( window.innerWidth, window.innerHeight );
+            const mesh = new THREE.Mesh( geometry, this.blend_material );
+            this.scene.add( mesh );
+        }
+
+	this.on_window_resize();    // also creates buffers
         window.addEventListener('resize', () => { this.on_window_resize(); });
+    }
+
+    set_tracer_params(num_traces, spacing, persistence) {
+        this.num_traces = num_traces;
+        this.trace_spacing = spacing;
+        this.trace_persistence = persistence;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        this.recreate_buffers(width, height);
     }
 
     anim_frame() {
@@ -1111,20 +1172,55 @@ class GraphicsContext {
         }
     }
 
+    recreate_buffers(width, height) {
+        this.buffers = [];
+        for (let i = 0; i < this.num_traces * this.trace_spacing; i++) {
+            this.buffers.push(new THREE.WebGLRenderTarget(width, height, {}));
+        }
+        this.cur_buffer_idx = 0;
+    }
+
     render() {
-        //renderer.autoClearColor = false;
-        //renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
+        this.renderer.autoClearColor = false;
+        this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
+        this.renderer.clear();
         this.scenes[this.cur_scene_idx].render(this.renderer);
+
+        let tex_values = [];
+        let idx = this.cur_buffer_idx;
+        for (let i = 0; i < this.buffers.length; i++) {
+            if (i % this.trace_spacing == 0) {
+                tex_values.push(this.buffers[idx].texture);
+            }
+            idx--;
+            if (idx < 0) {
+                idx = this.buffers.length - 1;
+            }
+        }
+        this.blend_material.uniforms.t1.value = tex_values[0];
+        this.blend_material.uniforms.t2.value = tex_values[1];
+        this.blend_material.uniforms.t3.value = tex_values[2];
+        this.blend_material.uniforms.t4.value = tex_values[3];
+        this.blend_material.uniforms.t5.value = tex_values[4];
+        this.blend_material.uniforms.t6.value = tex_values[5];
+        this.blend_material.uniforms.ratio.value = this.trace_persistence;
+
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear();
+        this.renderer.clearDepth();
+        this.renderer.render(this.scene, this.camera);
+        this.renderer.autoClearColor = true;
+        this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
     }
 
     on_window_resize() {
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;
+        this.recreate_buffers(width, height);
         this.scenes[this.cur_scene_idx].handle_resize(width, height);
         this.renderer.setSize(width, height);
     }
-
 
     change_scene(scene_idx) {
         this.scenes[this.cur_scene_idx].deactivate();
@@ -1137,6 +1233,12 @@ class GraphicsContext {
         if (!isNaN(num)) {
             const scene_idx = Math.min(num % 10, this.scenes.length - 1);
             this.change_scene(scene_idx);
+        } else if (e.key == 't') {
+            if (this.num_traces == 1) {
+                this.set_tracer_params(6, 2, 0.8);
+            } else {
+                this.set_tracer_params(1, 1, 1);
+            }
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);
         }

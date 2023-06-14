@@ -100,7 +100,7 @@ class Gantry {
         this.paddle_start_y = this.paddle_base_y;
         this.paddle_end_y = (1.5 + 0.5) - this.base_y;
 
-        this.pound_movement_beats = 0.5;
+        this.pound_movement_beats = 0.35;
 
         this.parent_obj = parent_obj;
         this.clock = new THREE.Clock(false);
@@ -249,10 +249,9 @@ class Gantry {
                 const sparks_origin = this.mover.position.clone();
                 sparks_origin.y = 1.5;
                 this.parent_scene.create_sparks(sparks_origin, 5, 25, "white");
-            } else {
-                this.parent_scene.add_excitation(new THREE.Vector3(
-                    this.mover.position.x, 0, this.mover.position.z));
             }
+            this.parent_scene.add_excitation(new THREE.Vector3(
+                this.mover.position.x, 0, this.mover.position.z));
         }, 1000 / beats_per_sec * this.pound_movement_beats);
     }
 }
@@ -497,9 +496,9 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 0 || channel == 1) {
+        if (channel == 1) {
             console.log(`BEAT: ${channel}, ${t}`);
-            this.gantries[this.pounding_gantry_idx].start_pound(channel == 1);
+            this.gantries[this.pounding_gantry_idx].start_pound(true);
         }
     }
 

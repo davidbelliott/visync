@@ -83,7 +83,7 @@ function init() {
 }
 
 function connect() {
-    const socket = new WebSocket(`ws://${window.location.hostname}:8080`);
+    const socket = new WebSocket(`ws://192.168.1.235:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;

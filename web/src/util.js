@@ -37,3 +37,17 @@ export function arr_eq(a, b) {
     }
     return true;
 }
+
+export class ShaderLoader {
+    constructor(vertex_url, fragment_url) {
+        this.vertex_url = vertex_url;
+        this.fragment_url = fragment_url;
+    }
+
+    load() {
+        return Promise.all([
+        fetch(this.vertex_url).then(resp => resp.text()),
+        fetch(this.fragment_url).then(resp => resp.text())
+        ]);
+    }
+}

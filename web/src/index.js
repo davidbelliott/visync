@@ -8,6 +8,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { Tesseract } from './highdim.js';
 import { VisScene } from './vis_scene.js';
 import { GantryScene } from './gantry_scene.js';
+import { HexagonScene } from './hexagon_scene.js';
 
 import {
     lerp_scalar,
@@ -1085,6 +1086,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new HexagonScene(env),
             new GantryScene(env),
             new Tracers(env),
             new HomeBackground(env),
@@ -1235,7 +1237,7 @@ class GraphicsContext {
             this.change_scene(scene_idx);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
-                this.set_tracer_params(6, 2, 0.8);
+                this.set_tracer_params(8, 4, 0.7);
             } else {
                 this.set_tracer_params(1, 1, 1);
             }

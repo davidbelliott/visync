@@ -25,6 +25,9 @@ export function rand_int(min, max) {
     return Math.floor(Math.random() * (max - min) + min); //The maximum is exclusive and the minimum is inclusive
 }
 
+export function clamp(x, min, max) {
+    return Math.max(min, Math.min(max, x));
+}
 
 export function arr_eq(a, b) {
     if (a.length != b.length) {

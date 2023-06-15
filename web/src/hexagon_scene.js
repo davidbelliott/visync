@@ -6,6 +6,7 @@ import {
     update_persp_camera_aspect,
     update_orth_camera_aspect,
     rand_int,
+    clamp,
     arr_eq,
     ShaderLoader
 } from './util.js';
@@ -28,6 +29,88 @@ function create_instanced_cube(dims, color) {
     return mesh;
 }
 
+class CubeAssembly extends THREE.Group {
+    constructor(start_exploded, template_obj, min_spacing=1.0, max_spacing=3.0) {
+        super();
+        this.max_spacing = max_spacing;
+        this.min_spacing = min_spacing;
+        if (start_exploded) {
+            this.spacing = this.max_spacing;
+            this.spacing_direction = 1;
+        } else {
+            this.spacing = this.min_spacing;
+            this.spacing_direction = -1;
+        }
+        this.cubes = [];
+        const cube_positions = this.get_cube_positions(this.spacing);
+        this.explode_clock = new THREE.Clock(false);
+
+        for (const pos of cube_positions) {
+            const cube_mesh = template_obj.clone();
+            cube_mesh.position.copy(pos);
+            this.cubes.push(cube_mesh);
+            this.add(cube_mesh);
+        }
+    }
+
+    clone() {
+        return new CubeAssembly(this.spacing_direction == 1, this.cubes[0], this.min_spacing, this.max_spacing);
+    }
+
+    get_cube_positions(spacing) {
+        const cube_positions = [];
+        for (let axis = 0; axis < 3; axis++) {
+            for (let i = 0; i < 3; i++) {
+                if (axis == 0 || i != 1) {
+                    const pos = new THREE.Vector3();
+                    pos.setComponent(axis, spacing * (i - 1));
+                    cube_positions.push(pos);
+                }
+            }
+        }
+        console.log(spacing);
+        return cube_positions;
+    }
+
+    handle_beat(t, channel, recurse=false, start_depth=0, cur_depth=0) {
+        if (cur_depth >= start_depth || !recurse) {
+            this.spacing_direction *= -1;
+            this.explode_clock.start();
+        }
+        if (recurse) {
+            this.cubes.forEach((cube, i) => {
+                if (typeof cube.handle_beat === 'function') {
+                    cube.handle_beat(t, channel, recurse, start_depth, cur_depth + 1);
+                }
+            });
+        }
+    }
+
+    anim_frame(dt, beats_per_sec) {
+        const explode_movement_beats = (this.max_spacing - this.min_spacing > 3 ? 0.5 : 0.25);
+        let explode_frac = 1.0;
+        if (this.explode_clock.running) {
+            explode_frac = ease(clamp(
+                this.explode_clock.getElapsedTime() * beats_per_sec / explode_movement_beats,
+                0, 1));
+        }
+        if (this.spacing_direction == 1) {
+            this.spacing = lerp_scalar(this.min_spacing, this.max_spacing, explode_frac);
+        } else {
+            this.spacing = lerp_scalar(this.max_spacing, this.min_spacing, explode_frac);
+        }
+
+        this.get_cube_positions(this.spacing).forEach((pos, i) => {
+            this.cubes[i].position.copy(pos);
+        });
+
+        this.cubes.forEach((cube, i) => {
+            if (typeof cube.anim_frame === 'function') {
+                cube.anim_frame(dt, beats_per_sec);
+            }
+        });
+    }
+}
 
 export class HexagonScene extends VisScene {
     constructor(env) {
@@ -46,9 +129,10 @@ export class HexagonScene extends VisScene {
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
 
+        this.cur_rotation = 0;
+
         this.shader_loader = new ShaderLoader('glsl/hex_shader.vert', 'glsl/hex_shader.frag');
         this.shader_loader.load().then(([vertex_shader, fragment_shader]) => {
-            console.log(fragment_shader);
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
@@ -63,27 +147,48 @@ export class HexagonScene extends VisScene {
             let geometry = new THREE.PlaneGeometry(this.cam_orth.right - this.cam_orth.left,
                 this.cam_orth.top - this.cam_orth.bottom);
             this.plane = new THREE.Mesh(geometry, material);
-            this.plane.position.z = -100;   // position in front of other objects
+            this.plane.position.z = 100;   // position in front of other objects
             this.scene.add(this.plane);
         });
 
         this.base_group = new THREE.Group();
+        this.asm_group = new THREE.Group();
 
-        const cube_mesh = create_instanced_cube(Array(3).fill(2), "white");
-        this.base_group.add(cube_mesh);
+        this.assemblies = [];
+        this.assembly_spacing = 9;
+        this.num_assemblies_per_side = 6;
+
+        {
+            const cube_template = create_instanced_cube(Array(3).fill(2), "white");
+            const assembly = new CubeAssembly(false, cube_template);
+            const asm2 = new CubeAssembly(false, assembly, 0, this.assembly_spacing);
+            this.assemblies.push(asm2);
+            this.base_group.add(asm2);
+        }
+
+        this.base_group.rotation.x = Math.asin(1 / Math.sqrt(3));     // isometric angle
+        this.base_group.rotation.y = Math.PI / 4;
 
         this.scene.add(this.base_group);
         this.camera = this.cam_orth;
+
+        this.elapsed_beats = 0.0;
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.env.bpm / 60;
-        // Y rotation
-        this.base_group.rotation.y += 0.01;
-        this.base_group.rotation.x += 0.02;
-        const elapsed_time = this.clock.getElapsedTime();
+        this.cur_rotation += 1;
+        this.base_group.rotation.y = this.cur_rotation * Math.PI / 1024;
+
+        for (const asm of this.assemblies) {
+            //asm.rotation.y += 0.005;
+            //asm.rotation.x += 0.01;
+            asm.anim_frame(dt, beats_per_sec);
+        }
+        const clock_dt = this.clock.getDelta();
+        this.elapsed_beats += clock_dt * beats_per_sec;
         if (this.uniforms != null) {
-            this.uniforms.time.value = elapsed_time * beats_per_sec / 16;
+            this.uniforms.time.value = this.elapsed_beats / 16;
         }
         //this.plane.position.z -= 0.02;
         //this.plane.rotation.y += 0.01;
@@ -93,5 +198,15 @@ export class HexagonScene extends VisScene {
     }
 
     handle_beat(t, channel) {
+        if (channel == 1) {
+            for (const asm of this.assemblies) {
+                asm.handle_beat(t, channel);
+            }
+        } else if (channel == 2) {
+            console.log("ch2");
+            for (const asm of this.assemblies) {
+                asm.handle_beat(t, channel, true, 1); // start at children of assembly
+            }
+        }
     }
 }

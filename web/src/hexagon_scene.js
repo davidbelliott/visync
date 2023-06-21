@@ -68,7 +68,6 @@ class CubeAssembly extends THREE.Group {
                 }
             }
         }
-        console.log(spacing);
         return cube_positions;
     }
 
@@ -203,7 +202,6 @@ export class HexagonScene extends VisScene {
                 asm.handle_beat(t, channel);
             }
         } else if (channel == 2) {
-            console.log("ch2");
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel, true, 1); // start at children of assembly
             }

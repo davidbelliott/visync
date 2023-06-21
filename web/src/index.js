@@ -9,6 +9,7 @@ import { Tesseract } from './highdim.js';
 import { VisScene } from './vis_scene.js';
 import { GantryScene } from './gantry_scene.js';
 import { HexagonScene } from './hexagon_scene.js';
+import { SpectrumScene } from './spectrum_scene.js';
 
 import {
     lerp_scalar,
@@ -84,7 +85,8 @@ function init() {
 }
 
 function connect() {
-    const socket = new WebSocket(`ws://192.168.1.235:8080`);
+    //const socket = new WebSocket(`ws://192.168.1.235:8080`);
+    const socket = new WebSocket(`ws://localhost:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -1086,6 +1088,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new SpectrumScene(env),
             new HexagonScene(env),
             new GantryScene(env),
             new Tracers(env),

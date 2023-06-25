@@ -83,12 +83,12 @@ def send_fake_measure(server, bpm):
             msg = MsgBeat(t, 1).to_json()
             send_msg(server, msg)'''
 
-        if ((i + 2) % 32 in [0, 8]) or ((i + 2 - 16) in [0, 8]):
+        '''if ((i + 2) % 32 in [0, 8]) or ((i + 2 - 16) in [0, 8]):
             msg = MsgBeat(t, 0).to_json()
             send_msg(server, msg)
         if ((i + 2) % 32 in [4, 12]) or ((i + 2 - 16) in [4, 12]):
             msg = MsgBeat(t, 1).to_json()
-            send_msg(server, msg)
+            send_msg(server, msg)'''
         time.sleep(sixteenths_dur)
 
 

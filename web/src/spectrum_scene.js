@@ -30,12 +30,63 @@ function create_instanced_cube(dims, color) {
 }
 
 
+function make_wireframe_circle(radius, segments, color) {
+    // Make a wireframe circle using THREE.js and return it
+    const geometry = new THREE.CircleGeometry(radius, segments);
+    const edges_geom = new THREE.EdgesGeometry(geometry);
+
+    const wireframe_mat = new THREE.LineBasicMaterial({
+        transparent: true,
+        opacity: 1.0,
+        color: color,
+        linewidth: 1.0});
+
+    const circle = new THREE.LineSegments(edges_geom, wireframe_mat);
+    //const circle = new THREE.Mesh(edges_geom, wireframe_mat);
+    return circle;
+}
+
+class Signal {
+    constructor(freq, max_amp) {
+        this.freq = freq;
+        this.max_amp = max_amp;
+        this.amp = max_amp;
+        this.target_freq = freq;
+        this.start_freq = freq;
+        this.move_clock = new THREE.Clock(false);
+    }
+
+    update(bpm) {
+        const beats_per_sec = bpm / 60;
+        const t = this.move_clock.getElapsedTime();
+        const elapsed_beats = t * beats_per_sec;
+        const move_beats = 0.5;
+        const frac = clamp(elapsed_beats / move_beats, 0, 1);
+        const new_freq = lerp_scalar(this.start_freq, this.target_freq, frac);
+        this.freq = new_freq;
+        this.amp = this.max_amp * Math.min(1, 2 * (frac - 0.5) ** 2 + 0.5);
+        console.log(this.freq);
+    }
+
+    get_whole_freq(num_points) {
+        return Math.round(this.freq * num_points) / num_points;
+    }
+
+    goto_freq(f) {
+        this.target_freq = f;
+        this.start_freq = this.freq;
+        this.move_clock.start();
+    }
+}
+
+
 export class SpectrumScene extends VisScene {
     constructor(env) {
         super(env);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
+
 
         const aspect = width / height;
         this.frustum_size = 20;
@@ -44,38 +95,87 @@ export class SpectrumScene extends VisScene {
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
+
+        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
+
+        this.line_length = this.frustum_size * aspect;
+        this.ceiling_height = 5;
+
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
+        this.sync_clock = new THREE.Clock(false);
+
+        this.base_group = new THREE.Group();
+
 
         // Create a line with many points to display a spectrum
-        let geometry = new THREE.BufferGeometry();
-        this.num_points = 1024;
-        this.positions = new Float32Array(this.num_points * 3); // each point needs x, y, z coordinates
-        for (let i = 0; i < this.num_points; i++) {
-            this.positions[i * 3] = (i / this.num_points - 0.5) * this.frustum_size * aspect;
+        {
+            let geometry = new THREE.BufferGeometry();
+            this.num_points = 512;
+            this.positions = new Float32Array(this.num_points * 3); // each point needs x, y, z coordinates
+            for (let i = 0; i < this.num_points; i++) {
+                this.positions[i * 3] = (i / this.num_points - 0.5) * this.line_length;
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+
+            let material = new THREE.LineBasicMaterial({ color: "yellow", linewidth: 1 });
+            this.num_divisions = 16;
+
+            this.line = new THREE.Line(geometry, material);
+            this.line.position.z = 0.0;
+            this.line.position.y = -this.ceiling_height;
+            this.base_group.add(this.line);
         }
-        geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
 
-        // Define the material of your line
-        let material = new THREE.LineBasicMaterial({ color: "yellow", linewidth: 1 });
+        this.traces = [];
+        this.max_num_traces = 10;
+        this.trace_spacing = this.line_length / this.num_divisions;
 
-        // Create the line and add it to the scene
-        this.line = new THREE.Line(geometry, material);
-        this.base_group = new THREE.Group();
-        this.base_group.add(this.line);
+        {
+            this.markers = [];
+            for (let i = 0; i < this.max_num_traces * this.num_divisions; i++) {
+                const marker = make_wireframe_circle(0.5, 16, "white");
+                marker.rotation.x = Math.PI / 2;
+                marker.position.y = this.ceiling_height;
+                marker.position.z = this.line.position.z;
+                marker.material.opacity = 0.0;
+                this.markers.push(marker);
+                this.base_group.add(marker);
+            }
+            this.cur_marker_idx = 0;
+        }
 
-        this.base_group.rotation.x = Math.asin(1 / Math.sqrt(3));     // isometric angle
+
+        {
+            const div_mat = new THREE.LineBasicMaterial({ color: 'white', linewidth: 1, transparent: true, opacity: 0.2 });
+            for (let i = 0; i < this.num_divisions + 1; i++) {
+                const plane_geom = new THREE.PlaneGeometry(this.line_length, this.ceiling_height * 2);
+                const edges = new THREE.EdgesGeometry(plane_geom);
+                const mesh = new THREE.LineSegments(edges, div_mat);
+                mesh.position.x = (i - this.num_divisions / 2) * this.trace_spacing;
+                mesh.position.z = this.line.position.z - this.line_length / 2;
+                mesh.rotation.y = Math.PI / 2;
+                this.base_group.add(mesh);
+            }
+            const front_plane = new THREE.PlaneGeometry(this.line_length, this.ceiling_height * 2);
+            const front_edges = new THREE.EdgesGeometry(front_plane);
+            const front_mesh = new THREE.LineSegments(front_edges, div_mat);
+            front_mesh.position.z = this.line.position.z;
+            this.base_group.add(front_mesh);
+        }
+
+        this.base_group.rotation.x = isom_angle;
         this.base_group.rotation.y = Math.PI / 4;
 
         this.scene.add(this.base_group);
         this.camera = this.cam_orth;
 
-        this.signals = [
-            [0.1, 0.5],
-            [0.4, 0.3],
-            [0.7, 0.7],
-        ];
+        this.signals = [];
+        for (let i = 0; i < 5; i++) {
+            this.signals.push(new Signal(0.5, 2 * (this.ceiling_height - i)));
+        }
 
+        this.rot = 1024 / 4;
 
         this.elapsed_beats = 0.0;
     }
@@ -83,28 +183,34 @@ export class SpectrumScene extends VisScene {
     get_frequency_data() {
         const noise_ampl = 0.3;
         const sharpness = 40;
-        const data = new Array(this.num_points);
-        for (let i = 0; i < this.num_points; i++) {
-            data[i] = Math.random() * noise_ampl;
-        }
-        for (const [f, mag] of this.signals) {
+        const data = new Array(this.num_points).fill(0.0);
+        for (const signal of this.signals) {
             for (let i = 0; i < this.num_points; i++) {
                 const x = (i / this.num_points);
-                const dist = Math.abs(x - f);
-                const mag_comp = mag * this.frustum_size;
-                const val_to_add = mag * 1 / (sharpness * Math.abs(dist) + 1.0 / mag_comp);
-                data[i] += val_to_add;
+                const dist = Math.abs(x - signal.get_whole_freq(this.num_points));
+                const amp_comp = signal.amp;
+                const val_to_add = 1 / (sharpness * Math.abs(dist) + 1.0 / amp_comp);
+                data[i] = Math.max(data[i], val_to_add);
             }
+        }
+        for (let i = 0; i < this.num_points; i++) {
+            data[i] = Math.min(this.ceiling_height * 2, data[i] + Math.random() * noise_ampl);
         }
         return data;
     }
 
     anim_frame(dt) {
+        this.rot++;
         const beats_per_sec = this.env.bpm / 60;
         let frequencyData = this.get_frequency_data();
 
         const clock_dt = this.clock.getDelta();
         this.elapsed_beats += clock_dt * beats_per_sec;
+
+
+        for (const signal of this.signals) {
+            signal.update(this.env.bpm);
+        }
 
         // Update the line's y-values based on the frequency data
         let positions = this.line.geometry.attributes.position.array;
@@ -112,13 +218,64 @@ export class SpectrumScene extends VisScene {
             positions[i * 3 + 1] = frequencyData[i];
         }
 
+        const opacity_step = 0.4;
+        for (const trace of this.traces) {
+            trace.position.z -= dt * beats_per_sec * this.trace_spacing;
+            trace.material.opacity -= opacity_step * dt;
+        }
+
+        for (const marker of this.markers) {
+            marker.position.z -= dt * beats_per_sec * this.trace_spacing;
+            marker.material.opacity -= opacity_step * dt;
+        }
+
         // Notify Three.js of the change in the positions data
         this.line.geometry.attributes.position.needsUpdate = true;
         //this.plane.position.z -= 0.02;
         //this.plane.rotation.y += 0.01;
+        //
+        this.base_group.rotation.y = this.rot * Math.PI / 1024;
     }
 
     handle_sync(t, bpm, beat) {
+        console.log("sync");
+        this.sync_clock.start();
+        const edge_margin = this.trace_spacing / this.line_length;
+        for (let i = 0; i < this.signals.length; i++) {
+            const target_freq = clamp(
+                (Math.round(this.signals[i].freq * this.num_divisions) +
+                rand_int(-2, 3)) / this.num_divisions, edge_margin, 1 - edge_margin);
+            this.signals[i].goto_freq(target_freq);
+        }
+        if (beat % 1 == 0) {
+            for (const signal of this.signals) {
+                if (signal.amp == this.ceiling_height * 2) {
+                    const marker = this.markers[this.cur_marker_idx];
+                    this.cur_marker_idx = (this.cur_marker_idx + 1) % this.markers.length;
+                    marker.position.x = (signal.get_whole_freq(this.num_points) - 0.5) * this.line_length;
+                    marker.material.opacity = 1.0;
+                    marker.position.z = this.line.position.z;
+                }
+            }
+
+
+
+            if (this.traces.length >= this.max_num_traces) {
+                const trace = this.traces.shift();
+                trace.position.z = this.line.position.z;
+                trace.material.opacity = 1.0;
+                trace.geometry.getAttribute('position').array = this.positions.slice();
+                trace.geometry.getAttribute('position').needsUpdate = true;
+                this.traces.push(trace);
+            } else {
+                const trace = this.line.clone();
+                trace.material = new THREE.LineBasicMaterial({ color: "cyan", linewidth: 1, transparent: true });
+                trace.geometry = new THREE.BufferGeometry();
+                trace.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions.slice(), 3));
+                this.traces.push(trace);
+                this.base_group.add(trace);
+            }
+        }
     }
 
     handle_beat(t, channel) {

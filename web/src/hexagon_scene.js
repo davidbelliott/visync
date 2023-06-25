@@ -90,9 +90,9 @@ class CubeAssembly extends THREE.Group {
         const explode_movement_beats = (this.max_spacing - this.min_spacing > 3 ? 0.5 : 0.25);
         let explode_frac = 1.0;
         if (this.explode_clock.running) {
-            explode_frac = ease(clamp(
+            explode_frac = clamp(
                 this.explode_clock.getElapsedTime() * beats_per_sec / explode_movement_beats,
-                0, 1));
+                0, 1);
         }
         if (this.spacing_direction == 1) {
             this.spacing = lerp_scalar(this.min_spacing, this.max_spacing, explode_frac);

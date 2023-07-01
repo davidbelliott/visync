@@ -10,6 +10,7 @@ import { VisScene } from './vis_scene.js';
 import { GantryScene } from './gantry_scene.js';
 import { HexagonScene } from './hexagon_scene.js';
 import { SpectrumScene } from './spectrum_scene.js';
+import { IntroScene } from './intro_scene.js';
 
 import {
     lerp_scalar,
@@ -1088,6 +1089,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new IntroScene(env),
             new SpectrumScene(env),
             new HexagonScene(env),
             new GantryScene(env),
@@ -1172,9 +1174,7 @@ class GraphicsContext {
 
     anim_frame() {
         let dt = this.clock.getDelta();
-        for (const scene of this.scenes) {
-            scene.anim_frame(dt);
-        }
+        this.scenes[this.cur_scene_idx].anim_frame(dt);
     }
 
     recreate_buffers(width, height) {

@@ -65,7 +65,6 @@ class Signal {
         const new_freq = lerp_scalar(this.start_freq, this.target_freq, frac);
         this.freq = new_freq;
         this.amp = this.max_amp * Math.min(1, 2 * (frac - 0.5) ** 2 + 0.5);
-        console.log(this.freq);
     }
 
     get_whole_freq(num_points) {
@@ -238,7 +237,6 @@ export class SpectrumScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
-        console.log("sync");
         this.sync_clock.start();
         const edge_margin = this.trace_spacing / this.line_length;
         for (let i = 0; i < this.signals.length; i++) {
@@ -279,6 +277,5 @@ export class SpectrumScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        console.log("beat");
     }
 }

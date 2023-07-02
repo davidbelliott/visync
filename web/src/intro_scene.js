@@ -92,7 +92,6 @@ export class IntroScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        console.log("beat");
         this.beat_clock.start();
     }
 }

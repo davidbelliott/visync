@@ -77,7 +77,7 @@ def send_fake_measure(server, bpm):
             msg = MsgSync(t, bpm, (i // 4) % 4).to_json()
             send_msg(server, msg)
         if i % 8 == 0:
-            msg = MsgBeat(t, 0).to_json()
+            msg = MsgBeat(t, 1).to_json()
             send_msg(server, msg)
         '''if ((i + 2) in [0, 6]) or ((i + 2 - 16) in [2, 6, 9, 13, 14]):
             msg = MsgBeat(t, 0).to_json()

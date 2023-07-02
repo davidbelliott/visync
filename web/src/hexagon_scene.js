@@ -197,6 +197,7 @@ export class HexagonScene extends VisScene {
     }
 
     handle_beat(t, channel) {
+        console.log("beat");
         if (channel == 1) {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel);

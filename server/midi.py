@@ -5,10 +5,10 @@ import time
 import rtmidi
 import asyncio
 import websockets
+from websocket_server import WebsocketServer
 from collections import deque
 
 
-CLIENTS = set()
 clients_lock = threading.Lock()
 midiin = rtmidi.RtMidiIn()
 cur_beat_idx = 0
@@ -36,7 +36,17 @@ class MIDIClockReceiver:
             self.bpm = 2.5 / (sum(self._samples) / len(self._samples))
             self.sync = True
 
+
+def recv(client, server, msg):
+    t = float(msg)
+    time_now = time.time()
+    dt = time_now - t
+    print(f'dt: {dt}')
+
 clock_receiver = MIDIClockReceiver()
+server = WebsocketServer(host='', port=WS_PORT, loglevel=logging.DEBUG)
+server.set_fn_message_received(recv)
+server.run_forever(True)
 
 
 class Msg:
@@ -96,7 +106,7 @@ def get_midi_events():
             msg_str = translate_midi(m)
             if msg_str != None:
                 with clients_lock:
-                    websockets.broadcast(CLIENTS, msg_str)
+                    server.send_message_to_all(msg_str)
 
 
 async def handler(websocket):
@@ -126,8 +136,6 @@ def main():
             print(midiin.getPortName(i))
         idx = int(input("input midi port to listen to"))
         midiin.openPort(idx)
-        
-        threading.Thread(target=run_websockets_server).start()
         get_midi_events()
     else:
         print('NO MIDI INPUT PORTS!')

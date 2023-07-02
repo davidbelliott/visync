@@ -496,10 +496,7 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 1) {
-            console.log(`BEAT: ${channel}, ${t}`);
-            this.gantries[this.pounding_gantry_idx].start_pound(true);
-        }
+        this.gantries[this.pounding_gantry_idx].start_pound(true);
     }
 
     add_excitation(pos) {

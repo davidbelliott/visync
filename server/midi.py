@@ -8,6 +8,7 @@ import websockets
 from websocket_server import WebsocketServer
 from collections import deque
 
+WS_PORT = 8080
 
 clients_lock = threading.Lock()
 midiin = rtmidi.RtMidiIn()

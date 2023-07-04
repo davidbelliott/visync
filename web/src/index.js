@@ -11,6 +11,7 @@ import { GantryScene } from './gantry_scene.js';
 import { HexagonScene } from './hexagon_scene.js';
 import { SpectrumScene } from './spectrum_scene.js';
 import { IntroScene } from './intro_scene.js';
+import { IceCreamScene } from './ice_cream_scene.js';
 
 import {
     lerp_scalar,
@@ -87,7 +88,7 @@ function init() {
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    const socket = new WebSocket(`ws://music:8080`);
+    const socket = new WebSocket(`ws://localhost:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -122,6 +123,7 @@ const BG_COLOR = 'black';
 const LINE_WIDTH = 1;
 const POINT_SIZE = 2.0
 const GRID_COLOR = 'white';
+
 
 function make_wireframe_cube() {
     const geometry = new THREE.BoxGeometry( 1, 1, 1 );
@@ -1089,6 +1091,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new IceCreamScene(env),
             new IntroScene(env),
             new SpectrumScene(env),
             new HexagonScene(env),

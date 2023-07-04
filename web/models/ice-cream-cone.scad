@@ -1,4 +1,4 @@
-$fn = 64;
+$fn = 20;
 rotate_extrude(convexity=10) {
         difference() {
             circle(r=6);

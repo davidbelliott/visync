@@ -7,6 +7,7 @@ import asyncio
 import websockets
 from websocket_server import WebsocketServer
 from collections import deque
+import logging
 
 WS_PORT = 8080
 
@@ -109,25 +110,6 @@ def get_midi_events():
                 with clients_lock:
                     server.send_message_to_all(msg_str)
 
-
-async def handler(websocket):
-    print("ws connection")
-    with clients_lock:
-        CLIENTS.add(websocket)
-    try:
-        async for _ in websocket:
-            pass
-    finally:
-        with clients_lock:
-            CLIENTS.remove(websocket)
-
-
-def run_websockets_server():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    ws_server = websockets.serve(handler, '0.0.0.0', 8080)
-    loop.run_until_complete(ws_server)
-    loop.run_forever()
     
 def main():
     midiin.ignoreTypes(True, False, True)

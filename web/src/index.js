@@ -12,6 +12,8 @@ import { HexagonScene } from './hexagon_scene.js';
 import { SpectrumScene } from './spectrum_scene.js';
 import { IntroScene } from './intro_scene.js';
 import { IceCreamScene } from './ice_cream_scene.js';
+import { FastCubeScene } from './fast_cube_scene.js';
+import { CubeLockingScene } from './cube_locking_scene.js';
 
 import {
     lerp_scalar,
@@ -29,11 +31,14 @@ import css_style from "./style.css";
 const SCALE_LERP_RATE = 5;
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
+const MSG_TYPE_GOTO_SCENE = 2;
+const MSG_TYPE_ADVANCE_SCENE_STATE = 3;
 
 var context = null;
 
 const env = {
     bpm: 120,
+    total_latency: 0.010,
 }
 
 window.addEventListener("load", init);
@@ -88,21 +93,25 @@ function init() {
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    const socket = new WebSocket(`ws://localhost:8080`);
+    const socket = new WebSocket(`ws://192.168.1.1:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
 
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
-            context.handle_sync(msg.t, msg.bpm, msg.beat);
+            console.log(`Beat ${msg.beat}`);
             env.bpm = msg.bpm;
+            const delay = 60 / msg.bpm - env.total_latency;
+            setTimeout(() => { context.handle_sync(msg.t, msg.bpm, msg.beat); }, delay * 1000);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
+        } else if (type == MSG_TYPE_GOTO_SCENE) {
+            context.change_scene(msg.scene);
+        } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
+            context.advance_state(msg.steps);
         }
-        const time_now = Date.now() / 1000;
-        const latency = time_now - msg.t;
-        socket.send(latency);
+        socket.send(msg.t);
     });
 
     socket.addEventListener('close', function(e) {
@@ -261,7 +270,7 @@ class VisOpening extends VisScene {
 
     activate() {
         const overlay = document.getElementById("overlay");
-        overlay.style.display = 'none';
+        //overlay.style.display = 'none';
         for (const [i, id] of this.all_html_elements.entries()) {
             const elem = document.getElementById(id);
             elem.style.visibility = 'hidden';
@@ -271,12 +280,12 @@ class VisOpening extends VisScene {
             elem.innerHTML = v;
         }
         this.set_stage(this.start_stage);
-        overlay.style.display = 'block';
+        overlay.style.display = 'none';
     }
 
     deactivate() {
         const overlay = document.getElementById("overlay");
-        overlay.style.display = 'none';
+        //overlay.style.display = 'none';
     }
 
     anim_frame(dt) {
@@ -961,7 +970,6 @@ class HyperRobot extends VisScene {
         if (this.beat_idx % 2 == 0) {
             // half-note beat
             this.half_beat_clock.start();
-            console.log(`HALF BEAT: ${t}`);
             this.circle_group.position.x = 0.75;
         } else {
             this.circle_group.position.x = -0.75;
@@ -991,7 +999,6 @@ class HyperRobot extends VisScene {
                     (Math.round(this.start_rot[1] / snap_mult) + rot_dirs[1]) * snap_mult];
                 this.go_to_target = true;
                 this.move_clock.start();
-                //console.log(`go to target: ${this.target_rot} from ${this.start_rot}`);
             }
         }
     }
@@ -1090,17 +1097,29 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
-            new VisOpening(env, "Kazakh Player Mode Presents", "Vain Oblations", "", 0),
+            new HyperRobot(env),
+            new HomeBackground(env),
+            new CubeLockingScene(env),
+            new Tracers(env),
             new IceCreamScene(env),
             new IntroScene(env),
-            new SpectrumScene(env),
             new HexagonScene(env),
             new GantryScene(env),
-            new Tracers(env),
-            new HomeBackground(env),
-            new HyperRobot(env)
+            new SpectrumScene(env),
+            new FastCubeScene(env)
         ];
         this.cur_scene_idx = 0;
+
+        this.overlay = document.getElementById("overlay");
+        this.overlay.style.display = "none";
+        this.overlay_indicators = [];
+        this.indicator_on_time_range = [];
+        for (let i = 1; i <= 16; i++) {
+            const elem = document.createElement("div");
+            this.overlay.appendChild(elem);
+            this.overlay_indicators.push(elem);
+            this.indicator_on_time_range.push([]);
+        }
 
 	this.canvas = document.getElementById('canvas');
 	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
@@ -1176,8 +1195,33 @@ class GraphicsContext {
     }
 
     anim_frame() {
-        let dt = this.clock.getDelta();
+        const dt = this.clock.getDelta();
+        const t_now = this.clock.getElapsedTime();
         this.scenes[this.cur_scene_idx].anim_frame(dt);
+
+        this.overlay_indicators.forEach((ind, i) => {
+            const t_ranges = this.indicator_on_time_range[i];
+            const keep_ranges = [];
+            let is_active = false;
+            for (const t_range of t_ranges) {
+                if (t_range[0] <= t_now && t_range[1] > t_now) {
+                    is_active = true;
+                }
+                if (t_range[1] > t_now) {
+                    keep_ranges.push(t_range);
+                }
+            }
+            this.indicator_on_time_range[i] = keep_ranges;
+            if (is_active) {
+                if (i == this.overlay_indicators.length - 1) {
+                    ind.style.backgroundColor = 'red';
+                } else {
+                    ind.style.backgroundColor = 'white';
+                }
+            } else {
+                ind.style.backgroundColor = 'transparent';
+            }
+        });
     }
 
     recreate_buffers(width, height) {
@@ -1231,9 +1275,15 @@ class GraphicsContext {
     }
 
     change_scene(scene_idx) {
-        this.scenes[this.cur_scene_idx].deactivate();
-        this.cur_scene_idx = scene_idx;
-        this.scenes[this.cur_scene_idx].activate();
+        if (scene_idx >= 0 && scene_idx < this.scenes.length) {
+            this.scenes[this.cur_scene_idx].deactivate();
+            this.cur_scene_idx = scene_idx;
+            this.scenes[this.cur_scene_idx].activate();
+        }
+    }
+
+    advance_state(steps) {
+        this.scenes[this.cur_scene_idx].advance_state(steps);
     }
 
     keydown(e) {
@@ -1247,16 +1297,36 @@ class GraphicsContext {
             } else {
                 this.set_tracer_params(1, 1, 1);
             }
+        } else if (e.code == "Tab") {
+            if (this.overlay.style.display == 'none') {
+                this.overlay.style.display = 'block';
+            } else {
+                this.overlay.style.display = 'none';
+            }
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);
         }
     }
 
     handle_sync(t, bpm, beat) {
+        const thirtysecond_note_dur = 60 / env.bpm / 8;
+        const start_t = this.clock.getElapsedTime() + 8 * thirtysecond_note_dur
+            - env.total_latency;
+        this.indicator_on_time_range[this.indicator_on_time_range.length - 1].push([
+            start_t,
+            start_t + thirtysecond_note_dur
+        ]);
         this.scenes[this.cur_scene_idx].handle_sync(t, bpm, beat);
     }
 
     handle_beat(t, channel) {
+        const thirtysecond_note_dur = 60 / env.bpm / 8;
+        const start_t = this.clock.getElapsedTime() + 4 * thirtysecond_note_dur
+            - env.total_latency;
+        this.indicator_on_time_range[channel - 1].push([
+            start_t,
+            start_t + thirtysecond_note_dur
+        ]);
         this.scenes[this.cur_scene_idx].handle_beat(t, channel);
     }
 }

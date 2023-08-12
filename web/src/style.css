@@ -50,14 +50,20 @@ h1, h2, h3 {
     width: 100%;
 }
 
-.text-overlay {
+.debug-overlay {
     position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
+    background-color: black;
+    bottom: 0;
     left: 0;
     width: 100%;
+    height: 10px;
     text-align: center;
-    padding: 20px;
+    display: flex;
+}
+
+.debug-overlay > div {
+    flex: 1 1 auto;
+    background-color: transparent;
 }
 
 .title {

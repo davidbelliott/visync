@@ -3,7 +3,6 @@ import * as THREE from 'three';
 export class Tesseract extends THREE.Object3D {
     constructor(size, camera) {
         super();
-        console.log(size);
         this.rot_xy = 0.0;
         this.rot_xz = 0.0;
         this.rot_xw = 0.0;

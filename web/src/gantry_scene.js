@@ -6,63 +6,9 @@ import {
     update_persp_camera_aspect,
     update_orth_camera_aspect,
     rand_int,
-    arr_eq
+    arr_eq,
+    Spark,
 } from './util.js';
-
-
-class Spark extends THREE.Object3D {
-    constructor(size, color, axes) {
-        super();
-        this.material = new THREE.LineBasicMaterial( { color: color } );
-        const lines = [
-            [-1, -1, 1, 1],
-            [-1, 1, 1, -1],
-            [-1.25, 0, 1.25, 0]];
-        for (const line of lines) {
-            const points = [];
-            for (let i = 0; i < 2; i++) {
-                const point = [0, 0, 0];
-                point[axes[0]] = line[i * 2] * size;
-                point[axes[1]] = line[i * 2 + 1] * size;
-                points.push(new THREE.Vector3().fromArray(point));
-            }
-            const geometry = new THREE.BufferGeometry().setFromPoints( points );
-            const l = new THREE.Line( geometry, this.material );
-            this.add(l);
-        }
-        this.velocity = new THREE.Vector3();
-        this.acceleration = new THREE.Vector3();
-        this.flicker_frames = 3;
-        this.cur_frame = 0;
-        this.active = true;
-    }
-
-    anim_frame(dt, camera) {
-        if (this.active) {
-            this.cur_frame++;
-            const dv = this.acceleration.clone();
-            dv.multiplyScalar(dt);
-            this.velocity.add(dv);
-
-            const dx = this.velocity.clone();
-            dx.multiplyScalar(dt);
-            this.position.add(dx);
-
-            this.visible = true;
-            this.visible = (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
-            this.quaternion.copy(camera.quaternion);
-            if (this.parent != null) {
-                const group_quat = new THREE.Quaternion();
-                this.parent.getWorldQuaternion(group_quat);
-                group_quat.conjugate();
-                this.quaternion.premultiply(group_quat);
-            }
-        } else {
-            this.cur_frame = 0;
-            this.visible = false;
-        }
-    }
-}
 
 
 function create_instanced_cube(dims, color) {
@@ -496,7 +442,9 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        this.gantries[this.pounding_gantry_idx].start_pound(true);
+        if (channel != 2) {
+            this.gantries[this.pounding_gantry_idx].start_pound(true);
+        }
     }
 
     add_excitation(pos) {

@@ -11,6 +11,7 @@ import {
     arr_eq,
     create_instanced_cube,
     make_wireframe_cylinder,
+    make_wireframe_circle,
     ShaderLoader
 } from './util.js';
 import { Tesseract } from './highdim.js';
@@ -62,14 +63,15 @@ export class IceCreamScene extends VisScene {
         });
 
         this.vbo_scene = new THREE.Scene();
+        this.ice_cream_color = new THREE.Color("yellow");
 
 
         const loader = new STLLoader();
         this.ice_cream_cone_mat = new THREE.MeshLambertMaterial({
-            color: "magenta",
+            color: this.ice_cream_color,
         });
         this.ice_cream_cone_mat.flatShading = false;
-        this.light = new THREE.PointLight("white", 0.5, 100 );
+        this.light = new THREE.PointLight("white", 0.75, 100 );
         this.light.position.set(0, 0, 20);
         this.vbo_scene.add(this.light);
         this.cones_per_side = 7;
@@ -96,9 +98,7 @@ export class IceCreamScene extends VisScene {
                     }
                 }
             },
-            (xhr) => {
-                console.log((xhr.loaded / xhr.total) * 100 + '% loaded')
-            },
+            (xhr) => { },
             (error) => {
                 console.log(error)
             }
@@ -112,14 +112,19 @@ export class IceCreamScene extends VisScene {
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
         //this.base_group.rotation.x = isom_angle;
         this.base_group.rotation.x = Math.PI / 4;
+        this.lid_base_y = 4.25;
 
         this.rot = 512 / 4;
 
         {
             this.fg_group = new THREE.Group();
             this.tub = make_wireframe_cylinder(4, 3, 7, "white");
-            this.lid = make_wireframe_cylinder(4.25, 4.25, 1, "white");
-            this.lid.position.y = 3.5;
+            this.front_decal = make_wireframe_circle(2, 32, this.ice_cream_color);
+            this.front_decal.position.z = 3.5;
+            this.front_decal.rotation.x = Math.atan(1 / 7);
+            this.tub.add(this.front_decal);
+            this.lid = make_wireframe_cylinder(4.25, 4.25, 1.5, "white");
+            this.lid.position.y = this.lid_base_y;
             this.fg_group.add(this.tub);
             this.fg_group.add(this.lid);
             this.fg_group.rotation.x = Math.PI / 8;
@@ -130,9 +135,12 @@ export class IceCreamScene extends VisScene {
         this.start_lid_y_offset = 0;
         this.target_lid_y_offset = 0;
         this.elapsed_beats = 0.0;
+        this.vibe_ampl = 0.0;
+        this.frame_idx = 0;
     }
 
     anim_frame(dt) {
+        this.frame_idx++;
         this.rot++;
     
         const beats_per_sec = this.env.bpm / 60;
@@ -143,6 +151,7 @@ export class IceCreamScene extends VisScene {
         const frac = clamp(t / rot_movement_beats, 0, 1);
 
         this.elapsed_beats += clock_dt * beats_per_sec;
+        this.vibe_ampl = (1.0 - frac) ** 2;
 
         this.cones.forEach((cone, i) => {
             //cone.rotation.z = this.rot * Math.PI / 512;
@@ -150,21 +159,24 @@ export class IceCreamScene extends VisScene {
             cone.rotation.x += clock_dt * beats_per_sec / rot_movement_beats * Math.PI / 2 * this.target_rot_multiplier;
         });
         this.fg_group.rotation.x += clock_dt * 0.2 * this.target_rot_multiplier;
+        //this.fg_group.position.y = -3 + (2 * Math.random() - 1) * this.vibe_ampl * 0.2;
 
 
         const scoop_elapsed = this.scoop_clock.getElapsedTime();
         const scoop_elapsed_beats = scoop_elapsed * beats_per_sec;
         const lid_open_movement_beats = 2.0;
         const lid_frac = clamp(scoop_elapsed_beats / lid_open_movement_beats, 0, 1);
-        this.lid.position.y = 3.5 + lerp_scalar(this.start_lid_y_offset, this.target_lid_y_offset, lid_frac);
+        this.lid.position.y = this.lid_base_y + lerp_scalar(this.start_lid_y_offset, this.target_lid_y_offset, lid_frac);
     }
 
     handle_sync(t, bpm, beat) {
     }
 
     handle_beat(t, channel) {
-        this.beat_clock.start();
-        this.target_rot_multiplier *= -1;
+        if (channel == 1) {
+            this.beat_clock.start();
+            this.target_rot_multiplier *= -1;
+        }
 
         if (channel == 2) {
             this.set_scooping(!this.scooping);
@@ -176,11 +188,11 @@ export class IceCreamScene extends VisScene {
             return;
         }
         if (scooping) {
-            this.target_lid_y_offset = 4;
+            this.target_lid_y_offset = this.lid_base_y;
             this.start_lid_y_offset = 0;
         } else {
             this.target_lid_y_offset = 0;
-            this.start_lid_y_offset = 4;
+            this.start_lid_y_offset = this.lid_base_y;
         }
         this.scoop_clock.start();
         this.scooping = scooping;

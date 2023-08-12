@@ -1,5 +1,6 @@
 uniform vec3      resolution;           // viewport resolution (in pixels)
 uniform float time;
+uniform sampler2D palette;
 
 //#define FLAT_TOP_HEXAGON
 
@@ -344,9 +345,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float eDist = hex(h.xy); // Edge distance.
 
     float color_noise = simplex3d(vec3(complexity * to_center.x, complexity * to_center.y, time * PI / 2.0));
-    float alpha = 0.3 + 0.7 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
-    vec3 rainbow_color = hsb2rgb(vec3(
-                mod(color_noise * 2.0 - time * 2.0, 1.), 1.0, 1.0));
+    float alpha = 0.8 + 0.2 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
+    //alpha = 1.0;
+    //vec3 rainbow_color = hsb2rgb(vec3(
+                //mod(color_noise * 2.0 - time * 2.0, 1.), 0.5, 1.0));
+    vec2 coord = vec2(mod(color_noise * 2.0 - time * 2.0, 1.), 0.5);
+    vec3 rainbow_color = texture2D(palette, coord).xyz;
     fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    
     //fragColor.a *= sin(time * 2. * PI);
 }

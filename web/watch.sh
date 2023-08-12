@@ -2,7 +2,8 @@
 npx webpack --watch &
 while true; do
     cp -r ./glsl ./dist/
+    cp -r ./static ./dist/
     cp -r ./stl ./dist/
     sudo cp -r ./dist/* /usr/share/nginx/html
-    inotifywait -e close_write ./dist/* ./glsl/* ./stl/*
+    inotifywait -e close_write ./dist/* ./glsl/* ./stl/* ./static/*
 done

@@ -16,7 +16,7 @@ import { Tesseract } from './highdim.js';
 
 export class IntroScene extends VisScene {
     constructor(env) {
-        super(env);
+        super(env, 8);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -59,6 +59,11 @@ export class IntroScene extends VisScene {
     }
 
     anim_frame(dt) {
+        let start_dim = 0;
+        let end_dim = Math.floor(this.cur_state_idx / 2) + 1;
+
+
+
         this.rot++;
     
         const beats_per_sec = this.env.bpm / 60;
@@ -71,21 +76,35 @@ export class IntroScene extends VisScene {
         let frac = clamp(16 * t / bounce_beats * Math.exp(-5 * t / bounce_beats) * (1 - t / bounce_beats), 0, 1);
         frac = Math.sin(t * Math.PI / bounce_beats);
         //frac = 1 - Math.abs(2 * (t / bounce_beats) - 1);
-        frac *= 4;
 
         //this.tesseract.rot_xw += 0.01;
         //this.tesseract.rot_xz += 0.01;
         //this.tesseract.rot_xz += 0.01;
-        let arr = [];
+        /*let arr = [];
+        frac *= 4;
         for (let i = 0; i < 4; i++) {
             const this_val = clamp(frac, 0, 1);
             arr.push(this_val);
             frac -= this_val;
+        }*/
+
+        let arr = new Array(4).fill(0);
+        for (let i = 0; i < 4; i++) {
+            if (i < end_dim - 1) {
+                arr[i] = 1;
+            } else {
+                arr[i] = Math.min(arr[i], frac);
+            }
         }
+        arr[end_dim - 1] = frac;
 
         this.tesseract.scale_vec.set(...arr);
         this.tesseract.update_geom(this.camera);
         //this.tesseract.rotation.x = this.rot * Math.PI / 1024;
+        if (this.cur_state_idx % 2 == 1) {
+            this.tesseract.rotation.y = this.rot * Math.PI / 1024;
+            this.tesseract.rot_xw = this.rot * Math.PI / 1024;
+        }
     }
 
     handle_sync(t, bpm, beat) {

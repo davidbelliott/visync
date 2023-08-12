@@ -6,11 +6,12 @@ import {
     update_persp_camera_aspect,
     update_orth_camera_aspect,
     rand_int,
-    arr_eq
+    arr_eq,
+    clamp
 } from './util.js';
 
 export class VisScene {
-    constructor(env) {
+    constructor(env, num_states=1) {
         this.env = env;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -18,6 +19,8 @@ export class VisScene {
         this.frustum_size = 16;
         this.camera = this.cam_persp;
         this.yscale = 1.0;
+        this.cur_state_idx = 0;
+        this.num_states = num_states;
     }
 
     activate() {
@@ -43,6 +46,16 @@ export class VisScene {
 
     handle_beat(t, channel) {
 
+    }
+
+    state_transition(old_state_idx, new_state_idx) {
+
+    }
+
+    advance_state(steps) {
+        const old_state_idx = this.cur_state_idx;
+        this.cur_state_idx = clamp(this.cur_state_idx + steps, 0, this.num_states - 1);
+        this.state_transition(old_state_idx, this.cur_state_idx);
     }
 
     handle_resize(width, height) {

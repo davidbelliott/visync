@@ -8,7 +8,8 @@ import {
     rand_int,
     clamp,
     arr_eq,
-    ShaderLoader
+    load_texture,
+    ResourceLoader
 } from './util.js';
 
 function create_instanced_cube(dims, color) {
@@ -130,11 +131,13 @@ export class HexagonScene extends VisScene {
 
         this.cur_rotation = 0;
 
-        this.shader_loader = new ShaderLoader('glsl/hex_shader.vert', 'glsl/hex_shader.frag');
-        this.shader_loader.load().then(([vertex_shader, fragment_shader]) => {
+        this.shader_loader = new ResourceLoader(['glsl/hex_shader.vert', 'glsl/hex_shader.frag']);
+        Promise.all([this.shader_loader.load(), load_texture('static/romaO.png')]).then(
+            ([[vertex_shader, fragment_shader], texture]) => {
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
+                palette: { type: 't', value: texture },
             };
             let material = new THREE.ShaderMaterial({
                 uniforms: this.uniforms,
@@ -146,7 +149,7 @@ export class HexagonScene extends VisScene {
             let geometry = new THREE.PlaneGeometry(this.cam_orth.right - this.cam_orth.left,
                 this.cam_orth.top - this.cam_orth.bottom);
             this.plane = new THREE.Mesh(geometry, material);
-            this.plane.position.z = 100;   // position in front of other objects
+            this.plane.position.z = -100;   // position in front of other objects
             this.scene.add(this.plane);
         });
 

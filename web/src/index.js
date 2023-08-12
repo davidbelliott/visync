@@ -20,8 +20,10 @@ import {
     ease,
     update_persp_camera_aspect,
     update_orth_camera_aspect,
+    create_instanced_cube,
     rand_int,
-    arr_eq
+    arr_eq,
+    clamp
 } from './util.js';
 
 import css_normalize from "./normalize.css";
@@ -38,7 +40,7 @@ var context = null;
 
 const env = {
     bpm: 120,
-    total_latency: 0.010,
+    total_latency: 0.065,
 }
 
 window.addEventListener("load", init);
@@ -100,7 +102,7 @@ function connect() {
 
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
-            console.log(`Beat ${msg.beat}`);
+            //console.log(`Beat ${msg.beat}`);
             env.bpm = msg.bpm;
             const delay = 60 / msg.bpm - env.total_latency;
             setTimeout(() => { context.handle_sync(msg.t, msg.bpm, msg.beat); }, delay * 1000);
@@ -280,7 +282,7 @@ class VisOpening extends VisScene {
             elem.innerHTML = v;
         }
         this.set_stage(this.start_stage);
-        overlay.style.display = 'none';
+        overlay.style.display = 'hidden';
     }
 
     deactivate() {
@@ -327,7 +329,7 @@ function Transition( sceneA, sceneB ) {
 
 class Tracers extends VisScene {
     constructor(env) {
-        super(env);
+        super(env, 3);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -338,8 +340,8 @@ class Tracers extends VisScene {
         this.trace_spacing = 2;
 
         this.beat_idx = 0;
-        this.beat_clock = new THREE.Clock(false);
-
+        this.sync_clock = new THREE.Clock(false);
+        this.state_change_clock = new THREE.Clock(false);
 
         this.recreate_buffers(window.innerWidth, window.innerHeight);
 
@@ -413,6 +415,7 @@ class Tracers extends VisScene {
 
             const lightning_strike_mesh = new THREE.Mesh(lightning_strike, this.lightningMaterial );
             this.lightning_strike_meshes.push(lightning_strike_mesh);
+            lightning_strike_mesh.visible = false;
 
             ls.add(lightning_strike_mesh);
         }
@@ -436,7 +439,9 @@ class Tracers extends VisScene {
 
         //this.vbo_scene.add(this.lightning_strike_mesh );
 
-
+        this.start_cube_bounce_ampl = 0;
+        this.curr_cube_bounce_ampl = 0;
+        this.target_cube_bounce_ampl = 0;
 
 
         this.elapsed_time = 0.0;
@@ -512,14 +517,13 @@ class Tracers extends VisScene {
         const min_base_scale = 1;
         const max_base_scale = 1.5;
 
-        return 4 * (t - 0.5) ** 2 * (max_base_scale - min_base_scale) + 
+        return this.curr_cube_bounce_ampl * clamp((t - 0.5) ** 2, 0, 1) * (max_base_scale - min_base_scale) + 
             min_base_scale;
     }
 
     handle_sync(t, bpm, beat) {
-        this.beat_idx++;
-        if (this.beat_idx % 2 == 0) {
-            this.beat_clock.start();
+        if (beat % 2 == 0) {
+            this.sync_clock.start();
         }
     }
 
@@ -531,7 +535,7 @@ class Tracers extends VisScene {
 
     anim_frame(dt) {
         const beats_per_sec = this.env.bpm / 60 / 2;
-        let beat_time = this.beat_clock.getElapsedTime() * beats_per_sec;
+        let beat_time = this.sync_clock.getElapsedTime() * beats_per_sec;
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
@@ -551,6 +555,11 @@ class Tracers extends VisScene {
 
         //this.cubes_group.scale.setScalar(this.base_scale);
 
+        // Update bounce amplitude
+        const bounce_change_beats = 8;
+        const frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / bounce_change_beats, 0, 1);
+        this.curr_cube_bounce_ampl = lerp_scalar(this.start_cube_bounce_ampl, this.target_cube_bounce_ampl, frac);
+
 
         this.cubes_group.rotation.x += 0.1 * dt;
         this.cubes_group.rotation.y += 0.4 * dt;
@@ -566,6 +575,33 @@ class Tracers extends VisScene {
             ls.update(this.elapsed_time);
         }
     }
+
+    state_transition(old_state_idx, new_state_idx) {
+        let lightning_visible = false;
+        let cubes_bouncing = false;
+        if (new_state_idx == 0) {
+            lightning_visible = false;
+            cubes_bouncing = false;
+        } else if (new_state_idx == 1) {
+            lightning_visible = false;
+            cubes_bouncing = true;
+        } else if (new_state_idx == 2) {
+            lightning_visible = true;
+            cubes_bouncing = true;
+        }
+        for (const ls of this.lightning_strike_meshes) {
+            ls.visible = lightning_visible;
+        }
+        if (cubes_bouncing) {
+            this.target_cube_bounce_ampl = 4;
+            this.start_cube_bounce_ampl = this.curr_cube_bounce_ampl;
+        } else {
+            this.target_cube_bounce_ampl = 0;
+            this.start_cube_bounce_ampl = this.curr_cube_bounce_ampl;
+        }
+        this.state_change_clock.start();
+    }
+
 
     render(renderer) {
         renderer.autoClearColor = false;
@@ -677,7 +713,8 @@ class HomeBackground extends VisScene {
     }
 
     handle_beat(t, channel) {
-        this.base_scale = this.max_base_scale;
+        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        setTimeout(() => { this.base_scale = this.max_base_scale; }, delay * 1000);
     }
 }
 
@@ -706,7 +743,8 @@ class BoxDef extends GeomDef {
     }
     create() {
         super.create();
-        let geometry = new THREE.BoxGeometry(...this.dims);
+        const created_mesh = create_instanced_cube(this.dims, "yellow");
+        /*let geometry = new THREE.BoxGeometry(...this.dims);
         let wireframe = new THREE.EdgesGeometry(geometry);
         const wireframe_mat = new THREE.LineBasicMaterial( { color: "yellow", linewidth: 1 } );
         this.mesh.add(new THREE.LineSegments(wireframe, wireframe_mat));
@@ -717,8 +755,8 @@ class BoxDef extends GeomDef {
         }
         const fill_mat = new THREE.MeshBasicMaterial( { color: "black" } );
         const inner_geom = new THREE.BoxGeometry(...inner_dims);
-        this.mesh.add(new THREE.Mesh(inner_geom, fill_mat));
-
+        this.mesh.add(new THREE.Mesh(inner_geom, fill_mat));*/
+        this.mesh.add(created_mesh);
         return this.mesh;
     }
 }
@@ -824,10 +862,10 @@ class Robot {
 
 class HyperRobot extends VisScene {
     constructor(env) {
-        super(env);
+        super(env, 4);
 
         const aspect = window.innerWidth / window.innerHeight;
-        this.frustum_size = 16;
+        this.frustum_size = 10;
         this.cam_persp = new THREE.PerspectiveCamera( 75, 1, 0.1, 10000 );
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
@@ -838,6 +876,7 @@ class HyperRobot extends VisScene {
         this.move_clock = new THREE.Clock(false);
         this.half_beat_clock = new THREE.Clock(false);
         this.beat_clock = new THREE.Clock(false);
+        this.state_change_clock = new THREE.Clock(false);
 
         this.beat_idx = 0;
 
@@ -858,7 +897,13 @@ class HyperRobot extends VisScene {
         this.tesseract_group.position.set(0, 0.5, 2.75);
         //this.all_group.add(this.tesseract_group);
 
-        this.curr_spacing = 3;
+        this.start_spacing = 0;
+        this.curr_spacing = 0;
+        this.target_spacing = 0;
+
+        this.start_zoom = 1;
+        this.curr_zoom = 1;
+        this.target_zoom = 1;
 
         for (let i = 0; i < 3; i++) {
             for (let j = 0; j < 3; j++) {
@@ -884,6 +929,8 @@ class HyperRobot extends VisScene {
 
         this.circle_scale_base = 0.1;
         this.circle_scale_max = 1.0;
+
+        this.all_group.position.y = 0.5;
 
         this.scene.add(this.all_group);
 
@@ -1003,6 +1050,29 @@ class HyperRobot extends VisScene {
         }
     }
 
+    state_transition(old_state_idx, new_state_idx) {
+        if (new_state_idx == 0) {
+            this.start_spacing = this.curr_spacing;
+            this.target_spacing = 0;
+
+            this.start_zoom = this.curr_zoom;
+            this.target_zoom = 1;
+        } else if (new_state_idx == 1) {
+            this.start_spacing = this.curr_spacing;
+            this.target_spacing = 0;
+
+            this.start_zoom = this.curr_zoom;
+            this.target_zoom = 1;
+
+        } else if (new_state_idx == 2) {
+            this.start_spacing = this.curr_spacing;
+            this.target_spacing = 3;
+
+            this.start_zoom = this.curr_zoom;
+            this.target_zoom = 0.8;
+        }
+        this.state_change_clock.start();
+    }
 
     anim_frame(dt) {
         const div = 512;    // # of divisions per pi radians
@@ -1033,6 +1103,33 @@ class HyperRobot extends VisScene {
                 }*/
                 this.go_to_target = false;
             }
+        }
+
+
+        // Update spacing
+        const spacing_change_beats = 4;
+        {
+            const frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / spacing_change_beats, 0, 1);
+            this.curr_spacing = lerp_scalar(this.start_spacing, this.target_spacing, frac);
+            let idx = 0;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    let position = new THREE.Vector3((i - 1) * this.curr_spacing, 0,
+                        (j - 1) * this.curr_spacing);
+                    this.robots[idx].obj.position.copy(position);
+                    this.circles[idx].position.copy(position);
+                    idx++;
+                }
+            }
+        }
+
+        // Update zoom
+        const zoom_change_beats = 1;
+        {
+            const frac = clamp((this.state_change_clock.getElapsedTime() * beats_per_sec - spacing_change_beats) / zoom_change_beats, 0, 1);
+            this.curr_zoom = lerp_scalar(this.start_zoom, this.target_zoom, frac);
+            this.cam_orth.zoom = this.curr_zoom;
+            this.cam_orth.updateProjectionMatrix();
         }
 
 
@@ -1111,7 +1208,6 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
 
         this.overlay = document.getElementById("overlay");
-        this.overlay.style.display = "none";
         this.overlay_indicators = [];
         this.indicator_on_time_range = [];
         for (let i = 1; i <= 16; i++) {
@@ -1120,6 +1216,7 @@ class GraphicsContext {
             this.overlay_indicators.push(elem);
             this.indicator_on_time_range.push([]);
         }
+        this.overlay.style.display = "hidden";
 
 	this.canvas = document.getElementById('canvas');
 	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
@@ -1298,10 +1395,10 @@ class GraphicsContext {
                 this.set_tracer_params(1, 1, 1);
             }
         } else if (e.code == "Tab") {
-            if (this.overlay.style.display == 'none') {
-                this.overlay.style.display = 'block';
+            if (this.overlay.style.visibility == 'hidden') {
+                this.overlay.style.visibility = 'visible';
             } else {
-                this.overlay.style.display = 'none';
+                this.overlay.style.display = 'hidden';
             }
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);

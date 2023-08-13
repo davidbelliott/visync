@@ -104,8 +104,7 @@ function connect() {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
             env.bpm = msg.bpm;
-            const delay = 60 / msg.bpm - env.total_latency;
-            setTimeout(() => { context.handle_sync(msg.t, msg.bpm, msg.beat); }, delay * 1000);
+            context.handle_sync(msg.t, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
@@ -1014,7 +1013,7 @@ class HyperRobot extends VisScene {
 
     handle_sync(t, bpm, beat) {
         this.beat_clock.start();
-        if (this.beat_idx % 2 == 0) {
+        if (beat % 2 == 0) {
             // half-note beat
             this.half_beat_clock.start();
             this.circle_group.position.x = 0.75;
@@ -1195,11 +1194,11 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new HyperRobot(env),
+            new IntroScene(env),
             new HomeBackground(env),
             new CubeLockingScene(env),
             new Tracers(env),
             new IceCreamScene(env),
-            new IntroScene(env),
             new HexagonScene(env),
             new GantryScene(env),
             new SpectrumScene(env),
@@ -1407,13 +1406,17 @@ class GraphicsContext {
 
     handle_sync(t, bpm, beat) {
         const thirtysecond_note_dur = 60 / env.bpm / 8;
-        const start_t = this.clock.getElapsedTime() + 8 * thirtysecond_note_dur
-            - env.total_latency;
+        const delay = 8 * thirtysecond_note_dur - env.total_latency;
+        const start_t = this.clock.getElapsedTime() + delay;
         this.indicator_on_time_range[this.indicator_on_time_range.length - 1].push([
             start_t,
             start_t + thirtysecond_note_dur
         ]);
-        this.scenes[this.cur_scene_idx].handle_sync(t, bpm, beat);
+
+        setTimeout(() => {
+            console.log((beat + 1) % 4);
+            this.scenes[this.cur_scene_idx].handle_sync(t, bpm, (beat + 1) % 4);
+        }, delay * 1000);
     }
 
     handle_beat(t, channel) {

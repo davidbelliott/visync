@@ -18,7 +18,7 @@ import { Tesseract } from './highdim.js';
 
 export class CubeLockingScene extends VisScene {
     constructor(env) {
-        super(env);
+        super(env, 3);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -42,9 +42,10 @@ export class CubeLockingScene extends VisScene {
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
         this.beat_clock = new THREE.Clock(false);
-        this.scoop_clock = new THREE.Clock(false);
+        this.cam_clock = new THREE.Clock(false);
 
         this.base_group = new THREE.Group();
+        this.object_group = new THREE.Group();
         this.cones = [];
 
         this.ice_cream_color = new THREE.Color("white");
@@ -90,8 +91,11 @@ export class CubeLockingScene extends VisScene {
         this.cone_spacing = 7;
         this.cone_scale = 0.25;
 
+        this.start_cam_pos = this.cam_vbo.position.clone();
+        this.target_cam_pos = this.start_cam_pos.clone();
+        this.cam_movement_beats = 8;
+
         const this_class = this;
-        this.target_rot_multiplier = 1;
 
         loader.load(
             'stl/cube-locking.stl',
@@ -101,8 +105,9 @@ export class CubeLockingScene extends VisScene {
                 const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1 } );
                 let edges = new THREE.EdgesGeometry(geometry, 30);
                 let mesh = new THREE.LineSegments(edges, wireframe_mat);
-                this_class.base_group.add(mesh);
-                this_class.base_group.add(mesh_inner);
+                this_class.object_group.add(mesh);
+                this_class.object_group.add(mesh_inner);
+                this_class.cube_thing = mesh;
             },
             (xhr) => { },
             (error) => {
@@ -125,7 +130,8 @@ export class CubeLockingScene extends VisScene {
                 obj.position.set(32, 0, 20);
                 obj.scale.setScalar(5);
 
-                this_class.base_group.add(obj);
+                this_class.object_group.add(obj);
+                this_class.text = obj;
             },
             (xhr) => { },
             (error) => {
@@ -135,12 +141,16 @@ export class CubeLockingScene extends VisScene {
 
         //const cube = create_instanced_cube([3, 3, 3], 0x00ff00);
         //this.base_group.add(cube);
-        this.base_group.rotation.y = Math.PI / 4;
 
+        // rotation
+        this.start_rot = 2;
+        this.end_rot = 2;
+        this.rot_dir = 1;
+        this.object_group.rotation.y = this.start_rot * Math.PI / 8;
+
+        this.base_group.add(this.object_group);
         this.vbo_scene.add(this.base_group);
         this.base_group.rotation.x = isom_angle;
-
-        this.rot = 512 / 4;
 
         /*{
             this.fg_group = new THREE.Group();
@@ -164,6 +174,61 @@ export class CubeLockingScene extends VisScene {
 
     anim_frame(dt) {
         //this.base_group.rotation.y += dt * 0.1;
+
+        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_rotation = 1.0;
+        const t = this.sync_clock.getElapsedTime() * beats_per_sec;
+        const frac = clamp((t - (1 - beats_per_rotation)) / beats_per_rotation, 0, 1);
+        this.object_group.rotation.y = Math.PI / 8 * (this.start_rot +
+            lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
+
+        const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
+        const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
+        const cur_color = new THREE.Color();
+        cur_color.lerpColors(start_color, end_color, frac);
+        this.light.color.copy(cur_color);
+
+        const cam_frac = clamp(this.cam_clock.getElapsedTime() * beats_per_sec / this.cam_movement_beats, 0, 1);
+        this.cam_vbo.position.lerpVectors(this.start_cam_pos, this.target_cam_pos, cam_frac);
+    }
+
+    handle_sync(t, bpm, beat) {
+        this.sync_clock.start();
+        const beats_per_sec = this.env.bpm / 60;
+
+        if (this.do_rotation) {
+            if (Math.abs(this.end_rot) == 4) {
+                this.rot_dir *= -1;
+            }
+            this.start_rot = this.end_rot;
+            this.end_rot = this.start_rot + this.rot_dir;
+        }
+
+        if (this.do_movement) {
+            if (rand_int(0, 4) == 0 &&
+                    (!this.cam_clock.running) ||
+                    (this.cam_clock.getElapsedTime() * beats_per_sec > this.cam_movement_beats)) {
+                this.start_cam_pos.copy(this.target_cam_pos);
+                this.target_cam_pos.x *= -1;
+                this.cam_clock.start();
+            }
+        } else {
+            this.start_cam_pos.copy(this.target_cam_pos);
+            this.target_cam_pos.set(20, 6, 0);
+        }
+    }
+
+    state_transition(old_state_idx, new_state_idx) {
+        if (new_state_idx == 0) {
+            this.do_rotation = false;
+            this.do_movement = false;
+        } else if (new_state_idx == 1) {
+            this.do_rotation = true;
+            this.do_movement = false;
+        } else if (new_state_idx == 2) {
+            this.do_rotation = true;
+            this.do_movement = true;
+        }
     }
 
     render(renderer) {

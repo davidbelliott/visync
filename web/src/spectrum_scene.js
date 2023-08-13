@@ -81,7 +81,7 @@ class Signal {
 
 export class SpectrumScene extends VisScene {
     constructor(env) {
-        super(env);
+        super(env, 3);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -95,7 +95,6 @@ export class SpectrumScene extends VisScene {
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
 
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.line_length = this.frustum_size * aspect;
         this.ceiling_height = 5;
@@ -103,6 +102,7 @@ export class SpectrumScene extends VisScene {
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
+        this.state_change_clock = new THREE.Clock(false);
 
         this.base_group = new THREE.Group();
 
@@ -126,6 +126,7 @@ export class SpectrumScene extends VisScene {
             this.base_group.add(this.line);
         }
 
+        this.show_traces = false;
         this.traces = [];
         this.max_num_traces = 10;
         this.trace_spacing = this.line_length / this.num_divisions;
@@ -138,6 +139,7 @@ export class SpectrumScene extends VisScene {
                 marker.position.y = this.ceiling_height;
                 marker.position.z = this.line.position.z;
                 marker.material.opacity = 0.0;
+                marker.visible = this.show_traces;
                 this.markers.push(marker);
                 this.base_group.add(marker);
             }
@@ -163,8 +165,8 @@ export class SpectrumScene extends VisScene {
             this.base_group.add(front_mesh);
         }
 
-        this.base_group.rotation.x = isom_angle;
-        this.base_group.rotation.y = Math.PI / 4;
+        this.base_group.rotation.x = 0;
+        this.base_group.rotation.y = 0;
 
         this.scene.add(this.base_group);
         this.camera = this.cam_orth;
@@ -174,13 +176,17 @@ export class SpectrumScene extends VisScene {
             this.signals.push(new Signal(0.5, 2 * (this.ceiling_height - i)));
         }
 
-        this.rot = 1024 / 4;
+        this.target_rot_x = 0;
+        this.start_rot_x = 0;
+
+        this.rot = 0;
+        this.target_noise_ampl = 5.0;
+        this.start_noise_ampl = 5.0;
 
         this.elapsed_beats = 0.0;
     }
 
-    get_frequency_data() {
-        const noise_ampl = 0.3;
+    get_frequency_data(noise_ampl) {
         const sharpness = 40;
         const data = new Array(this.num_points).fill(0.0);
         for (const signal of this.signals) {
@@ -199,9 +205,25 @@ export class SpectrumScene extends VisScene {
     }
 
     anim_frame(dt) {
-        this.rot++;
         const beats_per_sec = this.env.bpm / 60;
-        let frequencyData = this.get_frequency_data();
+
+
+        if (this.rotating_y) {
+            this.rot++;
+        }
+        //const target_x_rot_delta = this.target_rot_x - this.base_group.rotation.x;
+        //this.base_group.rotation.x += Math.sign(target_x_rot_delta) * Math.min(Math.abs(target_x_rot_delta), 0.01);
+        //
+
+        // Handle state change X rotation
+        const x_rot_beats = 8;
+        const x_rot_frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / x_rot_beats, 0, 1);
+        this.base_group.rotation.x = lerp_scalar(this.start_rot_x, this.target_rot_x, x_rot_frac);
+
+        // Handle noise level change
+        const noise_ampl = lerp_scalar(this.start_noise_ampl, this.target_noise_ampl, x_rot_frac);
+
+        let frequencyData = this.get_frequency_data(noise_ampl);
 
         const clock_dt = this.clock.getDelta();
         this.elapsed_beats += clock_dt * beats_per_sec;
@@ -236,6 +258,43 @@ export class SpectrumScene extends VisScene {
         this.base_group.rotation.y = this.rot * Math.PI / 1024;
     }
 
+    state_transition(old_state_idx, new_state_idx) {
+        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
+        if (new_state_idx == 0) {
+            this.start_rot_x = this.base_group.rotation.x;
+            this.target_rot_x = 0;
+            this.rotating_y = false;
+            this.start_noise_ampl = this.target_noise_ampl;
+            this.target_noise_ampl = 5.0;
+            this.doubletime = false;
+            this.show_traces = false;
+        } else if (new_state_idx == 1) {
+            this.start_rot_x = this.base_group.rotation.x;
+            this.target_rot_x = isom_angle;
+            this.rotating_y = true;
+            this.start_noise_ampl = this.target_noise_ampl;
+            this.target_noise_ampl = 1.0;
+            this.doubletime = false;
+            this.show_traces = true;
+        } else if (new_state_idx == 2) {
+            this.start_rot_x = this.base_group.rotation.x;
+            this.target_rot_x = isom_angle;
+            this.rotating_y = true;
+            this.start_noise_ampl = this.target_noise_ampl;
+            this.target_noise_ampl = 0.3;
+            this.doubletime = true;
+            this.show_traces = true;
+        }
+        for (const trace of this.traces) {
+            trace.visible = this.show_traces;
+        }
+
+        for (const marker of this.markers) {
+            marker.visible = this.show_traces;
+        }
+        this.state_change_clock.start();
+    }
+
     handle_sync(t, bpm, beat) {
         this.sync_clock.start();
         const edge_margin = this.trace_spacing / this.line_length;
@@ -264,12 +323,14 @@ export class SpectrumScene extends VisScene {
                 trace.material.opacity = 1.0;
                 trace.geometry.getAttribute('position').array = this.positions.slice();
                 trace.geometry.getAttribute('position').needsUpdate = true;
+                trace.visible = this.show_traces;
                 this.traces.push(trace);
             } else {
                 const trace = this.line.clone();
                 trace.material = new THREE.LineBasicMaterial({ color: "cyan", linewidth: 1, transparent: true });
                 trace.geometry = new THREE.BufferGeometry();
                 trace.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions.slice(), 3));
+                trace.visible = this.show_traces;
                 this.traces.push(trace);
                 this.base_group.add(trace);
             }

@@ -113,7 +113,7 @@ export class CubeLockingScene extends VisScene {
             (error) => {
                 console.log(error)
             }
-        )
+        );
 
         loader.load(
             'stl/text.stl',

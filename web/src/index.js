@@ -14,6 +14,7 @@ import { IntroScene } from './intro_scene.js';
 import { IceCreamScene } from './ice_cream_scene.js';
 import { FastCubeScene } from './fast_cube_scene.js';
 import { CubeLockingScene } from './cube_locking_scene.js';
+import { SpinningRobotsScene } from './spinning_robots_scene.js';
 
 import {
     lerp_scalar,
@@ -25,6 +26,7 @@ import {
     arr_eq,
     clamp
 } from './util.js';
+import { BoxDef } from './geom_def.js';
 
 import css_normalize from "./normalize.css";
 import css_style from "./style.css";
@@ -89,13 +91,13 @@ function init() {
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    context.change_scene(1);
+    context.change_scene(0);
     animate();
 }
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    const socket = new WebSocket(`ws://192.168.1.1:8080`);
+    const socket = new WebSocket(`ws://music:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -717,69 +719,6 @@ class HomeBackground extends VisScene {
     }
 }
 
-class GeomDef {
-    constructor(coords, children=new Map()) {
-        this.coords = coords;
-        this.children = children;
-        this.mesh = null;
-    }
-
-    create() {
-        const group = new THREE.Group();
-        for (const [i, c] of this.children) {
-            group.add(c.create());
-        }
-        this.mesh = group;
-        this.mesh.position.set(...this.coords);
-        return this.mesh;
-    }
-}
-
-class BoxDef extends GeomDef {
-    constructor(coords, dims, children=new Map()) {
-        super(coords, children);
-        this.dims = dims;
-    }
-    create() {
-        super.create();
-        const created_mesh = create_instanced_cube(this.dims, "yellow");
-        /*let geometry = new THREE.BoxGeometry(...this.dims);
-        let wireframe = new THREE.EdgesGeometry(geometry);
-        const wireframe_mat = new THREE.LineBasicMaterial( { color: "yellow", linewidth: 1 } );
-        this.mesh.add(new THREE.LineSegments(wireframe, wireframe_mat));
-
-        const inner_dims = [...this.dims];
-        for (const i in inner_dims) {
-            inner_dims[i] *= 0.97;
-        }
-        const fill_mat = new THREE.MeshBasicMaterial( { color: "black" } );
-        const inner_geom = new THREE.BoxGeometry(...inner_dims);
-        this.mesh.add(new THREE.Mesh(inner_geom, fill_mat));*/
-        this.mesh.add(created_mesh);
-        return this.mesh;
-    }
-}
-
-
-class LineDef extends GeomDef {
-    constructor(coords, children=new Map()) {
-        super(coords, children);
-        this.coords = coords;
-    }
-    create() {
-        super.create();
-        const line_mat = new THREE.LineBasicMaterial({color: "yellow"});
-        const points = [];
-        for (const i in this.coords) {
-            points.push(new THREE.Vector3(...(this.coords[i])));
-        }
-        const geom = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geom, line_mat);
-        this.mesh.add(line);
-        return this.mesh;
-    }
-}
-
 
 const RobotParts = {
     TORSO: 0,
@@ -806,7 +745,7 @@ class Robot {
                 [RobotParts.HANDS[side], this.cube_defs[RobotParts.HANDS[side]]]
             ]);
             this.cube_defs[RobotParts.ARMS[side]] = new BoxDef([sign * 1.75, 0.5, 1.75], [0.5, 0.5, 2.0],
-                arm_children);
+                "yellow", arm_children);
         }
 
         this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
@@ -826,7 +765,7 @@ class Robot {
             [RobotParts.EYES, this.cube_defs[RobotParts.EYES]]]);
 
         this.cube_defs[RobotParts.HEAD] = new BoxDef([0, 1.75, 0], [2.0, 1.0, 2.0],
-            head_children);
+            "yellow", head_children);
 
         const torso_children = new Map([
             [RobotParts.HEAD, this.cube_defs[RobotParts.HEAD]],
@@ -835,7 +774,7 @@ class Robot {
             [RobotParts.LEGS[0], this.cube_defs[RobotParts.LEGS[0]]],
             [RobotParts.LEGS[1], this.cube_defs[RobotParts.LEGS[1]]]]);
 
-        this.cube_defs[RobotParts.TORSO] = new BoxDef([0, 1, 0], [3, 2, 1], torso_children);
+        this.cube_defs[RobotParts.TORSO] = new BoxDef([0, 1, 0], [3, 2, 1], "yellow", torso_children);
 
         this.cube_defs[RobotParts.FEET[0]] = new BoxDef([-0.75, -2, 0], [1.5, 0.5, 2.0]);
         this.cube_defs[RobotParts.FEET[1]] = new BoxDef([0.75, -2, 0], [1.5, 0.5, 2.0]);
@@ -1193,6 +1132,7 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new SpinningRobotsScene(env),
             new HyperRobot(env),
             new IntroScene(env),
             new HomeBackground(env),
@@ -1207,6 +1147,7 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
 
         this.overlay = document.getElementById("overlay");
+
         this.overlay_indicators = [];
         this.indicator_on_time_range = [];
         for (let i = 1; i <= 16; i++) {
@@ -1215,7 +1156,7 @@ class GraphicsContext {
             this.overlay_indicators.push(elem);
             this.indicator_on_time_range.push([]);
         }
-        this.overlay.style.display = "hidden";
+        this.overlay.style.display = "none";
 
 	this.canvas = document.getElementById('canvas');
 	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
@@ -1389,7 +1330,8 @@ class GraphicsContext {
             this.change_scene(scene_idx);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
-                this.set_tracer_params(8, 4, 0.7);
+                //this.set_tracer_params(8, 4, 0.7);
+                this.set_tracer_params(8, 1, 0.7);
             } else {
                 this.set_tracer_params(1, 1, 1);
             }

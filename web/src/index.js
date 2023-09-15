@@ -9,6 +9,7 @@ import { Tesseract } from './highdim.js';
 import { VisScene } from './vis_scene.js';
 import { GantryScene } from './gantry_scene.js';
 import { HexagonScene } from './hexagon_scene.js';
+import { SlideScene } from './slide_scene.js';
 import { SpectrumScene } from './spectrum_scene.js';
 import { IntroScene } from './intro_scene.js';
 import { IceCreamScene } from './ice_cream_scene.js';
@@ -1132,6 +1133,7 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new SlideScene(env, ["img/cover.png", "img/rat.png"]),
             new SpinningRobotsScene(env),
             new HyperRobot(env),
             new IntroScene(env),
@@ -1146,17 +1148,17 @@ class GraphicsContext {
         ];
         this.cur_scene_idx = 0;
 
-        this.overlay = document.getElementById("overlay");
+        this.debug_overlay = document.getElementById("debug-overlay");
 
         this.overlay_indicators = [];
         this.indicator_on_time_range = [];
         for (let i = 1; i <= 16; i++) {
             const elem = document.createElement("div");
-            this.overlay.appendChild(elem);
+            this.debug_overlay.appendChild(elem);
             this.overlay_indicators.push(elem);
             this.indicator_on_time_range.push([]);
         }
-        this.overlay.style.display = "none";
+        this.debug_overlay.style.display = "none";
 
 	this.canvas = document.getElementById('canvas');
 	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
@@ -1336,10 +1338,10 @@ class GraphicsContext {
                 this.set_tracer_params(1, 1, 1);
             }
         } else if (e.code == "Tab") {
-            if (this.overlay.style.visibility == 'hidden') {
-                this.overlay.style.visibility = 'visible';
+            if (this.debug_overlay.style.visibility == 'hidden') {
+                this.debug_overlay.style.visibility = 'visible';
             } else {
-                this.overlay.style.display = 'hidden';
+                this.debug_overlay.style.display = 'hidden';
             }
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);

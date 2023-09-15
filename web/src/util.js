@@ -107,19 +107,20 @@ export function make_wireframe_cylinder(r_top, r_bottom, height, color) {
     const c_top = make_wireframe_circle(r_top, 32, color);
     c_top.rotation.x = Math.PI / 2;
     c_top.position.y = height / 2;
-    ls.add(c_top);
+    //ls.add(c_top);
     const c_bot = make_wireframe_circle(r_bottom, 32, color);
     c_bot.rotation.x = Math.PI / 2;
     c_bot.position.y = -height / 2;
-    ls.add(c_bot);
+    //ls.add(c_bot);
     const fill_geometry = new THREE.CylinderGeometry(r_top, r_bottom, height, 32);
     fill_geometry.scale(0.99, 0.99, 0.99);
-    const fill_mat = new THREE.MeshBasicMaterial({
+    /*const fill_mat = new THREE.MeshBasicMaterial({
         color: "black",
         polygonOffset: true,
         polygonOffsetFactor: 1, // positive value pushes polygon further away
         polygonOffsetUnits: 1
-    });
+    });*/
+    const fill_mat = new THREE.MeshLambertMaterial({color: color});
     const mesh = new THREE.Mesh(fill_geometry, fill_mat);
     ls.add(mesh);
 
@@ -131,8 +132,8 @@ export function make_wireframe_cylinder(r_top, r_bottom, height, color) {
     const line_2 = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(r_top, height / 2, 0),
         new THREE.Vector3(r_bottom, -height / 2, 0)]);
-    ls.add(new THREE.Line(line_1, line_mat));
-    ls.add(new THREE.Line(line_2, line_mat));
+    //ls.add(new THREE.Line(line_1, line_mat));
+    //ls.add(new THREE.Line(line_2, line_mat));
 
     return ls;
 }

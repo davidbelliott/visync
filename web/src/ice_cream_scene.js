@@ -63,7 +63,7 @@ export class IceCreamScene extends VisScene {
         });
 
         this.vbo_scene = new THREE.Scene();
-        this.ice_cream_color = new THREE.Color("yellow");
+        this.ice_cream_color = new THREE.Color("orange");
 
 
         const loader = new STLLoader();
@@ -118,18 +118,20 @@ export class IceCreamScene extends VisScene {
 
         {
             this.fg_group = new THREE.Group();
-            this.tub = make_wireframe_cylinder(4, 3, 7, "white");
+            //this.tub = make_wireframe_cylinder(4, 3, 7, "white");
+            this.tub = make_wireframe_cylinder(4, 4, 8, "orange");
             this.front_decal = make_wireframe_circle(2, 32, this.ice_cream_color);
             this.front_decal.position.z = 3.5;
             this.front_decal.rotation.x = Math.atan(1 / 7);
-            this.tub.add(this.front_decal);
-            this.lid = make_wireframe_cylinder(4.25, 4.25, 1.5, "white");
+            //this.tub.add(this.front_decal);
+            this.lid = make_wireframe_cylinder(4.25, 4.25, 1.5, "orange");
             this.lid.position.y = this.lid_base_y;
             this.fg_group.add(this.tub);
             this.fg_group.add(this.lid);
             this.fg_group.rotation.x = Math.PI / 8;
             this.fg_group.position.y = -3;
-            this.scene.add(this.fg_group);
+            //this.scene.add(this.fg_group);
+            this.base_group.add(this.fg_group);
         }
 
         this.start_lid_y_offset = 0;

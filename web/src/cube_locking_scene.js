@@ -16,6 +16,39 @@ import {
 } from './util.js';
 import { Tesseract } from './highdim.js';
 
+class CustomSinCurve extends THREE.Curve {
+    constructor( scale = 1 ) {
+            super();
+            this.scale = scale;
+    }
+
+    getPoint( t, optionalTarget = new THREE.Vector3() ) {
+        const plane_idx = 0;
+        const plane_frac = t;
+
+        const seg_idx = Math.floor(plane_frac * 3);
+        const seg_frac = plane_frac * 3 - seg_idx;
+        const separation = this.scale / 3;
+        const r = separation / 2;
+        const arc_frac_of_total_length = Math.PI * r / (Math.PI * r + this.scale);
+        const arc_frac = clamp((seg_frac - (1 - arc_frac_of_total_length)) / arc_frac_of_total_length, 0, 1);
+        const non_arc_frac = (seg_frac - arc_frac) / (1 - arc_frac_of_total_length);
+        let tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** seg_idx;
+        let ty = separation * (seg_idx - 1);
+        if (arc_frac > 0) {
+            tx = (this.scale / 2 + Math.sin(Math.PI * arc_frac) * r) * (-1) ** seg_idx;
+            ty -= (Math.cos(Math.PI * arc_frac) - 1) * r;
+            console.log(arc_frac);
+        } else {
+
+
+        }
+        const tz = separation * (plane_idx - 1);
+        return optionalTarget.set( tx, ty, tz );
+    }
+}
+
+
 export class CubeLockingScene extends VisScene {
     constructor(env) {
         super(env, 3);
@@ -25,7 +58,7 @@ export class CubeLockingScene extends VisScene {
 
 
         const aspect = width / height;
-        this.frustum_size = 60;
+        this.frustum_size = 40;
         this.cam_vbo = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
@@ -33,7 +66,7 @@ export class CubeLockingScene extends VisScene {
             -this.frustum_size / 2, -1000, 1000);
 
         this.camera = this.cam_vbo.clone();
-        this.cam_vbo.position.set(20, 6, 0);
+        this.cam_vbo.position.set(0, 0, 100);
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
@@ -48,7 +81,7 @@ export class CubeLockingScene extends VisScene {
         this.object_group = new THREE.Group();
         this.cones = [];
 
-        this.ice_cream_color = new THREE.Color("white");
+        this.ice_cream_color = new THREE.Color("magenta");
 
 
         this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/dither.frag');
@@ -81,15 +114,18 @@ export class CubeLockingScene extends VisScene {
             polygonOffsetUnits: 1
         });*/
         this.ice_cream_cone_mat.flatShading = false;
-        this.light = new THREE.PointLight("magenta", 0.7, 100 );
+        this.light = new THREE.PointLight("white", 1.0, 100 );
         this.light.position.set(0, 0, 40);
         this.base_group.add(this.light);
 
-        this.light2 = new THREE.PointLight("blue", 0.75, 100 );
+        this.light2 = new THREE.PointLight("white", 1.0, 100 );
         this.light2.position.set(50, 0, 0);
         this.cones_per_side = 7;
         this.cone_spacing = 7;
         this.cone_scale = 0.25;
+
+        this.light3 = new THREE.DirectionalLight("white", 1.0);
+        this.scene.add(this.light3);
 
         this.start_cam_pos = this.cam_vbo.position.clone();
         this.target_cam_pos = this.start_cam_pos.clone();
@@ -105,7 +141,7 @@ export class CubeLockingScene extends VisScene {
                 const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1 } );
                 let edges = new THREE.EdgesGeometry(geometry, 30);
                 let mesh = new THREE.LineSegments(edges, wireframe_mat);
-                this_class.object_group.add(mesh);
+                //this_class.object_group.add(mesh);
                 this_class.object_group.add(mesh_inner);
                 this_class.cube_thing = mesh;
             },
@@ -114,39 +150,26 @@ export class CubeLockingScene extends VisScene {
                 console.log(error)
             }
         );
-
-        loader.load(
-            'stl/text.stl',
-            function (geometry) {
-                const mesh_inner = new THREE.Mesh(geometry, this_class.ice_cream_cone_mat)
-
-                const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1 } );
-                let edges = new THREE.EdgesGeometry(geometry, 30);
-                let mesh = new THREE.LineSegments(edges, wireframe_mat);
-                let obj = new THREE.Object3D();
-                obj.add(mesh);
-                obj.add(mesh_inner);
-
-                obj.position.set(32, 0, 20);
-                obj.scale.setScalar(5);
-
-                this_class.object_group.add(obj);
-                this_class.text = obj;
-            },
-            (xhr) => { },
-            (error) => {
-                console.log(error)
-            }
-        )
-
         //const cube = create_instanced_cube([3, 3, 3], 0x00ff00);
         //this.base_group.add(cube);
+
+
+        const path = new CustomSinCurve( 24 );
+        this.tube_geometry = new THREE.TubeGeometry( path, 1024, 2, 32, false );
+        const material = new THREE.MeshLambertMaterial({ color: 'white',
+            side: THREE.DoubleSide});
+        const mesh = new THREE.Mesh( this.tube_geometry, material );
+        this.object_group.add( mesh );
+        this.draw_range = 0;
+
+
+
 
         // rotation
         this.start_rot = 2;
         this.end_rot = 2;
         this.rot_dir = 1;
-        this.object_group.rotation.y = this.start_rot * Math.PI / 8;
+        //this.object_group.rotation.y = this.start_rot * Math.PI / 8;
 
         this.base_group.add(this.object_group);
         this.vbo_scene.add(this.base_group);
@@ -173,17 +196,19 @@ export class CubeLockingScene extends VisScene {
     }
 
     anim_frame(dt) {
-        //this.base_group.rotation.y += dt * 0.1;
+        this.object_group.rotation.y += dt * 0.1;
+        this.draw_range += 360;
+        //this.tube_geometry.setDrawRange(this.draw_range, 9000);
 
         const beats_per_sec = this.env.bpm / 60;
         const beats_per_rotation = 1.0;
         const t = this.sync_clock.getElapsedTime() * beats_per_sec;
         const frac = clamp((t - (1 - beats_per_rotation)) / beats_per_rotation, 0, 1);
-        this.object_group.rotation.y = Math.PI / 8 * (this.start_rot +
-            lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
+        //this.object_group.rotation.y = Math.PI / 8 * (this.start_rot +
+            //lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
 
-        const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
-        const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
+        const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "white" : "white"));
+        const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "white" : "white"));
         const cur_color = new THREE.Color();
         cur_color.lerpColors(start_color, end_color, frac);
         this.light.color.copy(cur_color);

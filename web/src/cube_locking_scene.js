@@ -23,27 +23,73 @@ class CustomSinCurve extends THREE.Curve {
     }
 
     getPoint( t, optionalTarget = new THREE.Vector3() ) {
-        const plane_idx = 0;
-        const plane_frac = t;
-
-        const seg_idx = Math.floor(plane_frac * 3);
-        const seg_frac = plane_frac * 3 - seg_idx;
+        const seg_idx = Math.floor(t * 8);
+        const seg_frac = t * 8 - seg_idx;
         const separation = this.scale / 3;
         const r = separation / 2;
         const arc_frac_of_total_length = Math.PI * r / (Math.PI * r + this.scale);
         const arc_frac = clamp((seg_frac - (1 - arc_frac_of_total_length)) / arc_frac_of_total_length, 0, 1);
-        const non_arc_frac = (seg_frac - arc_frac) / (1 - arc_frac_of_total_length);
+        const non_arc_frac = clamp(seg_frac / (1 - arc_frac_of_total_length), 0, 1);
         let tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** seg_idx;
         let ty = separation * (seg_idx - 1);
-        if (arc_frac > 0) {
-            tx = (this.scale / 2 + Math.sin(Math.PI * arc_frac) * r) * (-1) ** seg_idx;
-            ty -= (Math.cos(Math.PI * arc_frac) - 1) * r;
-            console.log(arc_frac);
-        } else {
+        let tz = -separation;
 
+        const sin_part = (Math.sin(Math.PI * arc_frac) * r) * (-1) ** seg_idx
+        const cos_part = (Math.cos(Math.PI * arc_frac) - 1) * r;
 
+        if (seg_idx < 3) {
+            tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** seg_idx;
+            ty = separation * (seg_idx - 1);
+            tz = -separation;
+
+            if (arc_frac > 0) {
+                if (seg_idx < 2) {
+                    tx += sin_part;
+                    ty -= cos_part;
+                } else {
+                    tx += sin_part;
+                    tz -= cos_part;
+                }
+            }
+        } else if (seg_idx < 5) {
+            tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** (seg_idx);
+            ty = separation;
+            tz = separation * (seg_idx - 3);;
+
+            if (arc_frac > 0) {
+                if (seg_idx < 4) {
+                    tx += sin_part;
+                    tz -= cos_part;
+                } else {
+                    tx += sin_part;
+                    ty += cos_part;
+                }
+            }
+        } else if (seg_idx < 7) {
+            tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** (seg_idx);
+            ty = -(seg_idx - 5) * separation;
+            tz = separation;
+
+            if (arc_frac > 0) {
+                if (seg_idx < 6) {
+                    tx += sin_part;
+                    ty += cos_part;
+                } else {
+                    tx += sin_part;
+                    tz += cos_part;
+                }
+            }
+        }else if (seg_idx <= 8) {
+            tx = (this.scale * non_arc_frac - this.scale / 2) * (-1) ** (seg_idx);
+            ty = -separation;
+            tz = -(seg_idx - 7) * separation;
+
+            if (arc_frac > 0) {
+                tx += sin_part;
+                tz += cos_part;
+            }
         }
-        const tz = separation * (plane_idx - 1);
+
         return optionalTarget.set( tx, ty, tz );
     }
 }
@@ -81,7 +127,7 @@ export class CubeLockingScene extends VisScene {
         this.object_group = new THREE.Group();
         this.cones = [];
 
-        this.ice_cream_color = new THREE.Color("magenta");
+        this.ice_cream_color = new THREE.Color("cyan");
 
 
         this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/dither.frag');
@@ -124,7 +170,7 @@ export class CubeLockingScene extends VisScene {
         this.cone_spacing = 7;
         this.cone_scale = 0.25;
 
-        this.light3 = new THREE.DirectionalLight("white", 1.0);
+        this.light3 = new THREE.DirectionalLight("white", 5.0);
         this.scene.add(this.light3);
 
         this.start_cam_pos = this.cam_vbo.position.clone();
@@ -155,11 +201,23 @@ export class CubeLockingScene extends VisScene {
 
 
         const path = new CustomSinCurve( 24 );
-        this.tube_geometry = new THREE.TubeGeometry( path, 1024, 2, 32, false );
-        const material = new THREE.MeshLambertMaterial({ color: 'white',
-            side: THREE.DoubleSide});
-        const mesh = new THREE.Mesh( this.tube_geometry, material );
-        this.object_group.add( mesh );
+        this.tube_geometries = [];
+
+        for (let i = 0; i < 3; i++) {
+            const tube_geom = new THREE.TubeGeometry( path, 1024, 2, 32, false );
+            if (i == 1) {
+                tube_geom.rotateY(Math.PI / 2);
+            } else if (i == 2) {
+                tube_geom.rotateZ(Math.PI / 2);
+            }
+            this.tube_geometries.push(tube_geom);
+
+            const material = new THREE.MeshLambertMaterial({ color: 'white',
+                side: THREE.DoubleSide});
+            const mesh = new THREE.Mesh( tube_geom, material );
+            this.object_group.add( mesh );
+        }
+
         this.draw_range = 0;
 
 
@@ -196,9 +254,13 @@ export class CubeLockingScene extends VisScene {
     }
 
     anim_frame(dt) {
-        this.object_group.rotation.y += dt * 0.1;
-        this.draw_range += 360;
-        //this.tube_geometry.setDrawRange(this.draw_range, 9000);
+        this.object_group.rotation.y += dt * 0.5;
+        this.draw_range = (this.draw_range + 360);
+        for (let i = 0; i < 3; i++) {
+            const offset = (2 - i) * 39000;
+            const this_range = (this.draw_range + offset) % (this.tube_geometries[0].index.count);
+            this.tube_geometries[i].setDrawRange(this_range, 9000);
+        }
 
         const beats_per_sec = this.env.bpm / 60;
         const beats_per_rotation = 1.0;

@@ -3,20 +3,20 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { LightningStrike } from 'three/examples/jsm/geometries/LightningStrike.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { Tesseract } from './highdim.js';
-import { VisScene } from './vis_scene.js';
-import { GantryScene } from './gantry_scene.js';
-import { HexagonScene } from './hexagon_scene.js';
-import { SlideScene } from './slide_scene.js';
-import { SpectrumScene } from './spectrum_scene.js';
-import { IntroScene } from './intro_scene.js';
-import { IceCreamScene } from './ice_cream_scene.js';
-import { FastCubeScene } from './fast_cube_scene.js';
-import { CubeLockingScene } from './cube_locking_scene.js';
-import { SpinningRobotsScene } from './spinning_robots_scene.js';
+import { LightningStrike } from './src/lightning_strike.js';
+import { Tesseract } from './src/highdim.js';
+import { VisScene } from './src/vis_scene.js';
+import { GantryScene } from './src/gantry_scene.js';
+import { HexagonScene } from './src/hexagon_scene.js';
+import { SlideScene } from './src/slide_scene.js';
+import { SpectrumScene } from './src/spectrum_scene.js';
+import { IntroScene } from './src/intro_scene.js';
+import { IceCreamScene } from './src/ice_cream_scene.js';
+import { FastCubeScene } from './src/fast_cube_scene.js';
+import { CubeLockingScene } from './src/cube_locking_scene.js';
+import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
 
 
 import {
@@ -28,11 +28,11 @@ import {
     rand_int,
     arr_eq,
     clamp
-} from './util.js';
-import { BoxDef } from './geom_def.js';
+} from './src/util.js';
+import { BoxDef } from './src/geom_def.js';
 
-import css_normalize from "./normalize.css";
-import css_style from "./style.css";
+import "./src/normalize.css";
+import "./src/style.css";
 
 
 const SCALE_LERP_RATE = 5;
@@ -93,13 +93,13 @@ function createOutline( scene, camera, objectsArray, visibleColor ) {
 function init() {
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
-    document.body.appendChild( VRButton.createButton( context.renderer ) );
     connect();
     context.change_scene(0);
     animate();
 }
 
 function connect() {
+    return;
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
     const socket = new WebSocket(`ws://192.168.1.22:8080`);
     socket.addEventListener('message', function(e) {
@@ -1136,12 +1136,12 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new HomeBackground(env),
             new CubeLockingScene(env),
             new SlideScene(env, ["img/cover.png", "img/rat.png"]),
             new SpinningRobotsScene(env),
             new HyperRobot(env),
             new IntroScene(env),
-            new HomeBackground(env),
             new Tracers(env),
             new IceCreamScene(env),
             new HexagonScene(env),
@@ -1162,13 +1162,17 @@ class GraphicsContext {
             this.indicator_on_time_range.push([]);
         }
         this.debug_overlay.style.display = "none";
-
-	this.canvas = document.getElementById('canvas');
-	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas });
+        this.container = document.createElement( 'div' );
+        document.body.appendChild(this.container);
+	this.renderer = new THREE.WebGLRenderer();
 	this.renderer.setClearColor(BG_COLOR);
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.xr.enabled = true
+        this.container.appendChild(this.renderer.domElement);
+
+        document.body.appendChild( VRButton.createButton(this.renderer) );
+
         this.composer = new EffectComposer(this.renderer);
 
         // Plane in orthographic view with custom shaders for tracers

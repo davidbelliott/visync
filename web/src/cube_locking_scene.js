@@ -11,8 +11,11 @@ import {
     arr_eq,
     create_instanced_cube,
     make_wireframe_cylinder,
+    make_wireframe_cube,
     make_wireframe_circle,
-    ShaderLoader
+    ShaderLoader,
+    Spark,
+    ObjectPool
 } from './util.js';
 import { Tesseract } from './highdim.js';
 
@@ -119,9 +122,11 @@ export class CubeLockingScene extends VisScene {
         this.scene = new THREE.Scene();
         this.vbo_scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
-        this.sync_clock = new THREE.Clock(false);
+        this.rot_clock = new THREE.Clock(false);
         this.beat_clock = new THREE.Clock(false);
         this.cam_clock = new THREE.Clock(false);
+
+        this.beats_per_rotation = 8;
 
         this.base_group = new THREE.Group();
         this.object_group = new THREE.Group();
@@ -171,18 +176,48 @@ export class CubeLockingScene extends VisScene {
             function (geometry) {
                 const mesh_inner = new THREE.Mesh(geometry, this_class.object_material)
 
-                const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1 } );
+                const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1, transparent: true } );
                 let edges = new THREE.EdgesGeometry(geometry, 30);
                 let mesh = new THREE.LineSegments(edges, wireframe_mat);
                 this_class.object_group.add(mesh);
                 this_class.object_group.add(mesh_inner);
                 this_class.cube_thing = mesh;
+
             },
             (xhr) => { },
             (error) => {
                 console.log(error)
             }
         );
+        this.cubes = [];
+        this.cube_wireframe = new THREE.Group();
+        for (let i = 1; i < 2; i++) {
+            for (let j = 1; j < 2; j++) {
+                for (let k = 1; k < 2; k++) {
+                    //if ((i + j + k) % 2 == 0) {
+                        const c = make_wireframe_cube([24, 24, 24], "white");
+                        c.position.set((i - 1) * 8, (j - 1) * 8, (k - 1) * 8);
+                        c.material.depthTest = false;
+                        c.material.transparent = true;
+                        c.material.opacity = 0.8;
+                        this.cube_wireframe.add(c);
+                        this.cubes.push(c);
+                    //}
+                }
+            }
+        }
+
+        this.base_group.rotation.x = isom_angle;
+
+        this.fg_group = this.base_group.clone();
+        this.fg_group.renderOrder = 1;
+        this.fg_group.add(this.cube_wireframe);
+        this.scene.add(this.fg_group);
+
+        const spark_constructor = () => { return new Spark(1.0, "white", [0, 1]); };
+        this.spark_pool = new ObjectPool(spark_constructor, 64);
+        this.object_group.add(this.spark_pool);
+
         //const cube = create_instanced_cube([3, 3, 3], 0x00ff00);
         //this.base_group.add(cube);
 
@@ -218,8 +253,6 @@ export class CubeLockingScene extends VisScene {
 
         this.base_group.add(this.object_group);
         this.vbo_scene.add(this.base_group);
-        this.base_group.rotation.x = isom_angle;
-
         /*{
             this.fg_group = new THREE.Group();
             this.tub = make_wireframe_cylinder(4, 3, 7, "white");
@@ -249,42 +282,68 @@ export class CubeLockingScene extends VisScene {
         }
 
         const beats_per_sec = this.env.bpm / 60;
-        const beats_per_rotation = 1.0;
-        const t = this.sync_clock.getElapsedTime() * beats_per_sec;
-        const frac = clamp((t - (1 - beats_per_rotation)) / beats_per_rotation, 0, 1);
-        this.object_group.rotation.y = Math.PI / 8 * (this.start_rot +
-            lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
 
-        const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
-        const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
-        const cur_color = new THREE.Color();
-        cur_color.lerpColors(start_color, end_color, frac);
-        //this.object_material.color.copy(cur_color);
+        // Handle rotation
+        {
+            const t = this.rot_clock.getElapsedTime() * beats_per_sec;
+            const frac = clamp(t / this.beats_per_rotation, 0, 1);
+            const cur_rot = Math.PI / 2 * (0.5 + this.start_rot +
+                lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot))
+            this.object_group.rotation.y = cur_rot;
+            this.fg_group.rotation.y = cur_rot;
+
+            const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
+            const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
+            const cur_color = new THREE.Color();
+            cur_color.lerpColors(start_color, end_color, frac);
+            this.object_material.color.copy(cur_color);
+        }
+
+        // Update sparks
+        this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
+
+        // Handle expanding outline
+        {
+            const beats_per_expansion = 1.0;
+            let frac = 1;
+            if (this.beat_clock.running) {
+                const t = this.beat_clock.getElapsedTime() * beats_per_sec;
+                frac = clamp(t / beats_per_expansion - 0.1, 0, 1);
+            }
+            for (const c of this.cubes) {
+                c.material.opacity = 0.8 * (1.0 - frac);
+                c.scale.setScalar(1 + 2 * frac);
+            }
+        }
     }
 
     handle_sync(t, bpm, beat) {
-        this.sync_clock.start();
-        const beats_per_sec = this.env.bpm / 60;
-
-        if (this.do_rotation) {
-            if (Math.abs(this.end_rot) == 4) {
-                this.rot_dir *= -1;
-            }
+        console.log(beat);
+        if (beat % this.beats_per_rotation == 0 && this.do_rotation) {
+            this.rot_clock.start();
             this.start_rot = this.end_rot;
             this.end_rot = this.start_rot + this.rot_dir;
+            console.log(this.start_rot);
         }
+        const beats_per_sec = this.env.bpm / 60;
+    }
+
+    handle_beat(t, channel) {
+        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        setTimeout(() => {
+            if (channel == 1) {
+                this.beat_clock.start();
+            } else if (channel == 2) {
+                this.create_spark();
+            }
+        }, delay * 1000);
     }
 
     state_transition(old_state_idx, new_state_idx) {
         if (new_state_idx == 0) {
             this.do_rotation = false;
-            this.do_movement = false;
         } else if (new_state_idx == 1) {
             this.do_rotation = true;
-            this.do_movement = false;
-        } else if (new_state_idx == 2) {
-            this.do_rotation = true;
-            this.do_movement = true;
         }
     }
 
@@ -303,5 +362,16 @@ export class CubeLockingScene extends VisScene {
         renderer.clearDepth();
         renderer.render(this.scene, this.camera);
         renderer.autoClearColor = true;
+    }
+
+    create_spark() {
+        const vel = new THREE.Vector3(0, -20, 0);
+        const pos = new THREE.Vector3(8 * rand_int(-1, 2), 40, 8 * rand_int(-1, 2));
+        const spark = this.spark_pool.get_pool_object();
+        spark.active = true;
+        spark.position.copy(pos);
+        spark.velocity = vel;
+        spark.acceleration.set(0, 0, 0);
+        spark.material.color.set("white");
     }
 }

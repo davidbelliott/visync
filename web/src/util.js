@@ -139,6 +139,15 @@ export function make_wireframe_cylinder(r_top, r_bottom, height, color) {
 }
 
 
+export function make_wireframe_cube(dims, color) {
+    let geometry = new THREE.BoxGeometry(...dims);
+    let wireframe = new THREE.EdgesGeometry(geometry);
+    const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
+    const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
+    return mesh;
+}
+
+
 export function create_instanced_cube(dims, color) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);
@@ -241,4 +250,31 @@ export class Spark extends THREE.Object3D {
     }
 }
 
+export class ObjectPool extends THREE.Group {
+    constructor(object_constr, max_num_objects) {
+        super();
+        this.pool_object_constr = object_constr;
+        this.max_num_objects = max_num_objects;
+        this.pool_objects = [];
+        this.cur_idx = 0;
+    }
 
+    get_pool_object() {
+        let obj = null;
+        if (this.pool_objects.length < this.max_num_objects) {
+            obj = this.pool_object_constr();
+            this.pool_objects.push(obj);
+            this.add(obj);
+        } else {
+            obj = this.pool_objects[this.cur_idx];
+        }
+        this.cur_idx = (this.cur_idx + 1) % this.max_num_objects;
+        return obj;
+    }
+
+    foreach(fn) {
+        this.pool_objects.forEach((obj) => {
+            fn(obj);
+        });
+    }
+}

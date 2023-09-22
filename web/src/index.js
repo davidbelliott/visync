@@ -98,7 +98,7 @@ function init() {
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    const socket = new WebSocket(`ws://music:8080`);
+    const socket = new WebSocket(`ws://192.168.1.22:8080`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -1161,9 +1161,10 @@ class GraphicsContext {
         this.debug_overlay.style.display = "none";
 
 	this.canvas = document.getElementById('canvas');
-	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas, "antialias": false });
+	this.renderer = new THREE.WebGLRenderer({ "canvas": this.canvas });
 	this.renderer.setClearColor(BG_COLOR);
 	this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.composer = new EffectComposer(this.renderer);
 
         // Plane in orthographic view with custom shaders for tracers
@@ -1272,6 +1273,15 @@ class GraphicsContext {
     }
 
     render() {
+        this.renderer.setRenderTarget(null);
+        this.scenes[this.cur_scene_idx].render(this.renderer);
+        return;
+
+
+
+
+
+
         this.renderer.autoClearColor = false;
         this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
         this.renderer.clear();
@@ -1358,8 +1368,7 @@ class GraphicsContext {
         ]);
 
         setTimeout(() => {
-            console.log((beat + 1) % 4);
-            this.scenes[this.cur_scene_idx].handle_sync(t, bpm, (beat + 1) % 4);
+            this.scenes[this.cur_scene_idx].handle_sync(t, bpm, beat + 1);
         }, delay * 1000);
     }
 

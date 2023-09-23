@@ -99,9 +99,8 @@ function init() {
 }
 
 function connect() {
-    return;
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    const socket = new WebSocket(`ws://192.168.1.22:8080`);
+    const socket = new WebSocket(`wss://reuben:8765`);
     socket.addEventListener('message', function(e) {
         const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -1281,7 +1280,6 @@ class GraphicsContext {
     }
 
     render() {
-        this.renderer.setRenderTarget(null);
         this.scenes[this.cur_scene_idx].render(this.renderer);
         return;
 

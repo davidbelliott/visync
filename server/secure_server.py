@@ -4,8 +4,8 @@ import pathlib
 import ssl
 import websockets
 
-keyfile=pathlib.Path(__file__).parent / "ssl" / "reuben.key"
-certfile=pathlib.Path(__file__).parent / "ssl" / "reuben.crt"
+keyfile=pathlib.Path(__file__).parents[1] / "ssl" / "reuben.key"
+certfile=pathlib.Path(__file__).parents[1] / "ssl" / "reuben.crt"
 
 
 async def hello(websocket, path):

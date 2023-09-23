@@ -8,7 +8,7 @@ import ssl
 import websockets
 
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-issuer_pem = pathlib.Path(__file__).parent / "ssl" / "rootCA.pem"
+issuer_pem = pathlib.Path(__file__).parents[1] / "ssl" / "rootCA.pem"
 ssl_context.load_verify_locations(issuer_pem)
 
 async def hello():

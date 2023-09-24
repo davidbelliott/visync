@@ -71,7 +71,7 @@ export class IceCreamScene extends VisScene {
             color: this.ice_cream_color,
         });
         this.ice_cream_cone_mat.flatShading = false;
-        this.light = new THREE.PointLight("white", 0.75, 100 );
+        this.light = new THREE.PointLight("white", 1000);
         this.light.position.set(0, 0, 20);
         this.vbo_scene.add(this.light);
         this.cones_per_side = 7;
@@ -204,16 +204,18 @@ export class IceCreamScene extends VisScene {
         if (this.vbo_material == null) {
             return;
         }
+        const prev_render_target = renderer.getRenderTarget();
+        const prev_autoclear = renderer.autoClearColor;
         renderer.autoClearColor = false;
         super.render(renderer);
         renderer.setRenderTarget(this.buffer);
         renderer.clear();
         renderer.render(this.vbo_scene, this.cam_vbo);
         this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
-        renderer.setRenderTarget(null);
+        renderer.setRenderTarget(prev_render_target);
         renderer.clear();
         renderer.clearDepth();
         renderer.render(this.scene, this.camera);
-        renderer.autoClearColor = true;
+        renderer.autoClearColor = prev_autoclear;
     }
 }

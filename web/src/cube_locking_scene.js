@@ -165,7 +165,7 @@ export class CubeLockingScene extends VisScene {
             polygonOffsetUnits: 1
         });*/
         this.object_material.flatShading = false;
-        this.light = new THREE.PointLight("white", 1.0);
+        this.light = new THREE.DirectionalLight("white", 2);
         this.light.position.set(0, 100, 20);
         this.base_group.add(this.light);
 
@@ -182,6 +182,7 @@ export class CubeLockingScene extends VisScene {
                 this_class.object_group.add(mesh);
                 this_class.object_group.add(mesh_inner);
                 this_class.cube_thing = mesh;
+                this_class.light.target = this_class.cube_thing;
 
             },
             (xhr) => { },

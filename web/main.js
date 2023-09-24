@@ -1139,14 +1139,14 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
-            new HomeBackground(env),
-            new CubeLockingScene(env),
             new SlideScene(env, ["img/cover.png", "img/rat.png"]),
+            new CubeLockingScene(env),
+            new HomeBackground(env),
             new SpinningRobotsScene(env),
             new HyperRobot(env),
             new IntroScene(env),
-            new Tracers(env),
             new IceCreamScene(env),
+            new Tracers(env),
             new HexagonScene(env),
             new GantryScene(env),
             new SpectrumScene(env),

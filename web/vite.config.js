@@ -1,7 +1,5 @@
-import { defineConfig } from 'vite'
-import mkcert from 'vite-plugin-mkcert'
+const ASSET_URL = process.env.ASSET_URL || '';
 
-export default defineConfig({
-  server: { https: true },
-  plugins: [ mkcert(hosts=['localhost', 'ephraim']) ]
-})
+export default { 
+  base: `${ASSET_URL}/rave/`,
+}

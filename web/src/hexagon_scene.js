@@ -132,7 +132,7 @@ export class HexagonScene extends VisScene {
         this.cur_rotation = 0;
 
         this.shader_loader = new ResourceLoader(['glsl/hex_shader.vert', 'glsl/hex_shader.frag']);
-        Promise.all([this.shader_loader.load(), load_texture('static/romaO.png')]).then(
+        Promise.all([this.shader_loader.load(), load_texture('img/romaO.png')]).then(
             ([[vertex_shader, fragment_shader], texture]) => {
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },

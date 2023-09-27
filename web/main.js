@@ -106,7 +106,7 @@ function connect() {
     console.log(pathname);
     const socket = new WebSocket(`${protocol}://${window.location.hostname}${pathname}ws`);
     socket.addEventListener('message', function(e) {
-        const msg = JSON.parse(e.data);
+	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
 
         if (type == MSG_TYPE_SYNC) {
@@ -121,7 +121,7 @@ function connect() {
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
         }
-        socket.send(msg.t);
+        //socket.send(msg.t);	// TODO: re-add for latency estimation
     });
 
     socket.addEventListener('close', function(e) {

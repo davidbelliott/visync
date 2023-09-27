@@ -399,7 +399,7 @@ export class GantryScene extends VisScene {
         const beats_per_sec = this.env.bpm / 60;
 
         if (beat % 2 == 0) {
-            this.moving_gantry_idx = Math.floor(beat / 2);
+            this.moving_gantry_idx = Math.floor(beat / 2) % 2;
             this.pounding_gantry_idx = (this.moving_gantry_idx + 1) % this.gantries.length;
             let min_i = Math.floor(this.num_cubes_per_side / 2 + mid_range_cubes / 2 * (this.moving_gantry_idx - 1));
             let max_i = min_i + Math.floor(mid_range_cubes / 2);
@@ -418,7 +418,7 @@ export class GantryScene extends VisScene {
             this.gantries[this.moving_gantry_idx].set_cube_target_idx(cube_idx_i, cube_idx_j);
             this.gantries[this.moving_gantry_idx].move_clock.start();
         }
-        if (beat == 0) {
+        if (beat % 4 == 0) {
             console.log(this.rot_clock.getElapsedTime() * beats_per_sec);
             if (rand_int(0, 4) == 0 && (
                     (!this.rot_clock.running) ||

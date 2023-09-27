@@ -2,12 +2,11 @@ from enum import Enum
 import json
 import time
 import rtmidi
-from websocket_server import WebsocketServer
 from collections import deque
 import pathlib
+from websockets.sync.client import connect
 
-WS_PORT = 8765
-midiin = rtmidi.RtMidiIn()
+WS_RELAY = "wss://deadfacade.net/rave/ws"
 USE_STROBE = False
 
 cur_beat_idx = 0
@@ -60,7 +59,7 @@ class BPMEstimator:
         return elapsed
 
 
-def recv(client, server, msg):
+def recv(client, msg):
     try:
         t = float(msg)
         time_now = time.time()
@@ -76,9 +75,7 @@ bpm_estimator = BPMEstimator()
 keyfile=pathlib.Path(__file__).parent / "ssl" / "reuben.key"
 certfile=pathlib.Path(__file__).parent / "ssl" / "reuben.crt"
 
-server = WebsocketServer(host='reuben', port=WS_PORT, key=keyfile, cert=certfile)
-server.set_fn_message_received(recv)
-server.run_forever(True)
+
 
 
 class Msg:
@@ -142,7 +139,7 @@ def strobe_off():
         print(f'Error setting strobe on: {e}')
 
 
-def handle_midi(midi):
+def handle_midi(midi, websocket):
     global cur_beat_idx
     t = time.time()
     msg = None
@@ -177,18 +174,22 @@ def handle_midi(midi):
         print('clock')
     
     if msg != None:
-        server.send_message_to_all(msg.to_json())
+        try:
+            websocket.send(msg.to_json())
+        except Exception as e:
+            print(f'Error sending message: {e}')
 
 
-def get_midi_events():
+def get_midi_events(midiin, websocket):
     while True:
         m = midiin.getMessage()
         if m:
             print(m)
-            handle_midi(m)
+            handle_midi(m, websocket)
             
 
 def main():
+    midiin = rtmidi.RtMidiIn()
     ports = range(midiin.getPortCount())
     if ports:
         portnames = [midiin.getPortName(i) for i in ports]
@@ -201,7 +202,8 @@ def main():
             print('\n'.join(portnames))
             port_to_open = int(input("input midi port to listen to: "))
         midiin.openPort(port_to_open)
-        get_midi_events()
+        with connect(WS_RELAY) as websocket:
+            get_midi_events(midiin, websocket)
     else:
         print('NO MIDI INPUT PORTS!')
         exit(1)

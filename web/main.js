@@ -15,6 +15,7 @@ import { SpectrumScene } from './src/spectrum_scene.js';
 import { IntroScene } from './src/intro_scene.js';
 import { IceCreamScene } from './src/ice_cream_scene.js';
 import { FastCubeScene } from './src/fast_cube_scene.js';
+import { ChineseScene } from './src/chinese_scene.js';
 import { FastCarScene } from './src/fast_car_scene.js';
 import { CubeLockingScene } from './src/cube_locking_scene.js';
 import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
@@ -127,14 +128,14 @@ function connect() {
 
     socket.addEventListener('close', function(e) {
         // Try to reconnect after 1 second
-        console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+        //console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
         setTimeout(function() {
             connect();
         }, 1000);
     });
 
     socket.addEventListener('error', function(e) {
-        console.log('Socket encountered error: ', e.message, 'Closing socket');
+        //console.log('Socket encountered error: ', e.message, 'Closing socket');
         socket.close();
     });
 }
@@ -1141,6 +1142,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new SlideScene(env, ["img/cover.png", "img/rat.png"]),
+            new ChineseScene(env),
             new FastCarScene(env),
             new CubeLockingScene(env),
             new HomeBackground(env),

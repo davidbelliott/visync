@@ -14,7 +14,7 @@ import {
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
 const USE_SHADER = true;
-const SVG_SIZE = 75;
+const SVG_SIZE = 80;
 
 export class ChineseScene extends VisScene {
     constructor(env) {
@@ -41,6 +41,7 @@ export class ChineseScene extends VisScene {
         this.base_group = new THREE.Group();
 
         this.cur_rotation = 0;
+        this.beat_clock = new THREE.Clock(false);
 
         // Create interior scene
         {
@@ -144,7 +145,10 @@ export class ChineseScene extends VisScene {
     anim_frame(dt) {
         const beats_per_sec = this.env.bpm / 60;
         const clock_dt = this.clock.getDelta();
-        this.elapsed_beats += clock_dt * beats_per_sec;
+        const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
+        this.elapsed_beats += 0.5 * clock_dt * beats_per_sec;
+        this.elapsed_beats += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+        
         if (this.uniforms != null) {
             this.uniforms.time.value = this.elapsed_beats / 16;
         }
@@ -172,6 +176,8 @@ export class ChineseScene extends VisScene {
     }
 
     handle_beat(t, channel) {
+        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
     }
 
 

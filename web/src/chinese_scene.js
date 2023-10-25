@@ -147,14 +147,16 @@ export class ChineseScene extends VisScene {
         const clock_dt = this.clock.getDelta();
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
         this.elapsed_beats += 0.5 * clock_dt * beats_per_sec;
-        this.elapsed_beats += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+        if (this.beat_clock.running) {
+            this.elapsed_beats += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+        }
         
         if (this.uniforms != null) {
             this.uniforms.time.value = this.elapsed_beats / 16;
         }
         //this.plane.position.z -= 0.02;
         //this.base_group.rotation.y += 0.01;
-        //this.base_group.rotation.x += 0.01;
+        //this.base_group.rotation.z += 0.01;
     }
 
     handle_resize(width, height) {

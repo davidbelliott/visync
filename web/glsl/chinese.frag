@@ -314,8 +314,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float radius_px = length(u);
 
     fragColor = vec4(1.0);
-    for (int i = 0; i < 10; i++) {
-        float time_offset = 0.01 * float(i);
+    const int num_loops = 15;
+    for (int i = 0; i < num_loops; i++) {
+        float time_offset = 0.02 * float(i);
         float t = time + time_offset;
 
         float offset_complexity = 3.5;
@@ -336,7 +337,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    
         //fragColor.a *= sin(time * 2. * PI);
-        float alpha = float(i) / 10.0;
+        float alpha = pow(float(i + 1) / float(num_loops), 1.6);
         fragColor = rainbow_color * tex_val.r * alpha + fragColor * (1.0 - tex_val.r * alpha);
     }
 }

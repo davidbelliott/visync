@@ -14,7 +14,7 @@ import {
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
 const USE_SHADER = true;
-const SVG_SIZE = 80;
+const SVG_SIZE = 75;
 
 export class ChineseScene extends VisScene {
     constructor(env) {
@@ -69,7 +69,7 @@ export class ChineseScene extends VisScene {
                                 depthTest: false,
                                 linewidth: 2 } );
                             const mesh_mat = new THREE.MeshBasicMaterial( {
-                                color: "black",
+                                color: "white",
                                 side: THREE.DoubleSide,
                                 depthWrite: false,
                                 depthTest: false,
@@ -111,7 +111,7 @@ export class ChineseScene extends VisScene {
             this.base_group.scale.set(1, 1, 1);
 
             this.inner_scene.add(this.base_group);
-            this.create_buffer(1024, 1024);
+            this.create_buffer(4096, 4096);
         }
 
         // Create top-level scene
@@ -178,6 +178,8 @@ export class ChineseScene extends VisScene {
     render(renderer) {
         const prev_render_target = renderer.getRenderTarget();
         const prev_autoclear = renderer.autoClearColor;
+        const prev_clear_color = new THREE.Color();
+        renderer.getClearColor(prev_clear_color);
         if (USE_SHADER) {
             renderer.autoClearColor = false;
             renderer.setRenderTarget(this.buffer);
@@ -193,6 +195,7 @@ export class ChineseScene extends VisScene {
             renderer.clearDepth();
             renderer.render(this.scene, this.camera);
             renderer.autoClearColor = prev_autoclear;
+            renderer.setClearColor(prev_clear_color);
         }
     }
 }

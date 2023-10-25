@@ -300,57 +300,44 @@ float noise (in vec2 st) {
             (d - b) * u.x * u.y;
 }
 
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
     // Aspect correct screen coordinates.
     float hex_size = 40. + 10. * sin(time * PI / 2.0);
     //vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5) / hex_size;
 
-    vec2 st = fragCoord.xy / resolution.xy;
+    vec2 st = fragCoord.xy / resolution.xx;
     vec2 to_center = vec2(0.5) - st;
     
     vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5);
     float radius_px = length(u);
 
-    fragColor = vec4(0.0);
-    for (int i = 0; i < 1; i++) {
-        float time_offset = 0.1 * float(i);
+    fragColor = vec4(1.0);
+    for (int i = 0; i < 10; i++) {
+        float time_offset = 0.01 * float(i);
         float t = time + time_offset;
 
         float offset_complexity = 3.5;
         float color_complexity = 1.5;
         float y_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI));
         float x_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI / 2.0));
-        float theta = atan(u.y * (1.0 + y_noise), u.x * (1.0 + x_noise)) + t * PI / 8.0;
-        u = vec2(cos(theta), sin(theta)) * radius_px / hex_size;
 
-        // Scaling, translating, then converting it to a hexagonal grid cell coordinate and
-        // a unique coordinate ID. The resultant vector contains everything you need to produce a
-        // pretty pattern, so what you do from here is up to you.
-        //vec4 h = getHex(u*10. + s.yx*time/2.);
-        //vec4 h = getHex(u + time);
-        //vec4 h = getHex(u + s.yx * time * 2.0);
-        vec4 h = getHex(u);
-        //float width = 4.0 + 3.0 * sin(time * PI * 8.0);
         float width = 1.0;
         
-        // The beauty of working with hexagonal centers is that the relative edge distance will simply 
-        // be the value of the 2D isofield for a hexagon.
-        float eDist = hex(h.xy); // Edge distance.
-
         float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
         //float alpha = 0.8 + 0.2 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
         //alpha = 1.0;
         //vec3 rainbow_color = hsb2rgb(vec3(
                     //mod(color_noise * 2.0 - time * 2.0, 1.), 0.5, 1.0));
-        st += vec2(x_noise, y_noise);
-        vec4 tex_val = texture2D(tex, mod(st * 2.0, 1.0));
-        float color_t = mod(color_noise * 2.0 - t * 2.0 + tex_val.r * 0.1, 1.0);
+        vec2 tex_coords = st + vec2(x_noise, y_noise);
+        vec4 tex_val = texture2D(tex, mod(tex_coords * 2.0, 1.0));
+        float color_t = mod(color_noise * 2.0 - t * 2.0, 1.0);
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    
         //fragColor.a *= sin(time * 2. * PI);
-        float alpha = 1.0;
-        fragColor = rainbow_color;
+        float alpha = float(i) / 10.0;
+        fragColor = rainbow_color * tex_val.r * alpha + fragColor * (1.0 - tex_val.r * alpha);
     }
 }
 

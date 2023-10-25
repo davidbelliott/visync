@@ -15,6 +15,8 @@ import { SpectrumScene } from './src/spectrum_scene.js';
 import { IntroScene } from './src/intro_scene.js';
 import { IceCreamScene } from './src/ice_cream_scene.js';
 import { FastCubeScene } from './src/fast_cube_scene.js';
+import { ChineseScene } from './src/chinese_scene.js';
+import { FastCarScene } from './src/fast_car_scene.js';
 import { CubeLockingScene } from './src/cube_locking_scene.js';
 import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
 
@@ -103,7 +105,6 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    console.log(pathname);
     const socket = new WebSocket(`${protocol}://${window.location.hostname}${pathname}ws`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -126,14 +127,14 @@ function connect() {
 
     socket.addEventListener('close', function(e) {
         // Try to reconnect after 1 second
-        console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+        //console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
         setTimeout(function() {
             connect();
         }, 1000);
     });
 
     socket.addEventListener('error', function(e) {
-        console.log('Socket encountered error: ', e.message, 'Closing socket');
+        //console.log('Socket encountered error: ', e.message, 'Closing socket');
         socket.close();
     });
 }
@@ -654,7 +655,7 @@ class HomeBackground extends VisScene {
 
 
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
+        this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.camera.position.set(0, 0, 10);
         //this.camera = new THREE.OrthographicCamera(-8, 8, -8, 8);
         this.cam_vel = new THREE.Vector3();
@@ -811,7 +812,7 @@ class HyperRobot extends VisScene {
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 10;
-        this.cam_persp = new THREE.PerspectiveCamera( 75, 1, 0.1, 10000 );
+        this.cam_persp = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 10000 );
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
@@ -1140,6 +1141,8 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.scenes = [
             new SlideScene(env, ["img/cover.png", "img/rat.png"]),
+            new ChineseScene(env),
+            new FastCarScene(env),
             new CubeLockingScene(env),
             new HomeBackground(env),
             new SpinningRobotsScene(env),

@@ -22,24 +22,81 @@ export class ChineseScene extends VisScene {
 
         const aspect = width / height;
         this.frustum_size = 20;
-        this.cam_orth = new THREE.OrthographicCamera(
+        this.inner_camera = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
-        this.scene = new THREE.Scene();
+
+        /*this.camera = new THREE.OrthographicCamera(
+            -width / 2,
+            width / 2,
+            height / 2,
+            -height / 2, -1000, 1000);*/
+        this.camera = this.inner_camera.clone();
         this.clock = new THREE.Clock();
         this.base_group = new THREE.Group();
 
         this.cur_rotation = 0;
 
-        this.shader_loader = new ResourceLoader(['glsl/hex_shader.vert', 'glsl/hex_shader.frag']);
+        // Create interior scene
+        {
+            this.inner_scene = new THREE.Scene();
+            this.scene = new THREE.Scene();
+            const loader = new SVGLoader();
+            // load a SVG resource
+            loader.load(
+                // resource URL
+                'img/chinese.svg',
+                // called when the resource is loaded
+                (data) => {
+                    const paths = data.paths;
+                    const group = new THREE.Group();
+
+                    for ( let i = 0; i < paths.length; i ++ ) {
+                            const path = paths[ i ];
+                            const material = new THREE.MeshBasicMaterial( {
+                                    color: "white",
+                                    side: THREE.DoubleSide,
+                                    //depthWrite: false
+                            } );
+                            const shapes = SVGLoader.createShapes( path );
+                            for ( let j = 0; j < shapes.length; j ++ ) {
+                                const shape = shapes[ j ];
+                                const geometry = new THREE.ShapeGeometry( shape );
+                                const mesh = new THREE.Mesh( geometry, material );
+                                group.add( mesh );
+                            }
+                    }
+                    group.rotation.y = Math.PI;
+                    group.rotation.z = Math.PI;
+                    group.scale.set(0.5, 0.5, 0.5);
+                    group.position.set(-20, 20, 0);
+                    this.base_group.add(group);
+                },
+                // called when loading is in progresses
+                function ( xhr ) {
+                    console.log( 'SVG ' + ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+                },
+                // called when loading has errors
+                function ( error ) {
+                    console.log( 'An error happened: ' + error);
+                }
+            );
+
+            this.base_group.scale.set(1, 1, 1);
+
+            this.inner_scene.add(this.base_group);
+        }
+
+        // Create top-level scene
+        this.shader_loader = new ResourceLoader(['glsl/chinese.vert', 'glsl/chinese.frag']);
         Promise.all([this.shader_loader.load(), load_texture('img/romaO.png')]).then(
             ([[vertex_shader, fragment_shader], texture]) => {
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
-                palette: { type: 't', value: texture },
+                tex: { type: 't', value: null }
             };
             let material = new THREE.ShaderMaterial({
                 uniforms: this.uniforms,
@@ -48,64 +105,14 @@ export class ChineseScene extends VisScene {
                 transparent: true,
             });
             //material = new THREE.MeshBasicMaterial({ color: "red" });
-            let geometry = new THREE.PlaneGeometry(this.cam_orth.right - this.cam_orth.left,
-                this.cam_orth.top - this.cam_orth.bottom);
+            let geometry = new THREE.PlaneGeometry(1, 1);
             this.plane = new THREE.Mesh(geometry, material);
             this.plane.position.z = -100;   // position in front of other objects
             this.scene.add(this.plane);
+            this.plane.scale.set(width, height, 1);
         });
+        this.handle_resize(width, height);
 
-
-        const loader = new SVGLoader();
-
-        // load a SVG resource
-        loader.load(
-            // resource URL
-            'img/chinese.svg',
-            // called when the resource is loaded
-            (data) => {
-                const paths = data.paths;
-                const group = new THREE.Group();
-
-                for ( let i = 0; i < paths.length; i ++ ) {
-                        const path = paths[ i ];
-                        const material = new THREE.MeshBasicMaterial( {
-                                color: "white",
-                                side: THREE.DoubleSide,
-                                //depthWrite: false
-                        } );
-                        const shapes = SVGLoader.createShapes( path );
-                        for ( let j = 0; j < shapes.length; j ++ ) {
-                            const shape = shapes[ j ];
-                            const geometry = new THREE.ShapeGeometry( shape );
-                            const mesh = new THREE.Mesh( geometry, material );
-                            console.log(mesh);
-                            group.add( mesh );
-                        }
-                }
-                group.rotation.y = Math.PI;
-                group.rotation.z = Math.PI;
-                group.scale.set(0.5, 0.5, 0.5);
-                group.position.set(-20, 20, 0);
-                this.base_group.add(group);
-            },
-            // called when loading is in progresses
-            function ( xhr ) {
-                console.log( 'SVG ' + ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
-            },
-            // called when loading has errors
-            function ( error ) {
-                console.log( 'An error happened: ' + error);
-            }
-        );
-
-
-
-
-        this.base_group.scale.set(1, 1, 1);
-
-        this.scene.add(this.base_group);
-        this.camera = this.cam_orth;
         this.elapsed_beats = 0;
     }
 
@@ -121,9 +128,42 @@ export class ChineseScene extends VisScene {
         //this.base_group.rotation.x += 0.01;
     }
 
+    handle_resize(width, height) {
+        const aspect = width / height;
+        if (this.plane) {
+            this.plane.scale.set(width, height, 1);
+        }
+        update_orth_camera_aspect(this.inner_camera, aspect, this.frustum_size);
+        update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
+        this.create_buffer(width, height);
+        console.log(`Width/height: ${width}/${height}`);
+    }
+
+    create_buffer(width, height) {
+        this.buffer = new THREE.WebGLRenderTarget(width, height);
+    }
+
     handle_sync(t, bpm, beat) {
     }
 
     handle_beat(t, channel) {
+    }
+
+
+    render(renderer) {
+        const prev_render_target = renderer.getRenderTarget();
+        const prev_autoclear = renderer.autoClearColor;
+        renderer.autoClearColor = false;
+        renderer.setRenderTarget(this.buffer);
+        renderer.clear();
+        renderer.render(this.inner_scene, this.inner_camera);
+        if (this.uniforms != null) {
+            this.uniforms.tex.value = this.buffer.texture;
+        }
+        renderer.setRenderTarget(prev_render_target);
+        renderer.clear();
+        renderer.clearDepth();
+        renderer.render(this.scene, this.camera);
+        renderer.autoClearColor = prev_autoclear;
     }
 }

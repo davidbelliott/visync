@@ -102,14 +102,25 @@ export class FastCarScene extends VisScene {
     constructor(env) {
         super(env);
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight);
-        this.camera.position.set(0, 0, 6);
-        const aspect = window.innerWidth / window.innerHeight;
-        update_persp_camera_aspect(this.camera, aspect);
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const aspect = width / height;
+
+        this.frustum_size = 40;
+        this.camera = new THREE.OrthographicCamera(
+            -this.frustum_size * aspect / 2,
+            this.frustum_size * aspect / 2,
+            this.frustum_size / 2,
+            -this.frustum_size / 2, -1000, 1000);
+
+        update_orth_camera_aspect(this.camera, aspect);
+
+        this.cam_vbo = this.camera.clone();
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.scene = new THREE.Scene();
+        this.vbo_scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(true);
         this.half_beat_clock = new THREE.Clock(true);
@@ -125,19 +136,20 @@ export class FastCarScene extends VisScene {
         this.rot_dir = 1;
         this.base_group.rotation.y = this.start_rot * Math.PI / 8;
 
+        this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 
         const ambientLight = new THREE.AmbientLight("blue");
-        this.scene.add( ambientLight );
+        this.vbo_scene.add( ambientLight );
 
         const pointLight = new THREE.PointLight( 0xffffff, 15 );
         this.camera.add( pointLight );
         this.light = new THREE.DirectionalLight("white", 2);
-        this.scene.add(this.light);
+        this.vbo_scene.add(this.light);
 
 
 // manager
         this.object = null;
-        this.object_color = new THREE.Color("magenta");
+        this.object_color = new THREE.Color("black");
 
         function loadModel(self) {
             self.object_mat = new THREE.MeshLambertMaterial({
@@ -195,7 +207,24 @@ export class FastCarScene extends VisScene {
             this.object = obj;
         }, onProgress, onError );
 
-        this.scene.add(this.base_group);
+
+        this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/dither.frag');
+        this.shader_loader.load().then(([vertex_shader, fragment_shader]) => {
+            this.vbo_material = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTexture: { value: null }
+                },
+                vertexShader: vertex_shader,
+                fragmentShader: fragment_shader
+            });
+            let geometry = new THREE.PlaneGeometry(this.camera.right - this.camera.left,
+                this.camera.top - this.camera.bottom);
+            this.plane = new THREE.Mesh(geometry, this.vbo_material);
+            this.plane.position.z = -100;
+            this.scene.add(this.plane);
+        });
+
+        this.vbo_scene.add(this.base_group);
     }
 
     anim_frame(dt) {
@@ -232,5 +261,22 @@ export class FastCarScene extends VisScene {
         } else if (channel == 1 || channel == 3) {
             this.bg.add_square("red");
         }
+    }
+
+    render(renderer) {
+        if (this.vbo_material == null) {
+            return;
+        }
+        renderer.autoClearColor = false;
+        super.render(renderer);
+        renderer.setRenderTarget(this.buffer);
+        renderer.clear();
+        renderer.render(this.vbo_scene, this.cam_vbo);
+        this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
+        renderer.setRenderTarget(null);
+        renderer.clear();
+        renderer.clearDepth();
+        renderer.render(this.scene, this.camera);
+        renderer.autoClearColor = true;
     }
 }

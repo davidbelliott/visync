@@ -105,7 +105,6 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    console.log(pathname);
     const socket = new WebSocket(`${protocol}://${window.location.hostname}${pathname}ws`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);

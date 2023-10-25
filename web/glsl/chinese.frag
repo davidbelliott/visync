@@ -44,8 +44,8 @@ vec3 palette(in float t)
 {
     vec3 a = vec3(0.5, 0.5, 0.5);
     vec3 b = vec3(0.5, 0.5, 0.5);
-    vec3 c = vec3(1.0, 1.0, 0.5);
-    vec3 d = vec3(0.80, 0.90, 0.30);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.0, 0.1, 0.2);
     return a + b*cos( 6.28318*(c*t+d) );
 }
 
@@ -317,9 +317,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         float time_offset = 0.1 * float(i);
         float t = time + time_offset;
 
-        float complexity = 1.5 + 1.0 * sin(t * PI / 8.0);
-        float y_noise = 0.02 * simplex3d(vec3(to_center.x, to_center.y, t * PI));
-        float x_noise = 0.02 * simplex3d(vec3(to_center.x, to_center.y, t * PI / 2.0));
+        float offset_complexity = 3.5;
+        float color_complexity = 1.5;
+        float y_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI));
+        float x_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI / 2.0));
         float theta = atan(u.y * (1.0 + y_noise), u.x * (1.0 + x_noise)) + t * PI / 8.0;
         u = vec2(cos(theta), sin(theta)) * radius_px / hex_size;
 
@@ -337,13 +338,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         // be the value of the 2D isofield for a hexagon.
         float eDist = hex(h.xy); // Edge distance.
 
-        float color_noise = simplex3d(vec3(complexity * to_center.x, complexity * to_center.y, t * PI / 2.0));
+        float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
         //float alpha = 0.8 + 0.2 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
         //alpha = 1.0;
         //vec3 rainbow_color = hsb2rgb(vec3(
                     //mod(color_noise * 2.0 - time * 2.0, 1.), 0.5, 1.0));
         st += vec2(x_noise, y_noise);
-        vec4 tex_val = texture2D(tex, st);
+        vec4 tex_val = texture2D(tex, mod(st * 2.0, 1.0));
         float color_t = mod(color_noise * 2.0 - t * 2.0 + tex_val.r * 0.1, 1.0);
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    

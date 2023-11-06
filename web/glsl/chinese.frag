@@ -1,6 +1,8 @@
 uniform vec3      resolution;           // viewport resolution (in pixels)
 uniform float time;
+uniform float scroll_time;
 uniform sampler2D tex;
+uniform vec2 tex_dims;
 
 //#define FLAT_TOP_HEXAGON
 
@@ -303,21 +305,19 @@ float noise (in vec2 st) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
+    float texture_aspect = tex_dims.x / tex_dims.y;
     // Aspect correct screen coordinates.
-    float hex_size = 40. + 10. * sin(time * PI / 2.0);
-    //vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5) / hex_size;
-
     vec2 st = fragCoord.xy / resolution.xx;
     vec2 to_center = vec2(0.5) - st;
-    
-    vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5);
-    float radius_px = length(u);
 
     fragColor = vec4(1.0);
     const int num_loops = 15;
+    const float evolve_rate = 1.0 / 16.0;
+    const float scroll_rate = 1.0 / 64.0;
+    const float scale = 2.0;
     for (int i = 0; i < num_loops; i++) {
         float time_offset = 0.02 * float(i);
-        float t = time + time_offset;
+        float t = time * evolve_rate + time_offset;
 
         float offset_complexity = 3.5;
         float color_complexity = 1.5;
@@ -327,15 +327,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         float width = 1.0;
         
         float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
-        //float alpha = 0.8 + 0.2 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
-        //alpha = 1.0;
-        //vec3 rainbow_color = hsb2rgb(vec3(
-                    //mod(color_noise * 2.0 - time * 2.0, 1.), 0.5, 1.0));
-        vec2 tex_coords = st + vec2(x_noise, y_noise);
-        vec4 tex_val = texture2D(tex, mod(tex_coords * 2.0, 1.0));
+        vec2 tex_coords = st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset));
+        tex_coords.y *= texture_aspect;
+        vec4 tex_val = texture2D(tex, fract(tex_coords * scale), 0.5);
         float color_t = mod(color_noise * 2.0 - t * 2.0, 1.0);
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
-        //fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    
         //fragColor.a *= sin(time * 2. * PI);
         float alpha = pow(float(i + 1) / float(num_loops), 1.6);
         fragColor = rainbow_color * tex_val.r * alpha + fragColor * (1.0 - tex_val.r * alpha);

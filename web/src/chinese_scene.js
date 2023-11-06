@@ -117,12 +117,15 @@ export class ChineseScene extends VisScene {
 
         // Create top-level scene
         this.shader_loader = new ResourceLoader(['glsl/chinese.vert', 'glsl/chinese.frag']);
-        Promise.all([this.shader_loader.load(), load_texture('img/romaO.png')]).then(
+        Promise.all([this.shader_loader.load(), load_texture('img/chinese.png')]).then(
             ([[vertex_shader, fragment_shader], texture]) => {
+            texture.minFilter = THREE.LinearFilter;
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
+                scroll_time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
-                tex: { type: 't', value: null }
+                tex: { type: 't', value: texture },
+                tex_dims: { type: 'v2', value: new THREE.Vector2(texture.image.width, texture.image.height) }
             };
             let material = new THREE.ShaderMaterial({
                 uniforms: this.uniforms,
@@ -139,20 +142,23 @@ export class ChineseScene extends VisScene {
         });
         this.handle_resize(width, height);
 
-        this.elapsed_beats = 0;
+        this.evolve_time = 0;
+        this.elapsed_time_beats = 0;
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.env.bpm / 60;
         const clock_dt = this.clock.getDelta();
+        this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
-        this.elapsed_beats += 0.5 * clock_dt * beats_per_sec;
+        this.evolve_time += 0.5 * clock_dt * beats_per_sec;
         if (this.beat_clock.running) {
-            this.elapsed_beats += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+            this.evolve_time += (beat_elapsed < 1.0 ? 0.1 : 0.0);
         }
         
         if (this.uniforms != null) {
-            this.uniforms.time.value = this.elapsed_beats / 16;
+            this.uniforms.time.value = this.evolve_time;
+            this.uniforms.scroll_time.value = this.elapsed_time_beats;
         }
         //this.plane.position.z -= 0.02;
         //this.base_group.rotation.y += 0.01;
@@ -196,7 +202,7 @@ export class ChineseScene extends VisScene {
         renderer.render(this.inner_scene, this.inner_camera);
         if (USE_SHADER) {
             if (this.uniforms != null) {
-                this.uniforms.tex.value = this.buffer.texture;
+                //this.uniforms.tex.value = this.buffer.texture;
             }
             renderer.setRenderTarget(prev_render_target);
             renderer.clear();

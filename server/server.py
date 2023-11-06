@@ -9,7 +9,7 @@ from rtmidi.midiconstants import *
 from rtmidi.midiutil import open_midiinput
 import sys
 
-WS_RELAY = "wss://deadfacade.net/rave/ws"
+WS_RELAY = "ws://deadfacade.net/rave/ws"
 USE_STROBE = False
 
 cur_beat_idx = 0

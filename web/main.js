@@ -16,6 +16,7 @@ import { IntroScene } from './src/intro_scene.js';
 import { IceCreamScene } from './src/ice_cream_scene.js';
 import { FastCubeScene } from './src/fast_cube_scene.js';
 import { ChineseScene } from './src/chinese_scene.js';
+import { TessellateScene } from './src/tessellate_scene.js';
 import { FastCarScene } from './src/fast_car_scene.js';
 import { CubeLockingScene } from './src/cube_locking_scene.js';
 import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
@@ -1142,6 +1143,7 @@ class GraphicsContext {
         this.scenes = [
             new SlideScene(env, ["img/cover.png", "img/rat.png"]),
             new ChineseScene(env),
+            new TessellateScene(env),
             new FastCarScene(env),
             new CubeLockingScene(env),
             new HomeBackground(env),

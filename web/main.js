@@ -1289,8 +1289,8 @@ class GraphicsContext {
     }
 
     render() {
-        this.scenes[this.cur_scene_idx].render(this.renderer);
-        return;
+        /*this.scenes[this.cur_scene_idx].render(this.renderer);
+        return;*/
 
 
 
@@ -1357,8 +1357,8 @@ class GraphicsContext {
             this.change_scene(scene_idx);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
-                //this.set_tracer_params(8, 4, 0.7);
-                this.set_tracer_params(8, 1, 0.7);
+                this.set_tracer_params(10, 4, 0.8);
+                //this.set_tracer_params(8, 1, 0.7);
             } else {
                 this.set_tracer_params(1, 1, 1);
             }

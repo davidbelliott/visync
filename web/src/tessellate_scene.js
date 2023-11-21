@@ -24,7 +24,7 @@ export class TessellateScene extends VisScene {
         const height = window.innerHeight;
 
         const aspect = width / height;
-        this.frustum_size = 20;
+        this.frustum_size = 40;
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size / 2,
             this.frustum_size / 2,
@@ -39,11 +39,29 @@ export class TessellateScene extends VisScene {
         this.beat_clock = new THREE.Clock(false);
 
         this.cells = [];
+        this.materials = [];
 
         this.num_per_side = 3;
 
         this.scene = new THREE.Scene();
         this.scene = new THREE.Scene();
+
+        // Create a material for the lines
+
+        for (let i = 0; i < 3; i++) {
+            this.materials[i] = new THREE.LineBasicMaterial({
+                        color: "blue",
+                        linewidth: 1,
+                        });
+        }
+
+        const fill_mat = new THREE.MeshBasicMaterial({
+                                    color: "black",
+                                    polygonOffset: true,
+                                    polygonOffsetFactor: 1, // positive value pushes polygon further away
+                                    polygonOffsetUnits: 1
+                                });
+
         const loader = new SVGLoader();
         // load a SVG resource
         loader.load(
@@ -55,96 +73,145 @@ export class TessellateScene extends VisScene {
 
                 let renderOrder = 0;
 
-                for ( const path of data.paths ) {
+                for (const path of data.paths) {
 
-                        const fillColor = path.userData.style.fill;
-                        const brightness = 0.5;
+                    // Iterate over each subPath
+                    for (const subPath of path.subPaths) {
+                        // Use the getSpacedPoints method to get a set of points along the path
+                        const points = subPath.getPoints();
 
-                        if ( true && fillColor !== undefined && fillColor !== 'none' ) {
+                        // Create a geometry from the points
+                        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+                        // Create a line from the geometry and the material
+                        const line = new THREE.Line(geometry, this.materials[0]);
+                        line.position.z = 0.5;
+                        line.renderOrder = renderOrder++;
+
+                        // Add the line to the group
+                        group.add(line);
 
 
-                                const material = new THREE.MeshBasicMaterial( {
-                                        color: new THREE.Color("blue"),
-                                        opacity: path.userData.style.fillOpacity,
-                                        transparent: true,
-                                        side: THREE.DoubleSide,
-                                        depthWrite: false,
-                                        wireframe: false,
-                                } );
 
-                                const shapes = SVGLoader.createShapes( path );
 
-                                for ( const shape of shapes ) {
 
-                                        const geometry = new THREE.ShapeGeometry( shape );
-                                        const mesh = new THREE.Mesh( geometry, material );
-                                        mesh.renderOrder = renderOrder ++;
+// Extrude the line by creating vertices at an offset (extrusion) along the Z-axis
+                        /*const extrudeDepth = 1;
+                        const vertices = [];
+                        const indices = [];
 
-                                        group.add( mesh );
+                        // Loop over the points to create a "wall" of vertices
+                        for (let i = 0; i < points.length; i++) {
+                            const pt = points[i];
+                            //const ptNext = points[i + 1] || points[0];
+                            const ptNext = points[i + 1];
 
-                                }
+                            let baseIndex = 4 * i;
 
-                        }
+                            // Create two vertices for the current point, at different z positions
+                            const v1 = new THREE.Vector3(pt.x, pt.y, 0);
+                            const v2 = new THREE.Vector3(pt.x, pt.y, extrudeDepth);
+                            vertices.push(v1, v2);
 
-                        const strokeColor = path.userData.style.stroke;
-                        const material = new THREE.LineBasicMaterial( {
-                                color: "blue",
-                                linewidth: 1,
-                        } );
+                            if (ptNext) {
+                                // Same for the next point
+                                const v3 = new THREE.Vector3(ptNext.x, ptNext.y, 0);
+                                const v4 = new THREE.Vector3(ptNext.x, ptNext.y, extrudeDepth);
 
-                        const fill_mat = new THREE.MeshBasicMaterial({
-                            color: "black",
-                            polygonOffset: true,
-                            polygonOffsetFactor: 1, // positive value pushes polygon further away
-                            polygonOffsetUnits: 1
-                        });
-
-                        if ( true && strokeColor !== undefined && strokeColor !== 'none' ) {
-                            const shapes = SVGLoader.createShapes( path );
-                            for ( let j = 0; j < shapes.length; j ++ ) {
-
-                                const shape = shapes[ j ];
-                                const meshGeometry = new THREE.ExtrudeGeometry(shape, {
-                                    depth: 1,
-                                    bevelEnabled: false,
-                                });
-                                const linesGeometry = new THREE.EdgesGeometry(meshGeometry);
-                                const mesh = new THREE.Mesh(meshGeometry, fill_mat);
-                                const lines = new THREE.LineSegments(linesGeometry, material);
-
-                                /*const shape3d = new THREE.BufferGeometry().setFromPoints( shape.getPoints() );
-                                const line = new THREE.LineLoop( shape3d, material );
-                                group.add( line );
-                                line.renderOrder = 1;
-                                for (const hole of shape.getPointsHoles()) {
-                                    const hole3d = new THREE.BufferGeometry().setFromPoints( hole );
-                                    const hole_line = new THREE.LineLoop( hole3d, material );
-                                    group.add( hole_line );
-                                    hole_line.renderOrder = 1;
-                                }*/
-                                group.add(mesh);
-                                group.add(lines);
+                                vertices.push(v3, v4);
+                                indices.push(baseIndex, baseIndex + 1, baseIndex + 3, baseIndex + 2, baseIndex);
+                            } else {
+                                indices.push(baseIndex, baseIndex + 1);
                             }
+                            //extrudeGeom.vertices.push(v1, v2, v3, v4);
                         }
+                        const geometry = new THREE.BufferGeometry().setFromPoints(vertices);
+                        geometry.setIndex(indices);
+
+                        // Create a mesh from the custom geometry
+                        const edges = new THREE.EdgesGeometry( geometry );
+                        const mesh = new THREE.Mesh(geometry, material);
+                        const lines = new THREE.Line(edges, material);
+                        group.add(lines);*/
+
+
+                    }
+
+                    const shapes = SVGLoader.createShapes( path );
+
+                    for ( const shape of shapes ) {
+
+                            //const geometry = new THREE.ShapeGeometry( shape );
+                            //const mesh = new THREE.Mesh( geometry, material );
+                            //mesh.renderOrder = renderOrder ++;
+
+                            //group.add( mesh );
+                            const meshGeometry = new THREE.ExtrudeGeometry(shape, {
+                                depth: 0.5,
+                                bevelEnabled: false,
+                            });
+                            const linesGeometry = new THREE.EdgesGeometry(meshGeometry, 10);
+                            const mesh = new THREE.Mesh(meshGeometry, fill_mat);
+                            const lines = new THREE.LineSegments(linesGeometry, this.materials[0]);
+                            //group.add(mesh);
+                            //group.add(lines);
+                    }
                 }
                 group.scale.multiplyScalar( 0.05 );
                 group.scale.y *= - 1;
                 group.position.set(-this.frustum_size / 2, this.frustum_size / 2, 0);
+                const spacing = 12.45;
+                const spacing_y = spacing / 2;
+                const spacing_x = Math.sqrt(3) * spacing / 2;
+
+                for (let i = 0; i < 3; i++) {
+                    const vector = new THREE.Vector3(-5.35, 1.65, 0);
+                    const quaternion = new THREE.Quaternion();
+                    quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), i * 2 * Math.PI / 3);
+                    vector.applyQuaternion(quaternion);
+                    for (let j = -5; j < 5; j++) {
+                        for (let k = -5; k < 5; k++) {
+                            const quaternion2 = new THREE.Quaternion();
+                            quaternion2.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 2 * Math.PI / 3);
+
+                            const offset = new THREE.Vector3(spacing_x * j, spacing_y * j, 0);
+                            offset.add(new THREE.Vector3(2 * spacing_x * k, 0, 0));
+                            //offset.applyQuaternion(quaternion2);
+
+                            if (k % 2 == 1) {
+                                //offset.add(new THREE.Vector3(0, spacing_y / 2, 0));
+                            }
+
+
+
+                            const this_pos = vector.clone();
+                            this_pos.add(offset);
+
+                            //const vector = new THREE.Vector3(-5.35, 1.65, 0);
+                            //vector.add(offset);
+
+                            const cell = group.clone();
+                            for (const child of cell.children) {
+                                if (child.material.type == "LineBasicMaterial") {
+                                    child.material = this.materials[i];
+                                }
+                            }
+                            cell.position.copy(this_pos);
+                            cell.applyQuaternion(quaternion);
+                            this.cells.push(cell);
+                            this.base_group.add(cell);
+                        }
+                    }
+                }
 
 
                 for (let i = 0; i < this.num_per_side; i++) {
                     for (let j = 0; j < this.num_per_side; j++) {
-                        const cell = group.clone();
-                        const spacing = 10;
-                        cell.position.set(i * spacing - spacing * this.num_per_side / 2, j * spacing - spacing * this.num_per_side / 2, 0);
-                        cell.rotation.z = 2 * Math.PI / 3 * (this.num_per_side * i + j);
-                        this.cells.push(cell);
-                        this.base_group.add(cell);
                     }
                 }
 
                 this.isom_angle = -Math.asin(1 / Math.sqrt(3));
-                this.base_group.rotation.x = this.isom_angle;     // isometric angle
+                //this.base_group.rotation.x = this.isom_angle;     // isometric angle
             },
             // called when loading is in progresses
             function ( xhr ) {
@@ -170,8 +237,19 @@ export class TessellateScene extends VisScene {
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
         this.evolve_time += 0.5 * clock_dt * beats_per_sec;
-        this.base_group.rotation.z = this.elapsed_time_beats * Math.PI * 2 / 32;
+        this.base_group.rotation.z = this.elapsed_time_beats * Math.PI * 2 / 128;
         this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
+
+        const start_color = new THREE.Color("magenta");
+        const end_color = new THREE.Color("blue");
+        const beats_per_color_cycle = 16.0;
+        for (let i = 0; i < 3; i++) {
+            const cur_color = new THREE.Color();
+            const frac = (this.elapsed_time_beats / beats_per_color_cycle + i / 8) % 1;
+            cur_color.lerpColors(start_color, end_color, frac);
+            this.materials[i].color.setHSL(frac, 1, 0.5);
+            //this.materials[i].color = cur_color;
+        }
         for (const i in this.cells) {
             this.cells[i].scale.z = 2 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 8 + i * Math.PI / 3));
         }

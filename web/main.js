@@ -1179,7 +1179,7 @@ class GraphicsContext {
         this.renderer.xr.enabled = true
         this.container.appendChild(this.renderer.domElement);
 
-        document.body.appendChild( VRButton.createButton(this.renderer) );
+        //document.body.appendChild( VRButton.createButton(this.renderer) );
 
         this.composer = new EffectComposer(this.renderer);
 

@@ -24,7 +24,7 @@ export class TessellateScene extends VisScene {
         const height = window.innerHeight;
 
         const aspect = width / height;
-        this.frustum_size = 40;
+        this.frustum_size = 30;
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size / 2,
             this.frustum_size / 2,
@@ -38,7 +38,7 @@ export class TessellateScene extends VisScene {
         this.cur_rotation = 0;
         this.beat_clock = new THREE.Clock(false);
 
-        this.cells = [];
+        this.cells = [[], [], []];
         this.materials = [];
 
         this.num_per_side = 3;
@@ -198,7 +198,8 @@ export class TessellateScene extends VisScene {
                             }
                             cell.position.copy(this_pos);
                             cell.applyQuaternion(quaternion);
-                            this.cells.push(cell);
+                            cell.wave_idx = j;
+                            this.cells[i].push(cell);
                             this.base_group.add(cell);
                         }
                     }
@@ -211,7 +212,7 @@ export class TessellateScene extends VisScene {
                 }
 
                 this.isom_angle = -Math.asin(1 / Math.sqrt(3));
-                //this.base_group.rotation.x = this.isom_angle;     // isometric angle
+                this.base_group.rotation.x = this.isom_angle;     // isometric angle
             },
             // called when loading is in progresses
             function ( xhr ) {
@@ -231,6 +232,20 @@ export class TessellateScene extends VisScene {
 
     }
 
+    get_palette_color(t) {
+        const a = [0.5, 0.5, 0.5];
+        const b = [0.5, 0.5, 0.5];
+        const c = [2.0, 1.0, 0.0];
+        const d = [0.5, 0.2, 0.25];
+
+        const out = [0, 0, 0];
+        for (let i = 0; i < 3; i++) {
+            out[i] = a[i] + b[i] * Math.cos(2 * Math.PI * ( c[i] * t + d[i] ) );
+        }
+        console.log(out);
+        return new THREE.Color(...out);
+    }
+
     anim_frame(dt) {
         const beats_per_sec = this.env.bpm / 60;
         const clock_dt = this.clock.getDelta();
@@ -238,20 +253,31 @@ export class TessellateScene extends VisScene {
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
         this.evolve_time += 0.5 * clock_dt * beats_per_sec;
         this.base_group.rotation.z = this.elapsed_time_beats * Math.PI * 2 / 128;
-        this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
+        //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
 
-        const start_color = new THREE.Color("magenta");
-        const end_color = new THREE.Color("blue");
-        const beats_per_color_cycle = 16.0;
+        const beats_per_color_cycle = 8.0;
         for (let i = 0; i < 3; i++) {
             const cur_color = new THREE.Color();
             const frac = (this.elapsed_time_beats / beats_per_color_cycle + i / 8) % 1;
-            cur_color.lerpColors(start_color, end_color, frac);
-            this.materials[i].color.setHSL(frac, 1, 0.5);
+            //cur_color.lerpColors(start_color, end_color, frac);
+
+
+
+
+            //this.materials[i].color = this.get_palette_color(frac);
             //this.materials[i].color = cur_color;
         }
+
+        const start_color = new THREE.Color("blue");
+        const end_color = new THREE.Color("white");
         for (const i in this.cells) {
-            this.cells[i].scale.z = 2 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 8 + i * Math.PI / 3));
+            for (const j in this.cells[i]) {
+                const r = this.cells[i][j].position.x;
+                const jump_frac = (Math.max(1, 2 * 
+                    Math.sin(this.elapsed_time_beats / 8 * 2 * Math.PI + (2 / 3 * i + 1 / 200 * r) * Math.PI)) - 1)
+                this.cells[i][j].position.z = 8 * jump_frac;
+                this.materials[i].color.lerpColors(start_color, end_color, jump_frac);
+            }
         }
     }
 

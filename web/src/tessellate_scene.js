@@ -252,7 +252,8 @@ export class TessellateScene extends VisScene {
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
         this.evolve_time += 0.5 * clock_dt * beats_per_sec;
-        this.base_group.rotation.z = this.elapsed_time_beats * Math.PI * 2 / 128;
+        const cur_rot = this.elapsed_time_beats * Math.PI * 2 / 128
+        this.base_group.rotation.z = cur_rot;
         //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
 
         const beats_per_color_cycle = 8.0;
@@ -268,15 +269,23 @@ export class TessellateScene extends VisScene {
             //this.materials[i].color = cur_color;
         }
 
-        const start_color = new THREE.Color("blue");
+        const get_jump_func = (i, r, t) => {
+            return 1 * (Math.max(1, 2 * Math.sin(2 * Math.PI * (t - 1 / 3 * i + 1 / 200 * r))) - 1);
+        }
+
+        const color1 = new THREE.Color("blue");
+        const color2 = new THREE.Color("magenta");
+        const start_color = new THREE.Color();
+        start_color.lerpColors(color1, color2, Math.abs((3 * cur_rot / (2 * Math.PI) % 2) - 1));
         const end_color = new THREE.Color("white");
+        const t = this.elapsed_time_beats / 8;
         for (const i in this.cells) {
+            const color_frac = get_jump_func(i, 0, t);
+            this.materials[i].color.lerpColors(start_color, end_color, color_frac);
             for (const j in this.cells[i]) {
                 const r = this.cells[i][j].position.x;
-                const jump_frac = (Math.max(1, 2 * 
-                    Math.sin(this.elapsed_time_beats / 8 * 2 * Math.PI + (2 / 3 * i + 1 / 200 * r) * Math.PI)) - 1)
+                const jump_frac = get_jump_func(i, r, t);
                 this.cells[i][j].position.z = 8 * jump_frac;
-                this.materials[i].color.lerpColors(start_color, end_color, jump_frac);
             }
         }
     }

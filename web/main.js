@@ -44,6 +44,8 @@ const MSG_TYPE_BEAT = 1;
 const MSG_TYPE_GOTO_SCENE = 2;
 const MSG_TYPE_ADVANCE_SCENE_STATE = 3;
 
+const ENABLE_GLOBAL_TRACERS = false;
+
 var context = null;
 
 const env = {
@@ -1141,8 +1143,8 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
-            new SlideScene(env, ["img/cover.png", "img/rat.png"]),
-            new ChineseScene(env),
+            //new SlideScene(env, ["img/cover.png", "img/rat.png"]),
+            //new ChineseScene(env),
             new TessellateScene(env),
             new FastCarScene(env),
             new CubeLockingScene(env),
@@ -1289,8 +1291,10 @@ class GraphicsContext {
     }
 
     render() {
-        /*this.scenes[this.cur_scene_idx].render(this.renderer);
-        return;*/
+        if (!ENABLE_GLOBAL_TRACERS) {
+            this.scenes[this.cur_scene_idx].render(this.renderer);
+            return;
+        }
 
 
 

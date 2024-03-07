@@ -4,8 +4,6 @@ import { VisScene } from './vis_scene.js';
 import {
     lerp_scalar,
     ease,
-    update_persp_camera_aspect,
-    update_orth_camera_aspect,
     rand_int,
     clamp,
     arr_eq,
@@ -171,13 +169,13 @@ export class SpinningRobotsScene extends VisScene {
         const height = window.innerHeight;
         const aspect = width / height;
         this.frustum_size = 20;
-        this.cam_fg = new THREE.OrthographicCamera(
+        this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
 
-        this.camera = this.cam_fg;
+        this.camera = this.cam_orth;
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 

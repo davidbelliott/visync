@@ -9,7 +9,8 @@ import {
     clamp,
     arr_eq,
     create_instanced_cube,
-    ShaderLoader
+    ShaderLoader,
+    BeatClock,
 } from './util.js';
 import { Tesseract } from './highdim.js';
 
@@ -36,9 +37,9 @@ export class IntroScene extends VisScene {
 
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
-        this.sync_clock = new THREE.Clock(false);
-        this.beat_clock = new THREE.Clock(false);
-        this.dim_change_clock = new THREE.Clock(false);
+        this.sync_clock = new BeatClock(this, false);
+        this.beat_clock = new BeatClock(this, false);
+        this.dim_change_clock = new BeatClock(this, false);
 
         this.base_group = new THREE.Group();
         this.tesseract = new Tesseract(10.0, this.cam_orth);
@@ -68,13 +69,11 @@ export class IntroScene extends VisScene {
     }
 
     anim_frame(dt) {
-
-        const beats_per_sec = this.get_local_bpm() / 60;
         const beats_per_lerp = 1.0;
 
         // Handle rotation
         {
-            const t_sync = this.sync_clock.getElapsedTime() * beats_per_sec;
+            const t_sync = this.sync_clock.get_elapsed_beats();
             const frac = clamp((t_sync - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
             if (this.cur_dim == 4) {
                 this.tesseract.rot_xw = Math.PI / 8 * (2 + this.start_rot +
@@ -90,9 +89,7 @@ export class IntroScene extends VisScene {
 
         this.rot++;
     
-        const clock_dt = this.clock.getDelta();
-        const t_elapsed_since_beat = this.beat_clock.getElapsedTime();
-        const t = t_elapsed_since_beat * beats_per_sec;
+        const t = this.beat_clock.get_elapsed_beats();
         const bounce_beats = 4;
         const state_change_beats = 8;
 
@@ -111,7 +108,7 @@ export class IntroScene extends VisScene {
             arr.push(this_val);
             frac -= this_val;
         }*/
-        let state_change_frac = clamp(this.dim_change_clock.getElapsedTime() * beats_per_sec / state_change_beats, 0, 1);
+        let state_change_frac = clamp(this.dim_change_clock.get_elapsed_beats() / state_change_beats, 0, 1);
         const scaling_idx = this.cur_dim - 1 - this.dim_change_direction;
 
         this.scales[this.cur_dim - 1] = frac;

@@ -278,3 +278,29 @@ export class ObjectPool extends THREE.Group {
         });
     }
 }
+
+export class BeatClock extends THREE.Clock {
+    constructor(scene, autostart=true) {
+        super(autostart);
+        this.scene = scene;
+        this.elapsed_beats = 0;
+    }
+
+    start() {
+        super.start();
+        this.elapsed_beats = 0;
+    }
+
+    get_elapsed_beats() {
+        this.get_delta_beats();     // updates elapsed_beats
+        return this.elapsed_beats;
+    }
+
+    get_delta_beats() {
+        const delta_time = this.getDelta();
+        const beats_per_second = this.scene.get_local_bpm() / 60;
+        const beat_delta = delta_time * beats_per_second;
+        this.elapsed_beats += beat_delta;
+        return beat_delta;
+    }
+}

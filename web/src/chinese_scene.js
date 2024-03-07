@@ -101,7 +101,7 @@ export class ChineseScene extends VisScene {
                 },
                 // called when loading is in progresses
                 function ( xhr ) {
-                    console.log( 'SVG ' + ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+                    //console.log( 'SVG ' + ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
                 },
                 // called when loading has errors
                 function ( error ) {
@@ -171,7 +171,6 @@ export class ChineseScene extends VisScene {
             this.plane.scale.set(width, height, 1);
         }
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
-        console.log(`Width/height: ${width}/${height}`);
     }
 
     create_buffer(width, height) {

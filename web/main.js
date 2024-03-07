@@ -21,6 +21,7 @@ import { FastCarScene } from './src/fast_car_scene.js';
 import { CubeLockingScene } from './src/cube_locking_scene.js';
 import { YellowRobotScene } from './src/yellow_robot_scene.js';
 import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
+import { DrumboxScene } from './src/drumboxes_scene.js';
 
 
 import {
@@ -50,7 +51,7 @@ const ENABLE_GLOBAL_TRACERS = false;
 var context = null;
 
 const env = {
-    bpm: 120,
+    bpm: 0,
     total_latency: 0.065,
 }
 
@@ -109,8 +110,10 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    //const socket = new WebSocket(`${protocol}://${window.location.hostname}${pathname}ws`);
-    const socket = new WebSocket(`ws://192.168.1.2:8765`);
+    const relay_url = (import.meta.env.MODE === 'development') ?
+        '192.168.4.1:8765' : `${window.location.hostname}${pathname}ws`;
+    const socket = new WebSocket(`${protocol}://${relay_url}`);
+    //const socket = new WebSocket(`ws://192.168.1.2:8765`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -118,8 +121,9 @@ function connect() {
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
+            //
             env.bpm = msg.bpm;
-            context.handle_sync(msg.t, msg.bpm, msg.beat);
+            context.handle_sync(msg.t, env.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
@@ -740,6 +744,8 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new DrumboxScene(env),
+            new IceCreamScene(env),
             new SlideScene(env, ["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
             new IntroScene(env),
             new SpinningRobotsScene(env),
@@ -749,7 +755,6 @@ class GraphicsContext {
             new CubeLockingScene(env),
             new HomeBackground(env),
             new YellowRobotScene(env),
-            new IceCreamScene(env),
             new Tracers(env),
             new HexagonScene(env),
             new GantryScene(env),
@@ -850,7 +855,8 @@ class GraphicsContext {
     }
 
     anim_frame() {
-        const dt = this.clock.getDelta();
+        //const dt = this.clock.getDelta();
+        const dt = 1.0 / 60.0;
         const t_now = this.clock.getElapsedTime();
         this.scenes[this.cur_scene_idx].anim_frame(dt);
 
@@ -935,7 +941,9 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.recreate_buffers(width, height);
-        this.scenes[this.cur_scene_idx].handle_resize(width, height);
+        this.scenes.forEach((scene) => {
+            scene.handle_resize(width, height);
+        });
         this.renderer.setSize(width, height);
     }
 
@@ -953,6 +961,7 @@ class GraphicsContext {
 
     keydown(e) {
         const num = parseInt(e.key);
+        console.log(num);
         if (!isNaN(num)) {
             const scene_idx = Math.min(num % 10, this.scenes.length - 1);
             this.change_scene(scene_idx);
@@ -969,6 +978,10 @@ class GraphicsContext {
             } else {
                 this.debug_overlay.style.display = 'hidden';
             }
+        } else if (e.key == '.') {
+            this.scenes[this.cur_scene_idx].advance_state(1);
+        } else if (e.key == ',') {
+            this.scenes[this.cur_scene_idx].advance_state(-1);
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);
         }
@@ -984,7 +997,9 @@ class GraphicsContext {
         ]);
 
         setTimeout(() => {
-            this.scenes[this.cur_scene_idx]._handle_sync_raw(t, bpm, beat + 1);
+            this.scenes.forEach((scene) => {
+                scene._handle_sync_raw(t, bpm, beat + 1);
+            });
         }, delay * 1000);
     }
 
@@ -996,7 +1011,9 @@ class GraphicsContext {
             start_t,
             start_t + thirtysecond_note_dur
         ]);
-        this.scenes[this.cur_scene_idx].handle_beat(t, channel);
+        this.scenes.forEach((scene) => {
+            scene.handle_beat(t, channel);
+        });
     }
 }
 

@@ -418,12 +418,10 @@ export class GantryScene extends VisScene {
             this.gantries[this.moving_gantry_idx].move_clock.start();
         }
         if (beat % 4 == 0) {
-            console.log(this.rot_clock.getElapsedTime() * beats_per_sec);
             if (rand_int(0, 4) == 0 && (
                     (!this.rot_clock.running) ||
                     (this.rot_clock.getElapsedTime() * beats_per_sec > this.rotation_movement_beats))) {
 
-                console.log("rotation change");
                 this.start_rot_y = this.target_rot_y;
                 this.target_rot_y += rand_int(0, 2) * 2 - 1;
                 this.rot_clock.start();

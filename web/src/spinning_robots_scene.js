@@ -15,7 +15,8 @@ import {
     make_wireframe_circle,
     make_line,
     ShaderLoader,
-    Spark
+    Spark,
+    BeatClock
 } from './util.js';
 import { BoxDef } from './geom_def.js';
 
@@ -228,28 +229,24 @@ export class SpinningRobotsScene extends VisScene {
         this.scene.add(this.base_group);
 
         this.clock = new THREE.Clock(true);
-        this.half_beat_clock = new THREE.Clock(false);
-        this.throw_clock = new THREE.Clock(false);
+        this.half_beat_clock = new BeatClock(this, false);
+        this.throw_clock = new BeatClock(this, false);
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        //this.base_group.rotation.y += 0.1 * dt;
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
-        //this.base_group.rotation.x = Math.sin(this.clock.getElapsedTime() * beats_per_sec * Math.PI * 2) * isom_angle;
         this.base_group.rotation.y += 0.1 * dt;
-        //this.camera.rotation.x = -isom_angle;
         this.camera.rotation.x = -0.5 * (1 + Math.sin(this.clock.getElapsedTime() * 0.1)) * isom_angle;
 
-        const half_beat_time = this.half_beat_clock.getElapsedTime() * beats_per_sec / 2.0;;
-        const throw_time = this.throw_clock.getElapsedTime() * beats_per_sec;
+        const half_beat_time = this.half_beat_clock.get_elapsed_beats() / 2.0;;
+        const throw_time = this.throw_clock.get_elapsed_beats();
         for (const r of this.robots) {
             r.anim_frame(dt, half_beat_time, throw_time, this.get_local_bpm());
         }
     }
 
     handle_sync(t, bpm, beat) {
-        console.log("Handle sync");
         if (beat % 2 == 0) {
             // half-note beat
             this.half_beat_clock.start();

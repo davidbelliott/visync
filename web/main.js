@@ -313,8 +313,9 @@ class HomeBackground extends VisScene {
 
 
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
-        this.camera.position.set(0, 0, 10);
+        this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
+        this.cam_persp.position.set(0, 0, 10);
+        this.camera = this.cam_persp;
         //this.camera = new THREE.OrthographicCamera(-8, 8, -8, 8);
         this.cam_vel = new THREE.Vector3();
         this.cube_positions = [];
@@ -350,9 +351,6 @@ class HomeBackground extends VisScene {
 
         this.cur_selected = 0;
         this.has_started = false;
-
-        const aspect = window.innerWidth / window.innerHeight;
-        update_persp_camera_aspect(this.camera, aspect);
     }
 
     anim_frame(dt) {

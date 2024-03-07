@@ -11,7 +11,7 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(env, num_states=1) {
+    constructor(env, num_states=1, max_bpm=140) {
         this.env = env;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -21,6 +21,9 @@ export class VisScene {
         this.yscale = 1.0;
         this.cur_state_idx = 0;
         this.num_states = num_states;
+        this.max_bpm = max_bpm;
+        this.bpm_divisor = 1;
+        this.last_bpm_recorded = 0;
     }
 
     activate() {
@@ -40,8 +43,33 @@ export class VisScene {
 
     }
 
+    _handle_sync_raw(t, bpm, beat) {
+        if (this.last_bpm_recorded == 0) {
+            this.last_bpm_recorded = bpm;
+        }
+        this.bpm_divisor = 1;
+        let div_bpm = (bpm + this.last_bpm_recorded) / 2;
+        while (div_bpm > this.max_bpm) {
+            div_bpm /= 2;
+            this.bpm_divisor *= 2;
+        }
+        console.log(bpm);
+
+        if (beat % this.bpm_divisor == 0) {
+            const beat_idx = Math.floor(beat / this.bpm_divisor);
+            console.log(beat_idx);
+            this.handle_sync(t, div_bpm, beat_idx);
+        }
+
+        this.last_bpm_recorded = bpm;
+    }
+
+    get_local_bpm() {
+        return this.env.bpm / this.bpm_divisor;
+    }
+
     handle_sync(t, bpm, beat) {
-        
+
     }
 
     handle_beat(t, channel) {

@@ -147,7 +147,7 @@ export class ChineseScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
@@ -184,7 +184,7 @@ export class ChineseScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        const delay = Math.max(60 / this.get_local_bpm() / 2 - this.env.total_latency, 0);
         setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
     }
 

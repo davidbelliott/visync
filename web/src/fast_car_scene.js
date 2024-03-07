@@ -51,7 +51,7 @@ class TunnelMovementBackground {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const elapsed = this.clock.getElapsedTime();
         const speed = 20.0;
         this.squares_group.position.z = -speed * elapsed;
@@ -230,7 +230,7 @@ export class FastCarScene extends VisScene {
     anim_frame(dt) {
         this.bg.anim_frame(dt);
 
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const beats_per_lerp = 1.0;
         const t = this.sync_clock.getElapsedTime() * beats_per_sec;
         const frac = clamp((t - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);

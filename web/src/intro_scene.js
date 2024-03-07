@@ -69,7 +69,7 @@ export class IntroScene extends VisScene {
 
     anim_frame(dt) {
 
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const beats_per_lerp = 1.0;
 
         // Handle rotation

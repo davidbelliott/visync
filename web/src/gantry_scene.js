@@ -46,7 +46,7 @@ class Gantry {
         this.paddle_start_y = this.paddle_base_y;
         this.paddle_end_y = (1.5 + 0.5) - this.base_y;
 
-        this.pound_movement_beats = 0.35;
+        this.pound_movement_secs = 0.15;
 
         this.parent_obj = parent_obj;
         this.clock = new THREE.Clock(false);
@@ -93,7 +93,7 @@ class Gantry {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.parent_scene.get_local_bpm() / 60;
         const sweep_beats = 2;
 
         // Sweeping
@@ -125,7 +125,7 @@ class Gantry {
 
         // Pounding
         {
-            const t = this.pound_clock.getElapsedTime() * beats_per_sec / this.pound_movement_beats;
+            const t = this.pound_clock.getElapsedTime() / this.pound_movement_secs;
             let start_y = this.paddle_start_y;
             let end_y = this.paddle_end_y;
             const frac = (1 - Math.abs(Math.min(2, Math.max(0, t)) - 1)) ** 2;
@@ -182,7 +182,6 @@ class Gantry {
     }
 
     start_pound(sparks) {
-        const beats_per_sec = this.env.bpm / 60;
         /*if (this.pound_clock.getElapsedTime() * beats_per_sec < 2 * this.pound_movement_beats) {
             // has not fully returned to top position
             this.paddle_start_y = this.paddle.position.y;
@@ -198,7 +197,7 @@ class Gantry {
             }
             this.parent_scene.add_excitation(new THREE.Vector3(
                 this.mover.position.x, 0, this.mover.position.z));
-        }, 1000 / beats_per_sec * this.pound_movement_beats);
+        }, 1000 * this.pound_movement_secs);
     }
 }
 
@@ -312,7 +311,7 @@ export class GantryScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const cube_moves_per_beat = 4;
 
 
@@ -396,7 +395,7 @@ export class GantryScene extends VisScene {
         //}
         const elapsed_time = this.clock.getElapsedTime();
         const mid_range_cubes = 6;  // target middle 8 rows
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
 
         if (beat % 2 == 0) {
             this.moving_gantry_idx = Math.floor(beat / 2) % 2;

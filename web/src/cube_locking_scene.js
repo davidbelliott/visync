@@ -282,7 +282,7 @@ export class CubeLockingScene extends VisScene {
             this.tube_geometries[i].setDrawRange(this_range, 9000);
         }
 
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
 
         // Handle rotation
         {
@@ -326,7 +326,7 @@ export class CubeLockingScene extends VisScene {
             this.end_rot = this.start_rot + this.rot_dir;
             console.log(this.start_rot);
         }
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
     }
 
     handle_beat(t, channel) {

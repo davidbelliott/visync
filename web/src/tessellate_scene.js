@@ -208,7 +208,7 @@ export class TessellateScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
@@ -219,7 +219,9 @@ export class TessellateScene extends VisScene {
 
 
         const get_jump_func = (i, r, t) => {
-            return 1 * (Math.max(1, 2 * Math.sin(2 * Math.PI * (t - 1 / 3 * i + 1 / 150 * r))) - 1);
+            const x = t - r / 100 - i;
+            return Math.sin(Math.PI * Math.min(1, x % 3));
+            return 1 * (Math.max(0, 2 * Math.sin(2 * Math.PI * (t + 1 / 3 * i + 1 / 200 * r) - 1)));
         }
 
         const color1 = new THREE.Color("blue");
@@ -227,7 +229,7 @@ export class TessellateScene extends VisScene {
         const start_color = new THREE.Color();
         start_color.lerpColors(color1, color2, Math.abs((3 * cur_rot / (2 * Math.PI) % 2) - 1));
         const end_color = new THREE.Color("white");
-        const t = this.elapsed_time_beats / 8;
+        const t = this.elapsed_time_beats / 4;
         this.indices_of_cells.forEach((indices, i) => {
             for (const idx of indices) {
                 const pos = this.inst_geoms[idx[0]].get_pos(idx[1]);
@@ -249,7 +251,7 @@ export class TessellateScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        const delay = Math.max(60 / this.get_local_bpm() / 2 - this.env.total_latency, 0);
         this.beat_clock.stop();
         //setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
     }

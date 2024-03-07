@@ -19,7 +19,8 @@ import {
 } from './util.js';
 
 class TunnelMovementBackground {
-    constructor(env) {
+    constructor(env, parent_scene) {
+        this.parent_scene = parent_scene;
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.squares = [];
@@ -50,7 +51,7 @@ class TunnelMovementBackground {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.parent_scene.get_local_bpm() / 60;
         const elapsed = this.clock.getElapsedTime();
         const speed = 20.0;
         this.squares_group.position.z = -speed * elapsed;
@@ -124,7 +125,7 @@ export class FastCubeScene extends VisScene {
         this.full_beat_clock = new THREE.Clock(true);
 
         this.base_group = new THREE.Group();
-        this.bg = new TunnelMovementBackground(env);
+        this.bg = new TunnelMovementBackground(env, this);
 
         this.vibe_ampl = 0;
 
@@ -257,7 +258,7 @@ export class FastCubeScene extends VisScene {
 
     anim_frame(dt) {
         this.cur_frame++;
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const beats_per_lerp = 1.0;
         const t = this.sync_clock.getElapsedTime() * beats_per_sec;
         const frac = clamp((t - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
@@ -330,7 +331,7 @@ export class FastCubeScene extends VisScene {
         }
 
         if (channel == 1) {
-            const thirtysecond_note_dur = 60 / this.env.bpm / 8;
+            const thirtysecond_note_dur = 60 / this.get_local_bpm() / 8;
             const start_t = this.clock.getElapsedTime() + 4 * thirtysecond_note_dur
                 - this.env.total_latency;
             this.laser_on_times.push([

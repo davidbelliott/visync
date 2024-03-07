@@ -205,7 +205,7 @@ export class SpectrumScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
 
 
         if (this.rotating_y) {
@@ -230,7 +230,7 @@ export class SpectrumScene extends VisScene {
 
 
         for (const signal of this.signals) {
-            signal.update(this.env.bpm);
+            signal.update(this.get_local_bpm());
         }
 
         // Update the line's y-values based on the frequency data

@@ -178,7 +178,7 @@ export class HexagonScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         this.cur_rotation += 1;
         this.base_group.rotation.y = this.cur_rotation * Math.PI / 1024;
 
@@ -201,11 +201,11 @@ export class HexagonScene extends VisScene {
 
     handle_beat(t, channel) {
         console.log("beat");
-        if (channel == 1) {
+        if (channel == 2) {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel);
             }
-        } else if (channel == 2) {
+        } else if (channel == 1) {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel, true, 1); // start at children of assembly
             }

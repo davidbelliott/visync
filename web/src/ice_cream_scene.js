@@ -145,7 +145,7 @@ export class IceCreamScene extends VisScene {
         this.frame_idx++;
         this.rot++;
     
-        const beats_per_sec = this.env.bpm / 60;
+        const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         const t_elapsed_since_beat = this.beat_clock.getElapsedTime();
         const t = t_elapsed_since_beat * beats_per_sec;

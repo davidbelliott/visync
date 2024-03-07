@@ -154,26 +154,6 @@ const POINT_SIZE = 2.0
 const GRID_COLOR = 'white';
 
 
-function make_wireframe_cube() {
-    const geometry = new THREE.BoxGeometry( 1, 1, 1 );
-    const edges_geom = new THREE.EdgesGeometry(geometry);
-    const wireframe_mat = new THREE.LineBasicMaterial({
-        transparent: true,
-        opacity: 1.0,
-        color: new THREE.Color(GRID_COLOR),
-        linewidth: LINE_WIDTH} );
-
-    const ls = new THREE.LineSegments(edges_geom, wireframe_mat);
-
-    const frac = 0.98;
-    const fill_geometry = new THREE.BoxGeometry(frac, frac, frac);
-    const mat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color('black')});
-    const mesh = new THREE.Mesh(fill_geometry, mat);
-    ls.add(mesh);
-    return ls
-}
-
 function make_wireframe_circle(radius, segments, color) {
     // Make a wireframe circle using THREE.js and return it
     const geometry = new THREE.CircleGeometry(radius, segments);
@@ -413,9 +393,8 @@ class Tracers extends VisScene {
         this.lightning_strike_meshes = [];
         this.cubes_group = new THREE.Group();
         for (const pos of this.cube_positions) {
-            const ls = make_wireframe_cube();
+            const ls = create_instanced_cube([1, 1, 1], "cyan");
             ls.position.copy(pos);
-            ls.material.color.copy(new THREE.Color("cyan"));
             this.cubes_group.add(ls);
             this.cubes.push(ls);
             let ray_params = Object.assign({}, this.ray_params_base);
@@ -681,9 +660,8 @@ class HomeBackground extends VisScene {
         this.cubes = [];
         this.cubes_group = new THREE.Group();
         for (const pos of this.cube_positions) {
-            const ls = make_wireframe_cube();
+            const ls = create_instanced_cube([1, 1, 1], "cyan");
             ls.position.copy(pos);
-            ls.material.color.copy(new THREE.Color("cyan"));
             this.cubes_group.add(ls);
             this.cubes.push(ls);
         }
@@ -744,6 +722,7 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new CubeLockingScene(env),
             new DrumboxScene(env),
             new IceCreamScene(env),
             new SlideScene(env, ["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
@@ -752,7 +731,6 @@ class GraphicsContext {
             new ChineseScene(env),
             new TessellateScene(env),
             //new FastCarScene(env),
-            new CubeLockingScene(env),
             new HomeBackground(env),
             new YellowRobotScene(env),
             new Tracers(env),

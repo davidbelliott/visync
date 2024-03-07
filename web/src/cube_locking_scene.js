@@ -9,9 +9,9 @@ import {
     rand_int,
     clamp,
     arr_eq,
-    create_instanced_cube,
-    make_wireframe_cylinder,
     make_wireframe_cube,
+    make_wireframe_cylinder,
+    create_instanced_cube,
     make_wireframe_circle,
     ShaderLoader,
     Spark,
@@ -108,19 +108,18 @@ export class CubeLockingScene extends VisScene {
 
         const aspect = width / height;
         this.frustum_size = 40;
-        this.cam_vbo = new THREE.OrthographicCamera(
+        this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
 
-        this.camera = this.cam_vbo.clone();
-        this.cam_vbo.position.set(0, 0, 100);
+        this.cam_orth.position.set(0, 0, 100);
+        this.camera = this.cam_orth;
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.scene = new THREE.Scene();
-        this.vbo_scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
         this.rot_clock = new THREE.Clock(false);
         this.beat_clock = new THREE.Clock(false);
@@ -129,67 +128,88 @@ export class CubeLockingScene extends VisScene {
         this.beats_per_rotation = 8;
 
         this.base_group = new THREE.Group();
-        this.object_group = new THREE.Group();
-        this.cones = [];
 
-        this.object_color = new THREE.Color("cyan");
-
-
-        this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/dither.frag');
-        this.shader_loader.load().then(([vertex_shader, fragment_shader]) => {
-            this.vbo_material = new THREE.ShaderMaterial({
-                uniforms: {
-                    uTexture: { value: null }
-                },
-                vertexShader: vertex_shader,
-                fragmentShader: fragment_shader
-            });
-            let geometry = new THREE.PlaneGeometry(this.camera.right - this.camera.left,
-                this.camera.top - this.camera.bottom);
-            this.plane = new THREE.Mesh(geometry, this.vbo_material);
-            this.plane.position.z = -100;
-            this.scene.add(this.plane);
-        });
-
-        const loader = new STLLoader();
-        this.object_material = new THREE.MeshLambertMaterial({
-            color: this.object_color,
-            polygonOffset: true,
-            polygonOffsetFactor: 1, // positive value pushes polygon further away
-            polygonOffsetUnits: 1
-        });
-        /*this.object_material = new THREE.MeshBasicMaterial({
-            color: "black",
-            polygonOffset: true,
-            polygonOffsetFactor: 1, // positive value pushes polygon further away
-            polygonOffsetUnits: 1
-        });*/
-        this.object_material.flatShading = false;
-        this.light = new THREE.DirectionalLight("white", 2);
+        this.light = new THREE.DirectionalLight("white", 1);
         this.light.position.set(0, 100, 20);
         this.base_group.add(this.light);
 
-        const this_class = this;
+        this.object_color = new THREE.Color("cyan");
 
-        loader.load(
-            'stl/cube-locking.stl',
-            function (geometry) {
-                const mesh_inner = new THREE.Mesh(geometry, this_class.object_material)
+        const stl_loader = new STLLoader();
+        const stl_load_promise = stl_loader.loadAsync('stl/cube-locking.stl');
+        const shader_loader = new ShaderLoader('glsl/chunks/dither_pars.frag',
+            'glsl/chunks/dither.frag');
+        const shader_load_promise = shader_loader.load();
 
-                const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1, transparent: true } );
-                let edges = new THREE.EdgesGeometry(geometry, 30);
-                let mesh = new THREE.LineSegments(edges, wireframe_mat);
-                this_class.object_group.add(mesh);
-                this_class.object_group.add(mesh_inner);
-                this_class.cube_thing = mesh;
-                this_class.light.target = this_class.cube_thing;
+        Promise.all([stl_load_promise, shader_load_promise]).then(
+            (results) => {
+                const geometry = results[0];
+                const dither_pars = results[1][0];
+                const dither = results[1][1];
 
-            },
-            (xhr) => { },
-            (error) => {
-                console.log(error)
-            }
-        );
+                this.fill_mat = new THREE.MeshLambertMaterial({
+                    color: this.object_color,
+                    polygonOffset: true,
+                    polygonOffsetFactor: 1, // positive value pushes polygon further away
+                    polygonOffsetUnits: 1
+                });
+                this.fill_mat.flatShading = false;
+
+                this.tube_mat = new THREE.MeshLambertMaterial({
+                    color: 'white',
+                    side: THREE.DoubleSide
+                });
+                this.tube_mat.flatShading = false;
+
+                for (const mat of [this.fill_mat, this.tube_mat]) {
+                    mat.onBeforeCompile = (shader) => {
+                        shader.fragmentShader =
+                            shader.fragmentShader.replace(
+                                '#include <dithering_pars_fragment>',
+                                dither_pars
+                            ).replace(
+                                '#include <dithering_fragment>',
+                                dither
+                            );
+                    };
+                }
+
+                // Add cube assembly
+                {
+                    const mesh_inner = new THREE.Mesh(geometry, this.fill_mat)
+                    const wireframe_mat = new THREE.LineBasicMaterial({
+                        color: "white",
+                        linewidth: 1,
+                    });
+                    let edges = new THREE.EdgesGeometry(geometry, 30);
+                    let mesh = new THREE.LineSegments(edges, wireframe_mat);
+                    this.base_group.add(mesh);
+                    this.base_group.add(mesh_inner);
+                    this.cube_thing = mesh;
+                    this.light.target = this.cube_thing;
+                }
+
+
+                // Add tubes
+                {
+                    const path = new CustomSinCurve( 24 );
+                    this.tube_geometries = [];
+
+                    for (let i = 0; i < 3; i++) {
+                        const tube_geom = new THREE.TubeGeometry( path, 1024, 2, 32, false );
+                        if (i == 1) {
+                            tube_geom.rotateY(Math.PI / 2);
+                        } else if (i == 2) {
+                            tube_geom.rotateZ(Math.PI / 2);
+                        }
+                        this.tube_geometries.push(tube_geom);
+
+                        const mesh = new THREE.Mesh(tube_geom, this.tube_mat);
+                        this.base_group.add( mesh );
+                    }
+                }
+        });
+
         this.cubes = [];
         this.cube_wireframe = new THREE.Group();
         for (let i = 1; i < 2; i++) {
@@ -198,7 +218,6 @@ export class CubeLockingScene extends VisScene {
                     //if ((i + j + k) % 2 == 0) {
                         const c = make_wireframe_cube([24, 24, 24], "white");
                         c.position.set((i - 1) * 8, (j - 1) * 8, (k - 1) * 8);
-                        c.material.depthTest = false;
                         c.material.transparent = true;
                         c.material.opacity = 0.8;
                         this.cube_wireframe.add(c);
@@ -210,79 +229,34 @@ export class CubeLockingScene extends VisScene {
 
         this.base_group.rotation.x = isom_angle;
 
-        this.fg_group = this.base_group.clone();
-        this.fg_group.renderOrder = 1;
-        this.fg_group.add(this.cube_wireframe);
-        this.scene.add(this.fg_group);
+        this.base_group.add(this.cube_wireframe);
+        this.scene.add(this.base_group);
 
         const spark_constructor = () => { return new Spark(1.0, "white", [0, 1]); };
         this.spark_pool = new ObjectPool(spark_constructor, 64);
-        this.object_group.add(this.spark_pool);
-
-        //const cube = create_instanced_cube([3, 3, 3], 0x00ff00);
-        //this.base_group.add(cube);
-
-
-        const path = new CustomSinCurve( 24 );
-        this.tube_geometries = [];
-
-        for (let i = 0; i < 3; i++) {
-            const tube_geom = new THREE.TubeGeometry( path, 1024, 2, 32, false );
-            if (i == 1) {
-                tube_geom.rotateY(Math.PI / 2);
-            } else if (i == 2) {
-                tube_geom.rotateZ(Math.PI / 2);
-            }
-            this.tube_geometries.push(tube_geom);
-
-            const material = new THREE.MeshLambertMaterial({ color: 'white',
-                side: THREE.DoubleSide});
-            const mesh = new THREE.Mesh( tube_geom, material );
-            this.object_group.add( mesh );
-        }
-
+        this.base_group.add(this.spark_pool);
         this.draw_range = 0;
-
-
-
 
         // rotation
         this.start_rot = 2;
         this.end_rot = 2;
         this.rot_dir = 1;
-        //this.object_group.rotation.y = this.start_rot * Math.PI / 8;
 
-        this.base_group.add(this.object_group);
-        this.vbo_scene.add(this.base_group);
-        /*{
-            this.fg_group = new THREE.Group();
-            this.tub = make_wireframe_cylinder(4, 3, 7, "white");
-            this.front_decal = make_wireframe_circle(2, 32, this.object_color);
-            this.front_decal.position.z = 3.5;
-            this.front_decal.rotation.x = Math.atan(1 / 7);
-            this.tub.add(this.front_decal);
-            this.lid = make_wireframe_cylinder(4.25, 4.25, 1.5, "white");
-            this.lid.position.y = this.lid_base_y;
-            this.fg_group.add(this.tub);
-            this.fg_group.add(this.lid);
-            this.fg_group.rotation.x = Math.PI / 8;
-            this.fg_group.position.y = -3;
-            this.scene.add(this.fg_group);
-        }*/
 
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
     }
 
     anim_frame(dt) {
-        this.draw_range = (this.draw_range + 360);
-        for (let i = 0; i < 3; i++) {
-            const offset = (2 - i) * 39000;
-            const this_range = (this.draw_range + offset) % (this.tube_geometries[0].index.count);
-            this.tube_geometries[i].setDrawRange(this_range, 9000);
-        }
-
         const beats_per_sec = this.get_local_bpm() / 60;
+        if (this.tube_geometries) {
+            this.draw_range = (this.draw_range + 360);
+            for (let i = 0; i < 3; i++) {
+                const offset = (2 - i) * 39000;
+                const this_range = (this.draw_range + offset) % (this.tube_geometries[0].index.count);
+                this.tube_geometries[i].setDrawRange(this_range, 9000);
+            }
+        }
 
         // Handle rotation
         {
@@ -290,14 +264,15 @@ export class CubeLockingScene extends VisScene {
             const frac = clamp(t / this.beats_per_rotation, 0, 1);
             const cur_rot = Math.PI / 2 * (0.5 + this.start_rot +
                 lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot))
-            this.object_group.rotation.y = cur_rot;
-            this.fg_group.rotation.y = cur_rot;
+            this.base_group.rotation.y = cur_rot;
 
             const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
             const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
             const cur_color = new THREE.Color();
             cur_color.lerpColors(start_color, end_color, frac);
-            this.object_material.color.copy(cur_color);
+            if (this.fill_mat != null) {
+                this.fill_mat.color.copy(cur_color);
+            }
         }
 
         // Update sparks
@@ -344,23 +319,6 @@ export class CubeLockingScene extends VisScene {
         } else if (new_state_idx == 1) {
             this.do_rotation = true;
         }
-    }
-
-    render(renderer) {
-        if (this.vbo_material == null) {
-            return;
-        }
-        renderer.autoClearColor = false;
-        super.render(renderer);
-        renderer.setRenderTarget(this.buffer);
-        renderer.clear();
-        renderer.render(this.vbo_scene, this.cam_vbo);
-        this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
-        renderer.setRenderTarget(null);
-        renderer.clear();
-        renderer.clearDepth();
-        renderer.render(this.scene, this.camera);
-        renderer.autoClearColor = true;
     }
 
     create_spark() {

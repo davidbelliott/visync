@@ -1,16 +1,27 @@
-from websocket_server import WebsocketServer
+import asyncio
+import websockets
 
-WS_PORT=8765
+WS_PORT = 8765
 
-def recv(client, server, msg):
-    server.send_message_to_all(msg)
+# Set of connected clients
+connected = set()
+
+async def echo(websocket):
+    # Register new client
+    connected.add(websocket)
+    try:
+        async for message in websocket:
+            # Echo the message to all connected clients
+            websockets.broadcast(connected, message)
+    finally:
+        # Unregister client
+        connected.remove(websocket)
 
 
-def main():
-    server = WebsocketServer(host='', port=WS_PORT)
-    server.set_fn_message_received(recv)
-    server.run_forever()
+async def main():
+    async with websockets.serve(echo, "0.0.0.0", WS_PORT):
+        await asyncio.Future()  # run forever
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

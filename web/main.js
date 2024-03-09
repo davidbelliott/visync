@@ -23,6 +23,7 @@ import { YellowRobotScene } from './src/yellow_robot_scene.js';
 import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
 import { DrumboxScene } from './src/drumboxes_scene.js';
 import { TracersScene } from './src/tracers_scene.js';
+import { DDRScene } from './src/ddr_scene.js';
 
 
 import {
@@ -390,6 +391,7 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new DDRScene(env),
             new CubeLockingScene(env),
             new DrumboxScene(env),
             new IceCreamScene(env),

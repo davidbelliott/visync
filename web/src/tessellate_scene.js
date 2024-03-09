@@ -90,7 +90,9 @@ export class TessellateScene extends VisScene {
 
                         // Create a geometry from the points
                         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                        this.inst_geoms.push(new InstancedGeometryCollection(this.base_group, geometry, false));
+                        const inst_geom = new InstancedGeometryCollection(geometry, false);
+                        this.scene.add(inst_geom);
+                        this.inst_geoms.push(inst_geom);
 
 
                         // Create a line from the geometry and the material

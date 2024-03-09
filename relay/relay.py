@@ -13,7 +13,7 @@ async def echo(websocket):
         async for message in websocket:
             # Echo the message to all connected clients
             websockets.broadcast(connected, message)
-    finally:
+    except:
         # Unregister client
         connected.remove(websocket)
 

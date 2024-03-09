@@ -4,9 +4,9 @@ import * as THREE from 'three';
 
 
 
-export class InstancedGeometryCollection {
-    constructor(scene, templateGeometry, linesegments=true, maxInstances=1024) {
-        this.scene = scene;
+export class InstancedGeometryCollection extends THREE.Group {
+    constructor(templateGeometry, linesegments=true, maxInstances=1024) {
+        super();
         this.maxInstances = maxInstances;
 
         // Creating an instanced geometry based on the template
@@ -126,7 +126,7 @@ export class InstancedGeometryCollection {
             this.mesh = new THREE.Line(this.instancedGeometry, mat);
         }
         this.mesh.frustumCulled = false;
-        this.scene.add(this.mesh);
+        this.add(this.mesh);
     }
 
     create_geom(pos, color, scale, rotation=0) {

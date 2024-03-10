@@ -16,7 +16,7 @@ import {
 import { InstancedGeometryCollection } from './instanced_geom.js';
 
 const BODY_COLOR = new THREE.Color("red");
-const ROT_BEATS = 4;
+const ROT_BEATS = 3.75;
 
 function mirror_mesh(mesh, axis_idx) {
     const new_mesh = mesh.clone();
@@ -77,7 +77,7 @@ class DDRArrows extends InstancedGeometryCollection {
     constructor(template_geom) {
         super(template_geom);
         for (let i = 0; i < 3; i++) {
-            this.create_geom(new THREE.Vector3(0, 0, 0), new THREE.Color("magenta"), new THREE.Vector3(1, 1, 1), Math.PI / 2 * i);
+            this.create_geom(new THREE.Vector3(0, 0, 0), new THREE.Color("orange"), new THREE.Vector3(1, 1, 1), Math.PI / 2 * i);
         }
     }
 }

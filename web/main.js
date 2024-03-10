@@ -114,7 +114,7 @@ function connect() {
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     const relay_url = (import.meta.env.MODE === 'development') ?
-        '192.168.4.1:8765' : `${window.location.hostname}${pathname}ws`;
+        `${window.location.hostname}:8765` : `${window.location.hostname}${pathname}ws`;
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     //const socket = new WebSocket(`ws://192.168.1.2:8765`);
     socket.addEventListener('message', function(e) {

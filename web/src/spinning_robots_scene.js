@@ -80,7 +80,6 @@ class Robot extends THREE.Object3D {
 
     anim_frame(dt, half_beat_time, throw_time, bpm) {
         const beats_per_sec = bpm / 60;
-        const elapsed = this.clock.getElapsedTime();
 
         const body_offset = this.get_body_shuffle_offset(half_beat_time);
         const arms_offset = this.get_arms_pump_offset(half_beat_time);
@@ -106,12 +105,6 @@ class Robot extends THREE.Object3D {
         }
     }
 
-
-    is_foot_forward(side_idx, t) {
-        const t_period = 1.0 / 4.0;
-        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % 4;
-        return (pos_idx == 1 || pos_idx == 2);
-    }
 
     get_foot_shuffle_offset(side_idx, t) {
         // get shuffle offset for this side as an array [x, y, z]

@@ -11,8 +11,6 @@ from rtmidi.midiconstants import *
 from rtmidi.midiutil import open_midiinput
 import sys
 
-#WS_RELAY = "ws://deadfacade.net/rave/ws"
-WS_RELAY = "ws://192.168.4.1:8765"
 USE_STROBE = False
 
 MIN_BPM = 60
@@ -215,7 +213,7 @@ async def main():
 
     while True:
         try:
-            async with websockets.connect(WS_RELAY) as websocket:
+            async with websockets.connect(f'ws://{args.host}:8765') as websocket:
                 print('Connected to relay')
                 while True:
                     if not args.fake:
@@ -237,11 +235,10 @@ async def main():
                             await websocket.recv()
                         await asyncio.sleep(60 / bpm / 4)
                         beat_idx += 1
-
-        except (TimeoutError,
-                ConnectionRefusedError,
-                websockets.exceptions.ConnectionClosedError,
-                websockets.exceptions.ConnectionClosedOK):
+        except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+            break
+        except Exception as e:
+            print(f'Error: {e}')
             print('Connection failed, retrying...')
             await asyncio.sleep(1)
             continue

@@ -48,13 +48,12 @@ function mesh_from_gltf(gltf_mesh, fill_mat, wireframe_mat) {
 }
 
 class DDRRobot extends THREE.Object3D {
-    constructor(gltf_scene, fill_mat, wireframe_mat) {
+    constructor(gltf_parent_object, fill_mat, wireframe_mat) {
         super();
-        for (const child_mesh of gltf_scene.scene.children) {
-            if (child_mesh.name == "body") {
-                this.body = mesh_from_gltf(child_mesh, fill_mat, wireframe_mat);
-                this.add(this.body);
-            } else if (child_mesh.name == "leg") {
+        this.body = mesh_from_gltf(gltf_parent_object, fill_mat, wireframe_mat);
+        this.add(this.body);
+        for (const child_mesh of gltf_parent_object.children) {
+            if (child_mesh.name == "leg") {
                 this.legs = [mesh_from_gltf(child_mesh, fill_mat, wireframe_mat)];
                 this.legs.push(mirror_mesh(this.legs[0], 2));
                 for (const leg of this.legs) {
@@ -228,7 +227,9 @@ export class DDRScene extends VisScene {
                 const offset = new THREE.Vector3(-this.spacing * (this.num_per_side - 1) / 2, 0, -this.spacing * (this.num_per_side - 1) / 2);
                 for (let i = 0; i < this.num_per_side; i++) {
                     for (let j = 0; j < this.num_per_side; j++) {
-                        const robot = new DDRRobot(gltf_scene, this.fill_mat, this.wireframe_mat);
+                        const robot = new DDRRobot(
+                            gltf_scene.scene.getObjectByName("body"),
+                            this.fill_mat, this.wireframe_mat);
                         robot.position.set(i * this.spacing, 2, j * this.spacing);
                         robot.position.add(offset);
                         this.base_group.add(robot);

@@ -16,15 +16,23 @@ import {
 
 const BODY_COLOR = new THREE.Color("red");
 const ROT_BEATS = 3.75;
+const ARROW_VEL = 5;
+const ARROW_TOP_Y = 1.27;
 
 function mirror_mesh(mesh, axis_idx) {
     const new_mesh = mesh.clone();
-    const scale = new_mesh.scale.toArray();
+
+    // Mirror position
     const pos = new_mesh.position.toArray();
-    scale[axis_idx] *= -1;
     pos[axis_idx] *= -1;
-    new_mesh.scale.fromArray(scale);
+
+    // Mirror geometry
+    const mat = new THREE.Matrix4().identity();
+    mat.elements[axis_idx * 5] = -1;
+    new_mesh.applyMatrix4(mat);
     new_mesh.position.fromArray(pos);
+
+    // Record new base position, scale, and quaternion
     new_mesh.base_pos = new_mesh.position.clone();
     new_mesh.base_scale = new_mesh.scale.clone();
     new_mesh.base_quat = new_mesh.quaternion.clone();
@@ -38,9 +46,9 @@ function mesh_from_gltf(gltf_mesh, fill_mat, wireframe_mat) {
     const fill_mesh = new THREE.Mesh(gltf_geom, fill_mat);
     //mesh.add(fill_mesh);
     mesh.add(new THREE.LineSegments(edges, wireframe_mat));
-    mesh.quaternion.copy(gltf_mesh.quaternion);
-    mesh.position.copy(gltf_mesh.position);
-    mesh.scale.copy(gltf_mesh.scale);
+    gltf_mesh.getWorldQuaternion(mesh.quaternion);
+    gltf_mesh.getWorldPosition(mesh.position);
+    gltf_mesh.getWorldScale(mesh.scale);
     mesh.base_pos = mesh.position.clone();
     mesh.base_quat = mesh.quaternion.clone();
     mesh.base_scale = mesh.scale.clone();
@@ -50,24 +58,24 @@ function mesh_from_gltf(gltf_mesh, fill_mat, wireframe_mat) {
 class DDRRobot extends THREE.Object3D {
     constructor(gltf_parent_object, fill_mat, wireframe_mat) {
         super();
-        this.body = mesh_from_gltf(gltf_parent_object, fill_mat, wireframe_mat);
+        this.body = mesh_from_gltf(gltf_parent_object, fill_mat, wireframe_mat)
         this.add(this.body);
         for (const child_mesh of gltf_parent_object.children) {
             if (child_mesh.name == "leg") {
                 this.legs = [mesh_from_gltf(child_mesh, fill_mat, wireframe_mat)];
-                this.legs.push(mirror_mesh(this.legs[0], 2));
+                this.legs.push(mirror_mesh(this.legs[0], 0));
                 for (const leg of this.legs) {
                     this.add(leg);
                 }
             } else if (child_mesh.name == "hand") {
                 this.hands = [mesh_from_gltf(child_mesh, fill_mat, wireframe_mat)];
-                this.hands.push(mirror_mesh(this.hands[0], 2));
+                this.hands.push(mirror_mesh(this.hands[0], 0));
                 for (const hand of this.hands) {
                     this.add(hand);
                 }
             } else if (child_mesh.name == "foot") {
                 this.feet = [mesh_from_gltf(child_mesh, fill_mat, wireframe_mat)];
-                this.feet.push(mirror_mesh(this.feet[0], 2));
+                this.feet.push(mirror_mesh(this.feet[0], 0));
                 for (const foot of this.feet) {
                     this.add(foot);
                 }
@@ -146,26 +154,44 @@ class DDRRobot extends THREE.Object3D {
 }
 
 class DDRArrow extends THREE.LineSegments {
+    static global_clock = null;
+
     constructor(gltf_scene, parent_scene) {
-        const arrow_geom = gltf_scene.scene.getObjectByName("arrow").geometry;
+        if (DDRArrow.global_clock == null) {
+            DDRArrow.global_clock = new BeatClock(parent_scene, true);
+        }
+        const obj = gltf_scene.scene.getObjectByName("arrow");
+        const arrow_geom = obj.geometry;
         const edges_geom = new THREE.EdgesGeometry(arrow_geom, 30);
-        super(edges_geom, new THREE.LineBasicMaterial({ color: "magenta" }));
+        super(edges_geom, new THREE.LineBasicMaterial({ color: "orange", transparent: true}));
+        obj.getWorldPosition(this.position);
+        obj.getWorldQuaternion(this.quaternion);
+        obj.getWorldScale(this.scale);
+        this.base_pos = this.position.clone();
+        this.base_quat = this.quaternion.clone();
+        this.base_scale = this.scale.clone();
         this.clock = new BeatClock(parent_scene, false);
     }
 
     anim_frame() {
         const beats_elapsed = this.clock.get_elapsed_beats();
+        const global_beats_elapsed = DDRArrow.global_clock.get_elapsed_beats();
         this.offset_vec = new THREE.Vector3(
-            Math.max(4 * (beats_elapsed - this.time_till_impact), 0),
-            Math.min(4 * (beats_elapsed - this.time_till_impact), 0) - 1.27,
-            0);
-        //this.offset_vec.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.rotation.y);
-        this.position.y = this.offset_vec.y;
-        this.position.x = this.offset_vec.x;
+            0,
+            Math.min(ARROW_VEL * (beats_elapsed - this.time_till_impact), 0) - ARROW_TOP_Y,
+            Math.max(ARROW_VEL * (beats_elapsed - this.time_till_impact), 0));
+        this.offset_vec.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2 * this.ddr_direction);
+        this.position.copy(this.offset_vec);
+        this.material.opacity = clamp(1 - (this.time_till_impact - beats_elapsed) / this.time_till_impact, 0, 1);
+        this.material.color.setHSL(Math.sin((beats_elapsed + global_beats_elapsed) / 4), 1, 0.5);
     }
 
     start_anim(ddr_direction, time_till_impact) {
-        //this.rotation.y = Math.PI / 2 * ddr_direction;
+        this.ddr_direction = ddr_direction;
+        this.quaternion.copy(this.base_quat);
+        this.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2 * this.ddr_direction));
+        //const color_options = ["orange", "cyan", "lightgreen", "magenta"];
+        //this.material.color = new THREE.Color(color_options[ddr_direction]);
         this.time_till_impact = time_till_impact;
         this.clock.start();
     }
@@ -228,7 +254,7 @@ export class DDRScene extends VisScene {
                 for (let i = 0; i < this.num_per_side; i++) {
                     for (let j = 0; j < this.num_per_side; j++) {
                         const robot = new DDRRobot(
-                            gltf_scene.scene.getObjectByName("body"),
+                            gltf_scene.scene.getObjectByName("robot"),
                             this.fill_mat, this.wireframe_mat);
                         robot.position.set(i * this.spacing, 2, j * this.spacing);
                         robot.position.add(offset);
@@ -277,7 +303,7 @@ export class DDRScene extends VisScene {
         }
         const rot_frac = ease(clamp(this.robot_rot_clock.get_elapsed_beats() / ROT_BEATS, 0, 1));
         const robot_rot = lerp_scalar(this.start_robot_rot, this.target_robot_rot, rot_frac);
-        //this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
+        this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
 
         const half_beat_time = this.half_beat_clock.get_elapsed_beats() / 2.0;
         for (const r of this.robots) {
@@ -290,6 +316,8 @@ export class DDRScene extends VisScene {
     }
 
     handle_beat(t, channel) {
+        this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
+        this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
     }
 
     handle_sync(t, bpm, beat) {
@@ -302,8 +330,6 @@ export class DDRScene extends VisScene {
             // half-note beat
             this.half_beat_clock.start();
         }
-        this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
-        this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
     }
 
     state_transition(old_state_idx, new_state_idx) {

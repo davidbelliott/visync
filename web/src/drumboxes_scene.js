@@ -290,7 +290,7 @@ export class DrumboxScene extends VisScene {
             if (this.in_position && this.impacts[i][0] >= 0 && new_time < 0) {
                 // Impact on target drum
                 let strike_vel = 0;
-                if (this.impacts[i][1] == 1) {
+                if (this.impacts[i][1] == 1 || this.impacts[i][1] == 3) {
                     strike_vel = this.top_paddle_strike_vel;
                 } else if (this.impacts[i][1] == 2) {
                     strike_vel = this.side_paddle_strike_vel;
@@ -302,7 +302,7 @@ export class DrumboxScene extends VisScene {
             this.impacts[i][0] = new_time;
 
             if (this.in_position) {
-                if (this.impacts[i][1] == 1) {
+                if (this.impacts[i][1] == 1 || this.impacts[i][1] == 3) {
                     top_paddle_pos = Math.min(top_paddle_pos, this.paddle_pos(
                         this.impacts[i][0] / this.top_paddle_pound_time,
                         target_drum_z)[0]);

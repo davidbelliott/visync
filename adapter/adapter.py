@@ -164,7 +164,9 @@ def translate_midi_msg(msg):
             ws_msg = MsgGotoScene(0, note_number - 60)
         elif channel == 13:
             # This channel is used for moving forward/backward in the graphics scene
-            ws_msg = MsgAdvanceSceneState(0, 2 * (note_number % 2) - 1)
+            ws_msg = MsgAdvanceSceneState(0, 1)
+        elif channel == 12:
+            ws_msg = MsgAdvanceSceneState(0, -1)
         else:
             # Remaining channels are used for controlling elements within the scene
             ws_msg = MsgBeat(0, channel, True)

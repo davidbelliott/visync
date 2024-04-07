@@ -303,7 +303,7 @@ export class CubeLockingScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
+        const delay = this.env.get_beat_delay();
         setTimeout(() => {
             if (channel == 1) {
                 this.beat_clock.start();

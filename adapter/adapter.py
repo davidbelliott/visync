@@ -190,10 +190,10 @@ def usage():
 
 
 fake_beat = [[] for i in range(0, 16)]
-for i in [0, 4, 8, 12]:
+for i in [0, 8]:
     fake_beat[i].append(1)
-#for i in [4, 12]:
-    #fake_beat[i].append(2)
+for i in [2, 6, 10, 14]:
+    fake_beat[i].append(2)
 #for i in [0, 6]:
     #fake_beat[i].append(3)
 

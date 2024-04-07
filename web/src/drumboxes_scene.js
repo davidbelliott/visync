@@ -336,7 +336,7 @@ export class DrumboxScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const time_till_impact = 60 / this.env.bpm / 2 - this.env.total_latency;
+        const time_till_impact = this.env.get_beat_delay();
         this.impacts.push([time_till_impact, channel]);
     }
 

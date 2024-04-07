@@ -139,6 +139,34 @@ export function make_wireframe_cylinder(r_top, r_bottom, height, color) {
 }
 
 
+export function make_point_cloud() {
+    const geometry = new THREE.TorusGeometry(10, 3, 16, 100);
+    const material = new THREE.PointsMaterial({
+        size: 2.0,
+        sizeAttenuation: false,
+        depthTest: false,
+        transparent: true,
+        opacity: 1.0});
+
+    return new THREE.Points( geometry, material );
+}
+
+
+export function make_wireframe_special(color) {
+    const geometry = new THREE.TorusKnotGeometry(3, 1, 100, 16);
+    //const edges_geom = new THREE.EdgesGeometry(geometry);
+    const wireframe_mat = new THREE.LineBasicMaterial({
+        transparent: true,
+        opacity: 1.0,
+        color: new THREE.Color(color),
+        linewidth: 1.0} );
+    wireframe_mat.depthTest = false;
+    wireframe_mat.depthWrite = false;
+    const ls = new THREE.LineSegments(geometry, wireframe_mat);
+    return ls
+}
+
+
 export function make_wireframe_cube(dims, color) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);

@@ -183,7 +183,7 @@ export class ChineseScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = Math.max(60 / this.get_local_bpm() / 2 - this.env.total_latency, 0);
+        const delay = this.env.get_beat_delay();
         setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
     }
 

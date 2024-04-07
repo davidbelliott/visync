@@ -24,7 +24,8 @@ import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
 import { DrumboxScene } from './src/drumboxes_scene.js';
 import { TracersScene } from './src/tracers_scene.js';
 import { DDRScene } from './src/ddr_scene.js';
-
+import { HomeBackgroundScene } from './src/home_background_scene.js';
+import { SurfacesScene } from './src/surfaces_scene.js';
 
 import {
     lerp_scalar,
@@ -42,7 +43,6 @@ import "./src/normalize.css";
 import "./src/style.css";
 
 
-const SCALE_LERP_RATE = 5;
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
 const MSG_TYPE_GOTO_SCENE = 2;
@@ -51,12 +51,25 @@ const MSG_TYPE_ADVANCE_SCENE_STATE = 3;
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
 
+const SCENES_PER_BANK = 10;
+
 var context = null;
 
-const env = {
-    bpm: 0,
-    total_latency: 0.065,
+class Environment {
+    constructor() {
+        this.bpm = 0;
+        this.total_latency = 0.065;
+        this.immediate_mode = false;
+    }
+
+    get_beat_delay() {
+        const delay = this.immediate_mode ? 0 :
+            Math.max(60 / this.bpm / 2 - this.total_latency, 0);
+        return delay;
+    }
 }
+
+const env = new Environment();
 
 window.addEventListener("load", init);
 
@@ -113,8 +126,7 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const relay_url = (import.meta.env.MODE === 'development') ?
-        `${window.location.hostname}:8765` : `${window.location.hostname}${pathname}ws`;
+    const relay_url = `${window.location.hostname}:8765`;
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     //const socket = new WebSocket(`ws://192.168.1.2:8765`);
     socket.addEventListener('message', function(e) {
@@ -278,119 +290,19 @@ class VisOpening extends VisScene {
 function Transition( sceneA, sceneB ) {
 }
 
-function make_wireframe_special(color) {
-    const geometry = new THREE.TorusKnotGeometry(3, 1, 100, 16);
-    //const edges_geom = new THREE.EdgesGeometry(geometry);
-    const wireframe_mat = new THREE.LineBasicMaterial({
-        transparent: true,
-        opacity: 1.0,
-        color: new THREE.Color(color),
-        linewidth: 1.0} );
-    wireframe_mat.depthTest = false;
-    wireframe_mat.depthWrite = false;
-    const ls = new THREE.LineSegments(geometry, wireframe_mat);
-    return ls
-}
-
-function make_point_cloud() {
-    const geometry = new THREE.TorusGeometry(10, 3, 16, 100);
-    const material = new THREE.PointsMaterial({
-        size: 2.0,
-        sizeAttenuation: false,
-        depthTest: false,
-        transparent: true,
-        opacity: 1.0});
-
-    return new THREE.Points( geometry, material );
-}
-
-
-class HomeBackground extends VisScene {
-    constructor(env) {
-        super(env);
-        this.min_base_scale = 2.0;
-        this.max_base_scale = 3.0;
-        this.base_scale = this.min_base_scale;
-
-
-        this.scene = new THREE.Scene();
-        this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
-        this.cam_persp.position.set(0, 0, 10);
-        this.camera = this.cam_persp;
-        //this.camera = new THREE.OrthographicCamera(-8, 8, -8, 8);
-        this.cam_vel = new THREE.Vector3();
-        this.cube_positions = [];
-        const BOUND = 1;
-        for (let i = 0; i < 2; i++) {
-            for (let j = 0; j < 2; j++) {
-                for (let k = 0; k < 2; k++) {
-                    let pos = new THREE.Vector3(BOUND * (2 * i - 1), BOUND * (2 * j - 1), BOUND * (2 * k - 1));
-                    this.cube_positions.push(pos);
-                }
-            }
-        }
-        this.cubes = [];
-        this.cubes_group = new THREE.Group();
-        for (const pos of this.cube_positions) {
-            const ls = create_instanced_cube([1, 1, 1], "cyan");
-            ls.position.copy(pos);
-            this.cubes_group.add(ls);
-            this.cubes.push(ls);
-        }
-        this.ls = make_wireframe_special("white");
-        this.ls.material.color.copy(new THREE.Color("gray"));
-        this.ls.renderOrder = -1;
-        this.scene.add(this.ls);
-        this.pc = make_point_cloud();
-        this.pc.position.copy(this.camera.position);
-        this.scene.add(this.pc);
-        this.scene.add(this.cubes_group);
-
-        this.time_since_update = 0.0;
-        this.time_scaling_key = 0.0;
-        this.time_ellipses = 0.0;
-
-        this.cur_selected = 0;
-        this.has_started = false;
-    }
-
-    anim_frame(dt) {
-        for (const cube of this.cubes) {
-            cube.rotation.x += 0.5 * dt;
-            cube.rotation.y += 0.5 * dt;
-        }
-
-        this.cubes_group.scale.setScalar(this.base_scale);
-
-
-        this.cubes_group.rotation.x += 0.1 * dt;
-        this.cubes_group.rotation.y += 0.4 * dt;
-        this.ls.rotation.x += 0.2 * dt;
-        this.ls.rotation.y += 0.1 * dt;
-        //this.pc.rotation.y += 0.05 * dt;
-        //this.camera.position.addScaledVector(this.cam_vel, dt);
-
-        this.time_since_update += dt;
-        this.time_scaling_key += dt;
-        this.elapsed_time += dt;
-
-        this.base_scale += (this.min_base_scale - this.base_scale) * SCALE_LERP_RATE * dt;
-    }
-
-    handle_beat(t, channel) {
-        const delay = Math.max(60 / this.env.bpm / 2 - this.env.total_latency, 0);
-        if (channel == 1) {
-            setTimeout(() => { this.base_scale = this.max_base_scale; }, delay * 1000);
-        }
-    }
-}
-
 
 class GraphicsContext {
     constructor() {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
+            new SurfacesScene(env),
+            new TracersScene(env),
+            new HexagonScene(env),
+            new GantryScene(env),
+            new YellowRobotScene(env),
+            new SpectrumScene(env),
+            new FastCubeScene(env),
             new DDRScene(env),
             new CubeLockingScene(env),
             new DrumboxScene(env),
@@ -401,18 +313,13 @@ class GraphicsContext {
             new ChineseScene(env),
             new TessellateScene(env),
             //new FastCarScene(env),
-            new HomeBackground(env),
-            new YellowRobotScene(env),
-            new TracersScene(env),
-            new HexagonScene(env),
-            new GantryScene(env),
-            new SpectrumScene(env),
-            new FastCubeScene(env)
+            new HomeBackgroundScene(env),
         ];
         this.cur_scene_idx = 0;
+        this.cur_scene_bank = 0;
+        this.num_scene_banks = Math.ceil(this.scenes.length / SCENES_PER_BANK);
 
         this.debug_overlay = document.getElementById("debug-overlay");
-
         this.overlay_indicators = [];
         this.indicator_on_time_range = [];
         for (let i = 1; i <= 16; i++) {
@@ -421,14 +328,13 @@ class GraphicsContext {
             this.overlay_indicators.push(elem);
             this.indicator_on_time_range.push([]);
         }
-        this.debug_overlay.style.display = "none";
+        this.debug_overlay.style.visibility = "hidden";
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
-	this.renderer = new THREE.WebGLRenderer();
+	this.renderer = new THREE.WebGLRenderer( { antialias: false } );
 	this.renderer.setClearColor(BG_COLOR);
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.xr.enabled = true
         this.container.appendChild(this.renderer.domElement);
 
         //document.body.appendChild( VRButton.createButton(this.renderer) );
@@ -609,9 +515,9 @@ class GraphicsContext {
 
     keydown(e) {
         const num = parseInt(e.key);
-        console.log(num);
         if (!isNaN(num)) {
-            const scene_idx = Math.min(num % 10, this.scenes.length - 1);
+            const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
+                num % 10, 0, this.scenes.length - 1));
             this.change_scene(scene_idx);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
@@ -621,15 +527,21 @@ class GraphicsContext {
                 this.set_tracer_params(1, 1, 1);
             }
         } else if (e.code == "Tab") {
+            console.log("tab");
+            env.immediate_mode = !env.immediate_mode;
             if (this.debug_overlay.style.visibility == 'hidden') {
                 this.debug_overlay.style.visibility = 'visible';
             } else {
-                this.debug_overlay.style.display = 'hidden';
+                this.debug_overlay.style.visibility = 'hidden';
             }
-        } else if (e.key == '.') {
-            this.scenes[this.cur_scene_idx].advance_state(1);
-        } else if (e.key == ',') {
+        } else if (e.key == "ArrowLeft") {
             this.scenes[this.cur_scene_idx].advance_state(-1);
+        } else if (e.key == "ArrowRight") {
+            this.scenes[this.cur_scene_idx].advance_state(1);
+        } else if (e.key == "ArrowUp") {
+            this.cur_scene_bank = Math.min(this.cur_scene_bank + 1, this.num_scene_banks - 1);
+        } else if (e.key == "ArrowDown") {
+            this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
         } else {
             this.scenes[this.cur_scene_idx].handle_key(e.key);
         }
@@ -637,7 +549,8 @@ class GraphicsContext {
 
     handle_sync(t, bpm, beat) {
         const thirtysecond_note_dur = 60 / env.bpm / 8;
-        const delay = 8 * thirtysecond_note_dur - env.total_latency;
+        const delay = env.immediate_mode ? 0 :
+            8 * thirtysecond_note_dur - env.total_latency;
         const start_t = this.clock.getElapsedTime() + delay;
         this.indicator_on_time_range[this.indicator_on_time_range.length - 1].push([
             start_t,
@@ -653,8 +566,9 @@ class GraphicsContext {
 
     handle_beat(t, channel) {
         const thirtysecond_note_dur = 60 / env.bpm / 8;
-        const start_t = this.clock.getElapsedTime() + 4 * thirtysecond_note_dur
-            - env.total_latency;
+        const delay = env.immediate_mode ? 0 :
+            4 * thirtysecond_note_dur - env.total_latency;
+        const start_t = this.clock.getElapsedTime() + delay;
         this.indicator_on_time_range[channel - 1].push([
             start_t,
             start_t + thirtysecond_note_dur

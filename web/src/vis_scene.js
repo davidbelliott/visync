@@ -40,7 +40,11 @@ export class VisScene {
     }
 
     handle_key(key) {
-
+        if (key == "ArrowLeft") {
+            this.advance_state(-1);
+        } else if (key == "ArrowRight") {
+            this.advance_state(1);
+        }
     }
 
     _handle_sync_raw(t, bpm, beat) {

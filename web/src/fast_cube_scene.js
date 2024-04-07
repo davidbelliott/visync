@@ -332,8 +332,8 @@ export class FastCubeScene extends VisScene {
 
         if (channel == 1) {
             const thirtysecond_note_dur = 60 / this.get_local_bpm() / 8;
-            const start_t = this.clock.getElapsedTime() + 4 * thirtysecond_note_dur
-                - this.env.total_latency;
+            const delay = this.env.get_beat_delay();
+            const start_t = this.clock.getElapsedTime() + delay;
             this.laser_on_times.push([
                 start_t,
                 start_t + 8 * thirtysecond_note_dur
@@ -343,7 +343,7 @@ export class FastCubeScene extends VisScene {
                 sparks_origin.z = 3;
                 this.create_sparks(sparks_origin, 5, 10, "white");
                 this.vibe_ampl = 0.5;
-            }, 4 * thirtysecond_note_dur - this.env.total_latency);
+            }, delay);
         }
     }
 

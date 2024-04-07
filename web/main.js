@@ -2,6 +2,8 @@
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
@@ -26,6 +28,8 @@ import { TracersScene } from './src/tracers_scene.js';
 import { DDRScene } from './src/ddr_scene.js';
 import { HomeBackgroundScene } from './src/home_background_scene.js';
 import { SurfacesScene } from './src/surfaces_scene.js';
+import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
+import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
     lerp_scalar,
@@ -54,6 +58,7 @@ const BG_COLOR = 'black';
 const SCENES_PER_BANK = 10;
 
 var context = null;
+var stats = new Stats();
 
 class Environment {
     constructor() {
@@ -101,25 +106,17 @@ class Queue {
 }
 
 
-function createOutline( scene, camera, objectsArray, visibleColor ) {
-    const outlinePass = new OutlinePass( new THREE.Vector2( window.innerWidth, window.innerHeight ), scene, camera, objectsArray );
-    outlinePass.edgeStrength = 2.5;
-    outlinePass.edgeGlow = 0.7;
-    outlinePass.edgeThickness = 2.8;
-    outlinePass.visibleEdgeColor = visibleColor;
-    outlinePass.hiddenEdgeColor.set( 0 );
-    composer.addPass( outlinePass );
-
-    return outlinePass;
-}
-
 function init() {
+    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+    document.body.appendChild( stats.dom );
+
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    context.change_scene(0);
+    context.change_scene(4);
     animate();
 }
+
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
@@ -296,11 +293,13 @@ class GraphicsContext {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
         this.scenes = [
-            new SurfacesScene(env),
+            new BackgroundSurfacesScene(env),
             new TracersScene(env),
             new HexagonScene(env),
             new GantryScene(env),
             new YellowRobotScene(env),
+            new SurfacesScene(env),
+            new BackgroundSurfacesScene(env),
             new SpectrumScene(env),
             new FastCubeScene(env),
             new DDRScene(env),
@@ -339,7 +338,105 @@ class GraphicsContext {
 
         //document.body.appendChild( VRButton.createButton(this.renderer) );
 
-        this.composer = new EffectComposer(this.renderer);
+
+        // Effect composers for overlaying two scenes
+        {
+            this.composer_fg = new EffectComposer(this.renderer);
+            this.composer_bg = new EffectComposer(this.renderer);
+            this.composer_bg.renderToScreen = false;
+
+            // Render pass for sceneB, rendering it off-screen
+            this.render_pass_bg = new RenderPass(this.scenes[0].scene, this.scenes[0].camera);
+            this.composer_bg.addPass(this.render_pass_bg);
+
+            // Render pass for sceneA
+            this.render_pass_fg = new RenderPass(this.scenes[this.cur_scene_idx].scene, this.scenes[this.cur_scene_idx].camera);
+            this.composer_fg.addPass(this.render_pass_fg);
+
+            // Custom shader to blend sceneB into a portion of sceneA
+            const blendShader = {
+                uniforms: {
+                    tDiffuse: { value: null }, // Texture from sceneA
+                    tOverlay: { value: null }, // Texture from sceneB
+                    overlayRect: { value: new THREE.Vector4(0.25, 0.25, 0.5, 0.5) } // x, y, width, height of overlay in normalized coordinates
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                        float luma(vec3 color) {
+                        return dot(color, vec3(0.299, 0.587, 0.114));
+                        }
+
+                        float luma(vec4 color) {
+                        return dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                        }
+
+                        float dither4x4(vec2 position, float brightness) {
+                        int x = int(mod(position.x, 4.0));
+                        int y = int(mod(position.y, 4.0));
+                        int index = x + y * 4;
+                        float limit = 0.0;
+
+                        if (x < 8) {
+                            if (index == 0) limit = 0.0625;
+                            if (index == 1) limit = 0.5625;
+                            if (index == 2) limit = 0.1875;
+                            if (index == 3) limit = 0.6875;
+                            if (index == 4) limit = 0.8125;
+                            if (index == 5) limit = 0.3125;
+                            if (index == 6) limit = 0.9375;
+                            if (index == 7) limit = 0.4375;
+                            if (index == 8) limit = 0.25;
+                            if (index == 9) limit = 0.75;
+                            if (index == 10) limit = 0.125;
+                            if (index == 11) limit = 0.625;
+                            if (index == 12) limit = 1.0;
+                            if (index == 13) limit = 0.5;
+                            if (index == 14) limit = 0.875;
+                            if (index == 15) limit = 0.375;
+                        }
+
+                        return brightness < limit ? 0.0 : 1.0;
+                        }
+
+                        vec3 dither4x4(vec2 position, vec3 color) {
+                        return color * dither4x4(position, luma(color));
+                        }
+
+                        vec4 dither4x4(vec2 position, vec4 color) {
+                        return vec4(color.rgb * dither4x4(position, luma(color)), 1.0);
+                        }
+
+
+
+
+                    uniform sampler2D tDiffuse;
+                    uniform sampler2D tOverlay;
+                    uniform vec4 overlayRect;
+                    varying vec2 vUv;
+                    void main() {
+                        vec4 fg_color = texture2D(tDiffuse, vUv);
+                        if (fg_color.rgb == vec3(0, 0, 0) && vUv.x > overlayRect.x && vUv.x < overlayRect.x + overlayRect.z && vUv.y > overlayRect.y && vUv.y < overlayRect.y + overlayRect.w) {
+                            vec4 bg_color = dither4x4(
+                                gl_FragCoord.xy, texture2D(tOverlay, vUv)) * 2.0;
+                            float lum = luma(bg_color.rgb);
+                            bg_color = vec4(lum, lum, lum, 1.0);
+                            fg_color = fg_color + bg_color;
+                        }
+                        gl_FragColor = fg_color;
+                    }
+                `
+            };
+
+            // Add shader pass to blend sceneB onto sceneA
+            this.blendPass = new ShaderPass(blendShader);
+            this.composer_fg.addPass(this.blendPass);
+        }
 
         // Plane in orthographic view with custom shaders for tracers
         {
@@ -413,6 +510,7 @@ class GraphicsContext {
         const dt = 1.0 / 60.0;
         const t_now = this.clock.getElapsedTime();
         this.scenes[this.cur_scene_idx].anim_frame(dt);
+        this.scenes[0].anim_frame(dt);
 
         this.overlay_indicators.forEach((ind, i) => {
             const t_ranges = this.indicator_on_time_range[i];
@@ -448,10 +546,27 @@ class GraphicsContext {
     }
 
     render() {
-        if (!ENABLE_GLOBAL_TRACERS) {
-            this.scenes[this.cur_scene_idx].render(this.renderer);
-            return;
+        if (ENABLE_GLOBAL_TRACERS) {
+
+
+
         }
+
+        const ENABLE_OVERLAY = true;
+
+        if (ENABLE_OVERLAY) {
+            // Render sceneB to texture
+            this.composer_bg.render();
+            this.blendPass.uniforms.tOverlay.value = this.composer_bg.readBuffer.texture;
+            // Render sceneA with sceneB overlaid
+            this.composer_fg.render();
+        } else {
+            this.scenes[this.cur_scene_idx].render(this.renderer);
+        }
+
+
+
+        return;
 
 
 
@@ -505,6 +620,8 @@ class GraphicsContext {
         if (scene_idx >= 0 && scene_idx < this.scenes.length) {
             this.scenes[this.cur_scene_idx].deactivate();
             this.cur_scene_idx = scene_idx;
+            this.render_pass_fg.scene = this.scenes[this.cur_scene_idx].scene;
+            this.render_pass_fg.camera = this.scenes[this.cur_scene_idx].camera;
             this.scenes[this.cur_scene_idx].activate();
         }
     }
@@ -582,7 +699,9 @@ class GraphicsContext {
 
 function animate() {
     context.renderer.setAnimationLoop(() => {
+        stats.begin();
         context.anim_frame();
         context.render();
+        stats.end();
     });
 }

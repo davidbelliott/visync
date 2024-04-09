@@ -53,7 +53,7 @@ export class SurfacesScene extends VisScene {
         this.amblight = new THREE.AmbientLight("blue", 0.2);
         this.scene.add(this.amblight);
 
-        this.light = new THREE.PointLight(0xffffff, 10, 0, 1);
+        this.light = new THREE.PointLight(0xffffff, 10, 0, 0.75);
         this.light.position.set(0, 20, 10);
         this.light.castShadow = true;
         this.scene.add(this.light);

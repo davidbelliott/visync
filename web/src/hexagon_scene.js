@@ -139,17 +139,14 @@ export class HexagonScene extends VisScene {
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
                 palette: { type: 't', value: texture },
             };
-            let material = new THREE.ShaderMaterial({
+            this.background_material = new THREE.ShaderMaterial({
                 uniforms: this.uniforms,
                 vertexShader: vertex_shader,
                 fragmentShader: fragment_shader,
                 transparent: true,
             });
             //material = new THREE.MeshBasicMaterial({ color: "red" });
-            let geometry = new THREE.PlaneGeometry(this.cam_orth.right - this.cam_orth.left,
-                this.cam_orth.top - this.cam_orth.bottom);
-            this.plane = new THREE.Mesh(geometry, material);
-            this.plane.position.z = -100;   // position in front of other objects
+            this.plane = this.create_plane(this.cam_orth, this.background_material);
             this.scene.add(this.plane);
         });
 
@@ -175,6 +172,14 @@ export class HexagonScene extends VisScene {
         this.camera = this.cam_orth;
 
         this.elapsed_beats = 0.0;
+    }
+
+    create_plane(camera, material) {
+        const geometry = new THREE.PlaneGeometry(camera.right - camera.left,
+            camera.top - camera.bottom);
+        const plane = new THREE.Mesh(geometry, material);
+        plane.position.z = -100;   // position in front of other objects
+        return plane;
     }
 
     anim_frame(dt) {
@@ -209,6 +214,18 @@ export class HexagonScene extends VisScene {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel, true, 1); // start at children of assembly
             }
+        }
+    }
+
+    handle_resize(width, height) {
+        super.handle_resize(width, height);
+        if (this.uniforms != null) {
+            this.uniforms.resolution.value.set(width, height);
+        }
+        if (this.plane != null) {
+            this.scene.remove(this.plane);
+            this.plane = this.create_plane(this.cam_orth, this.background_material);
+            this.scene.add(this.plane);
         }
     }
 }

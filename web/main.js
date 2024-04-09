@@ -29,6 +29,8 @@ import { DDRScene } from './src/ddr_scene.js';
 import { HomeBackgroundScene } from './src/home_background_scene.js';
 import { SurfacesScene } from './src/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
+import { CopyShader } from 'three/addons/shaders/CopyShader.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -108,12 +110,13 @@ class Queue {
 
 function init() {
     stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+    stats.dom.style.visibility = 'hidden';
     document.body.appendChild( stats.dom );
 
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    context.change_scene(4);
+    context.change_scene(0);
     animate();
 }
 
@@ -134,8 +137,7 @@ function connect() {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
             //
-            env.bpm = msg.bpm;
-            context.handle_sync(msg.t, env.bpm, msg.beat);
+            context.handle_sync(msg.t, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
@@ -253,10 +255,6 @@ class VisOpening extends VisScene {
     anim_frame(dt) {
     }
 
-    render(renderer) {
-        renderer.render(this.scene, this.camera);
-    }
-
     set_stage(stage) {
         stage = Math.max(0, Math.min(this.html_values.length, stage));
         for (const i in this.html_values) {
@@ -292,7 +290,9 @@ class GraphicsContext {
     constructor() {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
+        this.sync_clock = new THREE.Clock(true);
         this.scenes = [
+            new CubeLockingScene(env),
             new BackgroundSurfacesScene(env),
             new TracersScene(env),
             new HexagonScene(env),
@@ -303,7 +303,6 @@ class GraphicsContext {
             new SpectrumScene(env),
             new FastCubeScene(env),
             new DDRScene(env),
-            new CubeLockingScene(env),
             new DrumboxScene(env),
             new IceCreamScene(env),
             new SlideScene(env, ["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
@@ -315,6 +314,7 @@ class GraphicsContext {
             new HomeBackgroundScene(env),
         ];
         this.cur_scene_idx = 0;
+        this.cur_bg_scene_idx = 1;
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil(this.scenes.length / SCENES_PER_BANK);
 
@@ -330,8 +330,11 @@ class GraphicsContext {
         this.debug_overlay.style.visibility = "hidden";
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
-	this.renderer = new THREE.WebGLRenderer( { antialias: false } );
-	this.renderer.setClearColor(BG_COLOR);
+	this.renderer = new THREE.WebGLRenderer({
+            antialias: false,
+        });
+        this.renderer.autoClearColor = false;
+        this.renderer.autoClearDepth = true;
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
@@ -341,13 +344,13 @@ class GraphicsContext {
 
         // Effect composers for overlaying two scenes
         {
-            this.composer_fg = new EffectComposer(this.renderer);
             this.composer_bg = new EffectComposer(this.renderer);
-            this.composer_bg.renderToScreen = false;
+            this.composer_fg = new EffectComposer(this.renderer);
 
             // Render pass for sceneB, rendering it off-screen
             this.render_pass_bg = new RenderPass(this.scenes[0].scene, this.scenes[0].camera);
             this.composer_bg.addPass(this.render_pass_bg);
+            this.composer_bg.renderToScreen = false;
 
             // Render pass for sceneA
             this.render_pass_fg = new RenderPass(this.scenes[this.cur_scene_idx].scene, this.scenes[this.cur_scene_idx].camera);
@@ -368,6 +371,7 @@ class GraphicsContext {
                     }
                 `,
                 fragmentShader: `
+                        precision highp float;
                         float luma(vec3 color) {
                         return dot(color, vec3(0.299, 0.587, 0.114));
                         }
@@ -421,12 +425,13 @@ class GraphicsContext {
                     varying vec2 vUv;
                     void main() {
                         vec4 fg_color = texture2D(tDiffuse, vUv);
-                        if (fg_color.rgb == vec3(0, 0, 0) && vUv.x > overlayRect.x && vUv.x < overlayRect.x + overlayRect.z && vUv.y > overlayRect.y && vUv.y < overlayRect.y + overlayRect.w) {
+                        if (fg_color.rgb == vec3(1, 1, 1) && vUv.x > overlayRect.x && vUv.x < overlayRect.x + overlayRect.z && vUv.y > overlayRect.y && vUv.y < overlayRect.y + overlayRect.w) {
                             vec4 bg_color = dither4x4(
                                 gl_FragCoord.xy, texture2D(tOverlay, vUv)) * 2.0;
+                            bg_color = texture2D(tOverlay, vUv);
                             float lum = luma(bg_color.rgb);
                             bg_color = vec4(lum, lum, lum, 1.0);
-                            fg_color = fg_color + bg_color;
+                            //fg_color = fg_color + bg_color;
                         }
                         gl_FragColor = fg_color;
                     }
@@ -434,8 +439,11 @@ class GraphicsContext {
             };
 
             // Add shader pass to blend sceneB onto sceneA
-            this.blendPass = new ShaderPass(blendShader);
-            this.composer_fg.addPass(this.blendPass);
+            this.blendPass = new ShaderPass(CopyShader);
+            //this.composer_fg.addPass(this.blendPass);
+            this.outputPass = new OutputPass();
+            //this.composer_fg.addPass(this.outputPass);
+            //this.composer_fg.addPass(gamma_shader);
         }
 
         // Plane in orthographic view with custom shaders for tracers
@@ -510,7 +518,9 @@ class GraphicsContext {
         const dt = 1.0 / 60.0;
         const t_now = this.clock.getElapsedTime();
         this.scenes[this.cur_scene_idx].anim_frame(dt);
-        this.scenes[0].anim_frame(dt);
+        if (this.cur_bg_scene_idx !== null) {
+            this.scenes[this.cur_bg_scene_idx].anim_frame(dt);
+        }
 
         this.overlay_indicators.forEach((ind, i) => {
             const t_ranges = this.indicator_on_time_range[i];
@@ -552,15 +562,19 @@ class GraphicsContext {
 
         }
 
-        const ENABLE_OVERLAY = true;
+        const ENABLE_OVERLAY = false;
 
         if (ENABLE_OVERLAY) {
             // Render sceneB to texture
             this.composer_bg.render();
-            this.blendPass.uniforms.tOverlay.value = this.composer_bg.readBuffer.texture;
             // Render sceneA with sceneB overlaid
+            //this.blendPass.uniforms.tOverlay.value = this.composer_bg.readBuffer.texture;
             this.composer_fg.render();
         } else {
+            this.renderer.clear();
+            if (this.cur_bg_scene_idx !== null) {
+                this.scenes[this.cur_bg_scene_idx].render(this.renderer);
+            }
             this.scenes[this.cur_scene_idx].render(this.renderer);
         }
 
@@ -609,11 +623,14 @@ class GraphicsContext {
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;
+        this.renderer.setSize(width, height);
+	this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.composer_bg.setSize(width, height);
+        this.composer_fg.setSize(width, height);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);
         });
-        this.renderer.setSize(width, height);
     }
 
     change_scene(scene_idx) {
@@ -648,8 +665,10 @@ class GraphicsContext {
             env.immediate_mode = !env.immediate_mode;
             if (this.debug_overlay.style.visibility == 'hidden') {
                 this.debug_overlay.style.visibility = 'visible';
+                stats.dom.style.visibility = 'visible';
             } else {
                 this.debug_overlay.style.visibility = 'hidden';
+                stats.dom.style.visibility = 'hidden';
             }
         } else if (e.key == "ArrowLeft") {
             this.scenes[this.cur_scene_idx].advance_state(-1);
@@ -673,6 +692,13 @@ class GraphicsContext {
             start_t,
             start_t + thirtysecond_note_dur
         ]);
+
+        const ms_since_last_sync = Math.round(1000 * this.sync_clock.getDelta());
+        const expected_ms = 60000 / bpm;
+        console.log(`Sync: ${ms_since_last_sync}`);
+        console.log(`Error: ${ms_since_last_sync - expected_ms}`);
+
+        env.bpm = bpm;
 
         setTimeout(() => {
             this.scenes.forEach((scene) => {

@@ -4,7 +4,8 @@ import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.j
 import {
     create_instanced_cube,
     make_wireframe_special,
-    make_point_cloud
+    make_point_cloud,
+    ShaderLoader
 } from "./util.js";
 
 function radial_wave(u, v, target, t) {
@@ -23,39 +24,69 @@ export class BackgroundSurfacesScene extends VisScene {
         super(env);
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
-        this.cam_persp.position.set(0, 0, 100);
+        this.cam_persp.position.set(0, 0, 200);
         this.camera = this.cam_persp;
         this.base_group = new THREE.Group();
+        this.geoms = [];
 
         const radialWave = function(u, v, target) {
             radial_wave(u, v, target, 0);
         };
 
-        const meshMaterial = new THREE.MeshPhongMaterial({
-            color: "white",
-            shininess: 10,
-            specular: 0xffffff,
-            flatShading: false,
+        const shader_loader = new ShaderLoader('glsl/chunks/dither_pars.frag',
+            'glsl/chunks/dither.frag');
+        const shader_load_promise = shader_loader.load();
+
+        shader_load_promise.then(([dither_pars, dither]) => {
+            const meshMaterial = new THREE.MeshPhongMaterial({
+                color: "white",
+                shininess: 20,
+                specular: 0xffffff,
+                flatShading: false,
+            });
+            meshMaterial.side = THREE.DoubleSide;
+
+            meshMaterial.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <dithering_pars_fragment>',
+                    dither_pars
+                ).replace(
+                    '#include <dithering_fragment>',
+                    dither
+                );
+            };
+            this.geom = new ParametricGeometry(radialWave, 120, 120);
+
+            for (let i = 0; i < 3; i++) {
+                const mesh = new THREE.Mesh(this.geom, meshMaterial);
+                mesh.position.set(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
+                mesh.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+                mesh.scale.set(Math.random() * 2 + 1, Math.random() * 2 + 1, Math.random() * 2 + 1);
+                this.base_group.add(mesh);
+            }
+
+            this.sphere_geom = new THREE.SphereGeometry(10, 32, 32);
+            for (let i = 0; i < 5; i++) {
+                const mesh = new THREE.Mesh(this.sphere_geom, meshMaterial);
+                mesh.position.set(Math.random() * 100 - 50, Math.random() * 100 - 50, Math.random() * 100 - 50);
+                mesh.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
+                mesh.scale.setScalar(Math.random() * 2 + 1);
+                this.base_group.add(mesh);
+            }
+
         });
-        meshMaterial.side = THREE.DoubleSide;
 
-        const cube = create_instanced_cube([1, 1, 1], "white");
-        //this.base_group.add(cube);
-
-        this.geom = new ParametricGeometry(radialWave, 120, 120);
-        //const geom = new THREE.ParametricGeometry( THREE.ParametricGeometries.klein, 25, 25 );
-        const mesh = new THREE.Mesh(this.geom, meshMaterial);
-        console.log(mesh);
-        this.base_group.add(mesh);
         this.base_group.rotation.x = Math.PI / 4;
-        //this.scene.add(mesh);
 
-        this.amblight = new THREE.AmbientLight("blue", 0.2);
+        this.amblight = new THREE.AmbientLight("blue", 0.7);
         this.scene.add(this.amblight);
 
-        this.light = new THREE.PointLight(0xffffff, 10, 0, 1);
-        this.light.position.set(0, 20, 10);
-        this.light.castShadow = true;
+        this.dir_light = new THREE.DirectionalLight("white", 0.2);
+        this.dir_light.position.set(1, 1, 0);
+        this.scene.add(this.dir_light);
+
+        this.light = new THREE.PointLight("white", 10, 0, 1);
+        //this.light.castShadow = true;
         this.scene.add(this.light);
 
         this.scene.add(this.base_group);
@@ -66,24 +97,26 @@ export class BackgroundSurfacesScene extends VisScene {
         //this.base_group.rotation.x += 0.04 * dt;
         //this.base_group.rotation.z += 1.0 * dt;
         // Get the current time
-        var time = Date.now() * 0.05;
+        var time = Date.now() * 0.01;
 
-        const positionAttribute = this.geom.getAttribute( 'position' );
+        if (this.geom) {
+            const positionAttribute = this.geom.getAttribute( 'position' );
 
-        let x = 0, y = 0, z = 0;
+            let x = 0, y = 0, z = 0;
 
-        const pos = new THREE.Vector3();
-        for ( let i = 0; i < positionAttribute.count; i ++ ) {
-            const u = positionAttribute.getX(i) / 50 + 0.5;
-            const v = positionAttribute.getZ(i) / 50 + 0.5;
-            radial_wave(u, v, pos, time);
-            positionAttribute.setXYZ( i, pos.x, pos.y, pos.z );
+            const pos = new THREE.Vector3();
+            for ( let i = 0; i < positionAttribute.count; i ++ ) {
+                const u = positionAttribute.getX(i) / 50 + 0.5;
+                const v = positionAttribute.getZ(i) / 50 + 0.5;
+                radial_wave(u, v, pos, time);
+                positionAttribute.setXYZ( i, pos.x, pos.y, pos.z );
+            }
+
+            positionAttribute.needsUpdate = true;
+            this.geom.computeVertexNormals();
+            this.geom.computeBoundingBox();
+            this.geom.computeBoundingSphere();
         }
-
-        positionAttribute.needsUpdate = true;
-        this.geom.computeVertexNormals();
-        this.geom.computeBoundingBox();
-        this.geom.computeBoundingSphere();
     }
 
     handle_beat(t, channel) {

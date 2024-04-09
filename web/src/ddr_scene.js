@@ -316,8 +316,10 @@ export class DDRScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
-        this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
+        if (this.arrows) {
+            this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
+            this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
+        }
     }
 
     handle_sync(t, bpm, beat) {

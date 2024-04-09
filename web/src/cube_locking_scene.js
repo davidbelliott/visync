@@ -300,6 +300,7 @@ export class CubeLockingScene extends VisScene {
             this.end_rot = this.start_rot + this.rot_dir;
         }
         const beats_per_sec = this.get_local_bpm() / 60;
+        console.log(this.get_local_bpm());
     }
 
     handle_beat(t, channel) {

@@ -35,10 +35,6 @@ export class VisScene {
     anim_frame(dt) {
     }
 
-    render(renderer) {
-        renderer.render(this.scene, this.camera);
-    }
-
     handle_key(key) {
         if (key == "ArrowLeft") {
             this.advance_state(-1);
@@ -75,6 +71,10 @@ export class VisScene {
 
     state_transition(old_state_idx, new_state_idx) {
 
+    }
+
+    render(renderer) {
+        renderer.render(this.scene, this.camera);
     }
 
     advance_state(steps) {

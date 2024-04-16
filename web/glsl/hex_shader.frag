@@ -1,5 +1,6 @@
 uniform vec3      resolution;           // viewport resolution (in pixels)
 uniform float time;
+uniform float pixel_ratio;
 uniform sampler2D palette;
 
 //#define FLAT_TOP_HEXAGON
@@ -319,10 +320,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     float complexity = 1.5 + 1.0 * sin(time * PI / 8.0);
     //vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5) / hex_size;
 
-    vec2 st = fragCoord.xy / resolution.xy;
+    vec2 st = fragCoord.xy / resolution.xy / pixel_ratio;
     vec2 to_center = vec2(0.5) - st;
     
-    vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5);
+    vec2 u = (fragCoord - resolution.xy / pixel_ratio / 2.0 + 0.5);
     float radius_px = length(u);
 
     float y_noise = 0.5 * simplex3d(vec3(to_center.x, to_center.y, time * PI));

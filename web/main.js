@@ -437,55 +437,44 @@ class GraphicsContext {
 
     render() {
         if (ENABLE_GLOBAL_TRACERS) {
-
-
-
+            this.renderer.autoClearColor = false;
+            this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
         }
-        //this.renderer.clear();
+
+        this.renderer.clear();
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
             this.scenes[this.cur_bg_scene_idx].render(this.renderer);
         }
         this.scenes[this.cur_scene_idx].render(this.renderer);
 
+        if (ENABLE_GLOBAL_TRACERS) {
+            let tex_values = [];
+            let idx = this.cur_buffer_idx;
+            for (let i = 0; i < this.buffers.length; i++) {
+                if (i % this.trace_spacing == 0) {
+                    tex_values.push(this.buffers[idx].texture);
+                }
+                idx--;
+                if (idx < 0) {
+                    idx = this.buffers.length - 1;
+                }
+            }
+            this.blend_material.uniforms.t1.value = tex_values[0];
+            this.blend_material.uniforms.t2.value = tex_values[1];
+            this.blend_material.uniforms.t3.value = tex_values[2];
+            this.blend_material.uniforms.t4.value = tex_values[3];
+            this.blend_material.uniforms.t5.value = tex_values[4];
+            this.blend_material.uniforms.t6.value = tex_values[5];
+            this.blend_material.uniforms.ratio.value = this.trace_persistence;
 
+            this.renderer.setRenderTarget(null);
+            this.renderer.clear();
+            this.renderer.clearDepth();
+            this.renderer.render(this.scene, this.camera);
+            this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
+        }
 
         return;
-
-
-
-
-
-
-        this.renderer.autoClearColor = false;
-        this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
-        this.renderer.clear();
-        this.scenes[this.cur_scene_idx].render(this.renderer);
-
-        let tex_values = [];
-        let idx = this.cur_buffer_idx;
-        for (let i = 0; i < this.buffers.length; i++) {
-            if (i % this.trace_spacing == 0) {
-                tex_values.push(this.buffers[idx].texture);
-            }
-            idx--;
-            if (idx < 0) {
-                idx = this.buffers.length - 1;
-            }
-        }
-        this.blend_material.uniforms.t1.value = tex_values[0];
-        this.blend_material.uniforms.t2.value = tex_values[1];
-        this.blend_material.uniforms.t3.value = tex_values[2];
-        this.blend_material.uniforms.t4.value = tex_values[3];
-        this.blend_material.uniforms.t5.value = tex_values[4];
-        this.blend_material.uniforms.t6.value = tex_values[5];
-        this.blend_material.uniforms.ratio.value = this.trace_persistence;
-
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear();
-        this.renderer.clearDepth();
-        this.renderer.render(this.scene, this.camera);
-        this.renderer.autoClearColor = true;
-        this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
     }
 
     on_window_resize() {

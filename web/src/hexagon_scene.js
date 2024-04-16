@@ -137,6 +137,7 @@ export class HexagonScene extends VisScene {
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
+                pixel_ratio: { type: 'f', value: window.devicePixelRatio },
                 palette: { type: 't', value: texture },
             };
             this.background_material = new THREE.ShaderMaterial({
@@ -220,6 +221,7 @@ export class HexagonScene extends VisScene {
         super.handle_resize(width, height);
         if (this.uniforms != null) {
             this.uniforms.resolution.value.set(width, height);
+            this.uniforms.pixel_ratio.value = window.devicePixelRatio;
         }
         if (this.plane != null) {
             this.scene.remove(this.plane);

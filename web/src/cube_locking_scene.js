@@ -15,7 +15,8 @@ import {
     make_wireframe_circle,
     ShaderLoader,
     Spark,
-    ObjectPool
+    ObjectPool,
+    BeatClock
 } from './util.js';
 import { Tesseract } from './highdim.js';
 
@@ -120,10 +121,8 @@ export class CubeLockingScene extends VisScene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.scene = new THREE.Scene();
-        this.clock = new THREE.Clock(true);
-        this.rot_clock = new THREE.Clock(false);
-        this.beat_clock = new THREE.Clock(false);
-        this.cam_clock = new THREE.Clock(false);
+        this.rot_clock = new BeatClock();
+        this.beat_clock = new BeatClock();
 
         this.beats_per_rotation = 8;
 
@@ -239,6 +238,7 @@ export class CubeLockingScene extends VisScene {
 
         // rotation
         this.start_rot = 2;
+        this.cur_rot = 2;
         this.end_rot = 2;
         this.rot_dir = 1;
 
@@ -260,16 +260,16 @@ export class CubeLockingScene extends VisScene {
 
         // Handle rotation
         {
-            const t = this.rot_clock.getElapsedTime() * beats_per_sec;
-            const frac = clamp(t / this.beats_per_rotation, 0, 1);
-            const cur_rot = Math.PI / 2 * (0.5 + this.start_rot +
-                lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot))
-            this.base_group.rotation.y = cur_rot;
+            const t = this.rot_clock.getElapsedBeats(this.get_local_bpm());
+            const frac = t / this.beats_per_rotation;
+            this.cur_rot = this.start_rot +
+                lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot);
+            this.base_group.rotation.y = Math.PI / 2 * (0.5 + this.cur_rot);
 
-            const start_color = new THREE.Color((this.start_rot % 2 == 0 ? "cyan" : "magenta"));
-            const end_color = new THREE.Color((this.start_rot % 2 == 0 ? "magenta" : "cyan"));
+            const start_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "cyan" : "magenta"));
+            const end_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "magenta" : "cyan"));
             const cur_color = new THREE.Color();
-            cur_color.lerpColors(start_color, end_color, frac);
+            cur_color.lerpColors(start_color, end_color, clamp(frac, 0, 1));
             if (this.fill_mat != null) {
                 this.fill_mat.color.copy(cur_color);
             }
@@ -283,7 +283,7 @@ export class CubeLockingScene extends VisScene {
             const beats_per_expansion = 1.0;
             let frac = 1;
             if (this.beat_clock.running) {
-                const t = this.beat_clock.getElapsedTime() * beats_per_sec;
+                const t = this.beat_clock.getElapsedBeats(this.get_local_bpm());
                 frac = clamp(t / beats_per_expansion - 0.1, 0, 1);
             }
             for (const c of this.cubes) {
@@ -294,24 +294,24 @@ export class CubeLockingScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
+        this.rot_clock.updateBPM(bpm);
+        this.beat_clock.updateBPM(bpm);
         if (beat % this.beats_per_rotation == 0 && this.do_rotation) {
-            this.rot_clock.start();
-            this.start_rot = this.end_rot;
+            this.rot_clock.start(this.get_local_bpm());
+            this.start_rot = this.cur_rot;
             this.end_rot = this.start_rot + this.rot_dir;
         }
-        const beats_per_sec = this.get_local_bpm() / 60;
-        console.log(this.get_local_bpm());
     }
 
     handle_beat(t, channel) {
-        const delay = this.env.get_beat_delay();
-        setTimeout(() => {
+        //const delay = 60 / this.get_local_bpm() / 2;
+        /*setTimeout(() => {*/
             if (channel == 1) {
-                this.beat_clock.start();
+                this.beat_clock.start(this.get_local_bpm());
             } else if (channel == 2) {
                 this.create_spark();
             }
-        }, delay * 1000);
+        //}, delay * 1000);
     }
 
     state_transition(old_state_idx, new_state_idx) {

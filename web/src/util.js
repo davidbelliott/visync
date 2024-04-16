@@ -308,27 +308,29 @@ export class ObjectPool extends THREE.Group {
 }
 
 export class BeatClock extends THREE.Clock {
-    constructor(scene, autostart=true) {
-        super(autostart);
-        this.scene = scene;
+    constructor() {
+        super(false);
         this.elapsed_beats = 0;
+        this.bpm = null;
     }
 
-    start() {
+    start(bpm) {
         super.start();
+        this.bpm = bpm;
         this.elapsed_beats = 0;
     }
 
-    get_elapsed_beats() {
-        this.get_delta_beats();     // updates elapsed_beats
-        return this.elapsed_beats;
+    updateBPM(new_bpm) {
+        this.elapsed_beats += this.getDelta() * this.bpm / 60;
+        this.bpm = new_bpm;
     }
 
-    get_delta_beats() {
-        const delta_time = this.getDelta();
-        const beats_per_second = this.scene.get_local_bpm() / 60;
-        const beat_delta = delta_time * beats_per_second;
-        this.elapsed_beats += beat_delta;
-        return beat_delta;
+    getElapsedBeats(bpm=null) {
+        if (bpm != null) {
+            this.updateBPM(bpm);
+        } else {
+            this.updateBPM(this.bpm);
+        }
+        return this.elapsed_beats;
     }
 }

@@ -174,8 +174,8 @@ class DDRArrow extends THREE.LineSegments {
     }
 
     anim_frame() {
-        const beats_elapsed = this.clock.get_elapsed_beats();
-        const global_beats_elapsed = DDRArrow.global_clock.get_elapsed_beats();
+        const beats_elapsed = this.clock.getElapsedBeats();
+        const global_beats_elapsed = DDRArrow.global_clock.getElapsedBeats();
         this.offset_vec = new THREE.Vector3(
             0,
             Math.min(ARROW_VEL * (beats_elapsed - this.time_till_impact), 0) - ARROW_TOP_Y,
@@ -301,11 +301,11 @@ export class DDRScene extends VisScene {
         if (!this.initialized) {
             return;
         }
-        const rot_frac = ease(clamp(this.robot_rot_clock.get_elapsed_beats() / ROT_BEATS, 0, 1));
+        const rot_frac = ease(clamp(this.robot_rot_clock.getElapsedBeats() / ROT_BEATS, 0, 1));
         const robot_rot = lerp_scalar(this.start_robot_rot, this.target_robot_rot, rot_frac);
         this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
 
-        const half_beat_time = this.half_beat_clock.get_elapsed_beats() / 2.0;
+        const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         for (const r of this.robots) {
             r.anim_frame(dt, half_beat_time, this.get_local_bpm());
         }

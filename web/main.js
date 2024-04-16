@@ -64,15 +64,8 @@ var stats = new Stats();
 
 class Environment {
     constructor() {
-        this.bpm = 0;
         this.total_latency = 0.065;
         this.immediate_mode = false;
-    }
-
-    get_beat_delay() {
-        const delay = this.immediate_mode ? 0 :
-            Math.max(60 / this.bpm / 2 - this.total_latency, 0);
-        return delay;
     }
 }
 
@@ -290,12 +283,16 @@ class GraphicsContext {
     constructor() {
         this.tracers = false;
         this.clock = new THREE.Clock(true);
-        this.sync_clock = new THREE.Clock(true);
+        this.cur_beat = 0;
+        this.cur_sync_error = 0;
+        this.bpm = 120;
+        this.last_scheduled_sync_time = null;
+        this.next_scheduled_sync_time = null;
         this.scenes = [
             new CubeLockingScene(env),
-            new BackgroundSurfacesScene(env),
             new TracersScene(env),
-            new HexagonScene(env),
+            new BackgroundSurfacesScene(env),
+            /*new HexagonScene(env),
             new GantryScene(env),
             new YellowRobotScene(env),
             new SurfacesScene(env),
@@ -311,21 +308,19 @@ class GraphicsContext {
             new ChineseScene(env),
             new TessellateScene(env),
             //new FastCarScene(env),
-            new HomeBackgroundScene(env),
+            new HomeBackgroundScene(env),*/
         ];
         this.cur_scene_idx = 0;
-        this.cur_bg_scene_idx = 1;
+        this.cur_bg_scene_idx = 2;
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil(this.scenes.length / SCENES_PER_BANK);
 
         this.debug_overlay = document.getElementById("debug-overlay");
         this.overlay_indicators = [];
-        this.indicator_on_time_range = [];
         for (let i = 1; i <= 16; i++) {
             const elem = document.createElement("div");
             this.debug_overlay.appendChild(elem);
             this.overlay_indicators.push(elem);
-            this.indicator_on_time_range.push([]);
         }
         this.debug_overlay.style.visibility = "hidden";
         this.container = document.createElement( 'div' );
@@ -338,113 +333,6 @@ class GraphicsContext {
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
-
-        //document.body.appendChild( VRButton.createButton(this.renderer) );
-
-
-        // Effect composers for overlaying two scenes
-        {
-            this.composer_bg = new EffectComposer(this.renderer);
-            this.composer_fg = new EffectComposer(this.renderer);
-
-            // Render pass for sceneB, rendering it off-screen
-            this.render_pass_bg = new RenderPass(this.scenes[0].scene, this.scenes[0].camera);
-            this.composer_bg.addPass(this.render_pass_bg);
-            this.composer_bg.renderToScreen = false;
-
-            // Render pass for sceneA
-            this.render_pass_fg = new RenderPass(this.scenes[this.cur_scene_idx].scene, this.scenes[this.cur_scene_idx].camera);
-            this.composer_fg.addPass(this.render_pass_fg);
-
-            // Custom shader to blend sceneB into a portion of sceneA
-            const blendShader = {
-                uniforms: {
-                    tDiffuse: { value: null }, // Texture from sceneA
-                    tOverlay: { value: null }, // Texture from sceneB
-                    overlayRect: { value: new THREE.Vector4(0.25, 0.25, 0.5, 0.5) } // x, y, width, height of overlay in normalized coordinates
-                },
-                vertexShader: `
-                    varying vec2 vUv;
-                    void main() {
-                        vUv = uv;
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                        precision highp float;
-                        float luma(vec3 color) {
-                        return dot(color, vec3(0.299, 0.587, 0.114));
-                        }
-
-                        float luma(vec4 color) {
-                        return dot(color.rgb, vec3(0.299, 0.587, 0.114));
-                        }
-
-                        float dither4x4(vec2 position, float brightness) {
-                        int x = int(mod(position.x, 4.0));
-                        int y = int(mod(position.y, 4.0));
-                        int index = x + y * 4;
-                        float limit = 0.0;
-
-                        if (x < 8) {
-                            if (index == 0) limit = 0.0625;
-                            if (index == 1) limit = 0.5625;
-                            if (index == 2) limit = 0.1875;
-                            if (index == 3) limit = 0.6875;
-                            if (index == 4) limit = 0.8125;
-                            if (index == 5) limit = 0.3125;
-                            if (index == 6) limit = 0.9375;
-                            if (index == 7) limit = 0.4375;
-                            if (index == 8) limit = 0.25;
-                            if (index == 9) limit = 0.75;
-                            if (index == 10) limit = 0.125;
-                            if (index == 11) limit = 0.625;
-                            if (index == 12) limit = 1.0;
-                            if (index == 13) limit = 0.5;
-                            if (index == 14) limit = 0.875;
-                            if (index == 15) limit = 0.375;
-                        }
-
-                        return brightness < limit ? 0.0 : 1.0;
-                        }
-
-                        vec3 dither4x4(vec2 position, vec3 color) {
-                        return color * dither4x4(position, luma(color));
-                        }
-
-                        vec4 dither4x4(vec2 position, vec4 color) {
-                        return vec4(color.rgb * dither4x4(position, luma(color)), 1.0);
-                        }
-
-
-
-
-                    uniform sampler2D tDiffuse;
-                    uniform sampler2D tOverlay;
-                    uniform vec4 overlayRect;
-                    varying vec2 vUv;
-                    void main() {
-                        vec4 fg_color = texture2D(tDiffuse, vUv);
-                        if (fg_color.rgb == vec3(1, 1, 1) && vUv.x > overlayRect.x && vUv.x < overlayRect.x + overlayRect.z && vUv.y > overlayRect.y && vUv.y < overlayRect.y + overlayRect.w) {
-                            vec4 bg_color = dither4x4(
-                                gl_FragCoord.xy, texture2D(tOverlay, vUv)) * 2.0;
-                            bg_color = texture2D(tOverlay, vUv);
-                            float lum = luma(bg_color.rgb);
-                            bg_color = vec4(lum, lum, lum, 1.0);
-                            //fg_color = fg_color + bg_color;
-                        }
-                        gl_FragColor = fg_color;
-                    }
-                `
-            };
-
-            // Add shader pass to blend sceneB onto sceneA
-            this.blendPass = new ShaderPass(CopyShader);
-            //this.composer_fg.addPass(this.blendPass);
-            this.outputPass = new OutputPass();
-            //this.composer_fg.addPass(this.outputPass);
-            //this.composer_fg.addPass(gamma_shader);
-        }
 
         // Plane in orthographic view with custom shaders for tracers
         {
@@ -518,33 +406,25 @@ class GraphicsContext {
         const dt = 1.0 / 60.0;
         const t_now = this.clock.getElapsedTime();
         this.scenes[this.cur_scene_idx].anim_frame(dt);
-        if (this.cur_bg_scene_idx !== null) {
+        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
             this.scenes[this.cur_bg_scene_idx].anim_frame(dt);
         }
+    }
 
-        this.overlay_indicators.forEach((ind, i) => {
-            const t_ranges = this.indicator_on_time_range[i];
-            const keep_ranges = [];
-            let is_active = false;
-            for (const t_range of t_ranges) {
-                if (t_range[0] <= t_now && t_range[1] > t_now) {
-                    is_active = true;
-                }
-                if (t_range[1] > t_now) {
-                    keep_ranges.push(t_range);
-                }
-            }
-            this.indicator_on_time_range[i] = keep_ranges;
-            if (is_active) {
-                if (i == this.overlay_indicators.length - 1) {
-                    ind.style.backgroundColor = 'red';
-                } else {
-                    ind.style.backgroundColor = 'white';
-                }
-            } else {
-                ind.style.backgroundColor = 'transparent';
-            }
-        });
+    indicator_on(i, color) {
+        this.overlay_indicators[i].style.backgroundColor = color;
+    }
+
+    indicator_off(i) {
+        this.overlay_indicators[i].style.backgroundColor = 'transparent';
+    }
+
+    indicator_toggle(i, color) {
+        if (this.overlay_indicators[i].style.backgroundColor == 'transparent') {
+            this.overlay_indicators[i].style.backgroundColor = color;
+        } else {
+            this.overlay_indicators[i].style.backgroundColor = 'transparent';
+        }
     }
 
     recreate_buffers(width, height) {
@@ -561,22 +441,11 @@ class GraphicsContext {
 
 
         }
-
-        const ENABLE_OVERLAY = false;
-
-        if (ENABLE_OVERLAY) {
-            // Render sceneB to texture
-            this.composer_bg.render();
-            // Render sceneA with sceneB overlaid
-            //this.blendPass.uniforms.tOverlay.value = this.composer_bg.readBuffer.texture;
-            this.composer_fg.render();
-        } else {
-            this.renderer.clear();
-            if (this.cur_bg_scene_idx !== null) {
-                this.scenes[this.cur_bg_scene_idx].render(this.renderer);
-            }
-            this.scenes[this.cur_scene_idx].render(this.renderer);
+        //this.renderer.clear();
+        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+            this.scenes[this.cur_bg_scene_idx].render(this.renderer);
         }
+        this.scenes[this.cur_scene_idx].render(this.renderer);
 
 
 
@@ -625,21 +494,27 @@ class GraphicsContext {
         const aspect = width / height;
         this.renderer.setSize(width, height);
 	this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.composer_bg.setSize(width, height);
-        this.composer_fg.setSize(width, height);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);
         });
     }
 
-    change_scene(scene_idx) {
-        if (scene_idx >= 0 && scene_idx < this.scenes.length) {
-            this.scenes[this.cur_scene_idx].deactivate();
-            this.cur_scene_idx = scene_idx;
-            this.render_pass_fg.scene = this.scenes[this.cur_scene_idx].scene;
-            this.render_pass_fg.camera = this.scenes[this.cur_scene_idx].camera;
-            this.scenes[this.cur_scene_idx].activate();
+    change_scene(new_scene_idx, bg=false) {
+        if (new_scene_idx >= 0 && new_scene_idx < this.scenes.length) {
+            const cur_idx = bg ? this.cur_bg_scene_idx : this.cur_scene_idx;
+            const other_idx = bg ? this.cur_scene_idx : this.cur_bg_scene_idx;
+            if (cur_idx != other_idx) {
+                this.scenes[cur_idx].deactivate();
+            }
+            if (bg) {
+                this.cur_bg_scene_idx = new_scene_idx;
+            } else {
+                this.cur_scene_idx = new_scene_idx;
+            }
+            if (new_scene_idx != other_idx) {
+                this.scenes[new_scene_idx].activate();
+            }
         }
     }
 
@@ -649,6 +524,7 @@ class GraphicsContext {
 
     keydown(e) {
         const num = parseInt(e.key);
+        console.log(num);
         if (!isNaN(num)) {
             const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
                 num % 10, 0, this.scenes.length - 1));
@@ -683,28 +559,45 @@ class GraphicsContext {
         }
     }
 
+    send_sync_to_scenes() {
+        const cur_time = this.clock.getElapsedTime();
+        this.indicator_toggle(0, 'red');
+        const t_till_new_scheduled_sync = 60 / this.bpm - this.cur_sync_error;
+        const compensated_bpm = 60 / t_till_new_scheduled_sync;
+        this.scenes.forEach((scene) => {
+            scene.handle_sync_raw(compensated_bpm, this.cur_beat);
+        });
+        console.log(`Sync sent: ${compensated_bpm} bpm`);
+        this.last_scheduled_sync_time = cur_time;
+        this.next_scheduled_sync_time = cur_time + t_till_new_scheduled_sync;
+        setTimeout(() => { this.send_sync_to_scenes(); },
+            t_till_new_scheduled_sync * 1000);
+    }
+
     handle_sync(t, bpm, beat) {
-        const thirtysecond_note_dur = 60 / env.bpm / 8;
-        const delay = env.immediate_mode ? 0 :
-            8 * thirtysecond_note_dur - env.total_latency;
-        const start_t = this.clock.getElapsedTime() + delay;
-        this.indicator_on_time_range[this.indicator_on_time_range.length - 1].push([
-            start_t,
-            start_t + thirtysecond_note_dur
-        ]);
+        this.scenes.forEach((scene) => {
+            scene.handle_sync_raw(bpm, beat);
+        });
+        /*const cur_time = this.clock.getElapsedTime();
 
-        const ms_since_last_sync = Math.round(1000 * this.sync_clock.getDelta());
-        const expected_ms = 60000 / bpm;
-        console.log(`Sync: ${ms_since_last_sync}`);
-        console.log(`Error: ${ms_since_last_sync - expected_ms}`);
+        if (this.next_scheduled_sync_time == null) {
+            this.send_sync_to_scenes();
+            this.cur_sync_error = 0;
+            this.cur_beat = beat;
+        } else if (
+            Math.abs(this.last_scheduled_sync_time - cur_time) <
+            Math.abs(this.next_scheduled_sync_time - cur_time)) {
+            // The last scheduled sync was closer
+            this.cur_sync_error = this.last_scheduled_sync_time - cur_time;
+            this.cur_beat = beat + 1;
+        } else {
+            // The next scheduled sync is closer
+            this.cur_sync_error = this.next_scheduled_sync_time - cur_time;
+            this.cur_beat = beat;
+        }
+        console.log(`Error: ${this.cur_sync_error}`);
+        this.bpm = bpm;*/
 
-        env.bpm = bpm;
-
-        setTimeout(() => {
-            this.scenes.forEach((scene) => {
-                scene._handle_sync_raw(t, bpm, beat + 1);
-            });
-        }, delay * 1000);
     }
 
     handle_beat(t, channel) {
@@ -712,10 +605,6 @@ class GraphicsContext {
         const delay = env.immediate_mode ? 0 :
             4 * thirtysecond_note_dur - env.total_latency;
         const start_t = this.clock.getElapsedTime() + delay;
-        this.indicator_on_time_range[channel - 1].push([
-            start_t,
-            start_t + thirtysecond_note_dur
-        ]);
         this.scenes.forEach((scene) => {
             scene.handle_beat(t, channel);
         });

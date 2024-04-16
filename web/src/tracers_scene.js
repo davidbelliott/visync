@@ -4,7 +4,8 @@ import {
     clamp,
     lerp_scalar,
     update_persp_camera_aspect,
-    create_instanced_cube
+    create_instanced_cube,
+    BeatClock
 } from './util.js';
 import { LightningStrike } from './lightning_strike.js';
 
@@ -37,8 +38,8 @@ export class TracersScene extends VisScene {
         this.trace_spacing = 2;
 
         this.beat_idx = 0;
-        this.sync_clock = new THREE.Clock(false);
-        this.state_change_clock = new THREE.Clock(false);
+        this.sync_clock = new BeatClock();
+        this.state_change_clock = new BeatClock();
 
         this.recreate_buffers(window.innerWidth, window.innerHeight);
 
@@ -85,6 +86,9 @@ export class TracersScene extends VisScene {
 
         this.lightningMaterial = new THREE.MeshBasicMaterial( { color: this.lightningColor } );
 
+        this.base_scale = 0.75;
+        this.scale_start = this.min_base_scale;
+        this.scale_end = this.min_base_scale;
 
         this.cubes = [];
         this.ray_params = [];
@@ -135,6 +139,13 @@ export class TracersScene extends VisScene {
         this.start_cube_bounce_ampl = 0;
         this.curr_cube_bounce_ampl = 0;
         this.target_cube_bounce_ampl = 0;
+        this.max_cube_bounce_ampl = 0.5;
+
+        this.start_scale = 1;
+        this.curr_scale = 1;
+        this.target_scale = 1;
+
+        this.expand_period_beats = 8;
 
 
         this.elapsed_time = 0.0;
@@ -207,16 +218,38 @@ export class TracersScene extends VisScene {
     }
 
     get_cube_scale(t) {
-        const min_base_scale = 1;
-        const max_base_scale = 1.5;
+        let beat_time = this.sync_clock.getElapsedBeats();
+        // Update bounce amplitude
+        const bounce_change_beats = 8;
+        const state_change_frac = clamp(this.state_change_clock.getElapsedBeats() / bounce_change_beats, 0, 1);
+        this.curr_cube_bounce_ampl = lerp_scalar(this.start_cube_bounce_ampl, this.target_cube_bounce_ampl, state_change_frac);
 
-        return this.curr_cube_bounce_ampl * clamp((t - 0.5) ** 2, 0, 1) * (max_base_scale - min_base_scale) + 
-            min_base_scale;
+
+        const scale_frac = beat_time / this.expand_period_beats;
+        return this.base_scale + Math.cos(scale_frac * 2 * Math.PI) * this.curr_cube_bounce_ampl;
+        /*return this.curr_cube_bounce_ampl * (t - 0.5) ** 2 * (max_base_scale - min_base_scale) + 
+            min_base_scale;*/
+        this.curr_scale = lerp_scalar(
+            this.start_scale,
+            (this.target_scale - this.min_base_scale) * this.curr_cube_bounce_ampl
+            + this.min_base_scale, scale_frac);
+        return this.curr_scale;
     }
 
     handle_sync(t, bpm, beat) {
-        if (beat % 2 == 0) {
-            this.sync_clock.start();
+        this.sync_clock.updateBPM(bpm);
+        this.state_change_clock.updateBPM(bpm);
+        console.log(beat);
+        if (beat % (2 * this.expand_period_beats) == 0) {
+            console.log("expand");
+            this.start_scale = this.curr_scale;
+            this.target_scale = this.max_base_scale;
+            this.sync_clock.start(bpm);
+        } else if (beat % (2 * this.expand_period_beats) == this.expand_period_beats){
+            console.log("contract");
+            this.start_scale = this.curr_scale;
+            this.target_scale = this.min_base_scale;
+            this.sync_clock.start(bpm);
         }
     }
 
@@ -227,12 +260,10 @@ export class TracersScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.env.bpm / 60 / 2;
-        let beat_time = this.sync_clock.getElapsedTime() * beats_per_sec;
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
-            cube.scale.setScalar(this.get_cube_scale(beat_time));
+            cube.scale.setScalar(this.get_cube_scale());
         }
 
         for (const rp of this.ray_params) {
@@ -247,11 +278,6 @@ export class TracersScene extends VisScene {
         }
 
         //this.cubes_group.scale.setScalar(this.base_scale);
-
-        // Update bounce amplitude
-        const bounce_change_beats = 8;
-        const frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / bounce_change_beats, 0, 1);
-        this.curr_cube_bounce_ampl = lerp_scalar(this.start_cube_bounce_ampl, this.target_cube_bounce_ampl, frac);
 
 
         this.cubes_group.rotation.x += 0.1 * dt;
@@ -286,23 +312,25 @@ export class TracersScene extends VisScene {
             ls.visible = lightning_visible;
         }
         if (cubes_bouncing) {
-            this.target_cube_bounce_ampl = 4;
+            this.target_cube_bounce_ampl = this.max_cube_bounce_ampl;
             this.start_cube_bounce_ampl = this.curr_cube_bounce_ampl;
         } else {
             this.target_cube_bounce_ampl = 0;
             this.start_cube_bounce_ampl = this.curr_cube_bounce_ampl;
         }
-        this.state_change_clock.start();
+        this.state_change_clock.start(this.get_local_bpm());
     }
 
 
     render(renderer) {
+        const old_autoclear = renderer.autoClearColor;
+        const old_render_target = renderer.getRenderTarget();
         renderer.autoClearColor = false;
-        super.render(renderer);
-        renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
-        renderer.clear();
+        //super.render(renderer);
+        //renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
+        //renderer.clear();
         renderer.render(this.vbo_scene, this.vbo_camera);
-        let tex_values = [];
+        /*let tex_values = [];
         let idx = this.cur_buffer_idx;
         for (let i = 0; i < this.buffers.length; i++) {
             if (i % this.trace_spacing == 0) {
@@ -321,11 +349,11 @@ export class TracersScene extends VisScene {
         this.blend_material.uniforms.t6.value = tex_values[5];
         this.blend_material.uniforms.ratio.value = 0.8;//transitionParams.transition;
 
-        renderer.setRenderTarget(null);
+        renderer.setRenderTarget(old_render_target);
         renderer.clear();
         renderer.clearDepth();
-        renderer.render(this.scene, this.camera);
-        renderer.autoClearColor = true;
+        renderer.render(this.scene, this.camera);*/
+        //renderer.autoClearColor = old_autoclear;
         this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
     }
 }

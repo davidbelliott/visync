@@ -94,8 +94,8 @@ class Robot {
 
 
 export class YellowRobotScene extends VisScene {
-    constructor(env) {
-        super(env, 4);
+    constructor() {
+        super(4);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 10;

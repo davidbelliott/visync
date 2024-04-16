@@ -16,8 +16,8 @@ import { Tesseract } from './highdim.js';
 
 
 export class IntroScene extends VisScene {
-    constructor(env) {
-        super(env, 8);
+    constructor() {
+        super(8);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -73,8 +73,8 @@ export class IntroScene extends VisScene {
 
         // Handle rotation
         {
-            const t_sync = this.sync_clock.get_elapsed_beats();
-            const frac = clamp((t_sync - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
+            const t_sync = this.sync_clock.getElapsedBeats(this.get_local_bpm());
+            const frac = (t_sync - (1 - beats_per_lerp)) / beats_per_lerp;
             if (this.cur_dim == 4) {
                 this.tesseract.rot_xw = Math.PI / 8 * (2 + this.start_rot +
                     lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
@@ -89,7 +89,7 @@ export class IntroScene extends VisScene {
 
         this.rot++;
     
-        const t = this.beat_clock.get_elapsed_beats();
+        const t = this.beat_clock.getElapsedBeats(this.get_local_bpm());
         const bounce_beats = 4;
         const state_change_beats = 8;
 
@@ -108,7 +108,7 @@ export class IntroScene extends VisScene {
             arr.push(this_val);
             frac -= this_val;
         }*/
-        let state_change_frac = clamp(this.dim_change_clock.get_elapsed_beats() / state_change_beats, 0, 1);
+        let state_change_frac = clamp(this.dim_change_clock.getElapsedBeats(this.get_local_bpm()) / state_change_beats, 0, 1);
         const scaling_idx = this.cur_dim - 1 - this.dim_change_direction;
 
         this.scales[this.cur_dim - 1] = frac;

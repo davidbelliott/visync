@@ -37,7 +37,7 @@ class Excitation extends THREE.Object3D {
 }
 
 class Gantry {
-    constructor(parent_scene, parent_obj, cubes_arr, width, env, start_xz) {
+    constructor(parent_scene, parent_obj, cubes_arr, width, start_xz) {
         const start_pos = new THREE.Vector3(start_xz.x,
             5.929,  // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
             start_xz.z);
@@ -87,7 +87,6 @@ class Gantry {
         parent_obj.add(this.x_beam);
 
         this.cubes_arr = cubes_arr;
-        this.env = env;
 
         this.clock.start();
     }
@@ -203,8 +202,8 @@ class Gantry {
 
 
 export class GantryScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 20;
@@ -288,7 +287,7 @@ export class GantryScene extends VisScene {
         this.gantries = [];
         for (let i = 0; i < 2; i++) {
             this.gantries.push(
-                new Gantry(this, this.cubes_group, this.cubes, width, this.env,
+                new Gantry(this, this.cubes_group, this.cubes, width,
                     new THREE.Vector3(2, 0, 2)));
         }
         this.moving_gantry_idx = 0;

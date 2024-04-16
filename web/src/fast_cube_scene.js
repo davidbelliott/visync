@@ -19,7 +19,7 @@ import {
 } from './util.js';
 
 class TunnelMovementBackground {
-    constructor(env, parent_scene) {
+    constructor(parent_scene) {
         this.parent_scene = parent_scene;
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -31,7 +31,6 @@ class TunnelMovementBackground {
         this.sync_clock = new THREE.Clock(true);
         this.wave_ampl = 2;
         this.start_square_offset = 0;
-        this.env = env;
         this.start_rot = 0;
         this.end_rot = 0;
         for (let i = 0; i < this.num_squares; i++) {
@@ -99,8 +98,8 @@ class TunnelMovementBackground {
 }
 
 export class FastCubeScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -108,13 +107,13 @@ export class FastCubeScene extends VisScene {
 
         const aspect = width / height;
         this.frustum_size = 20;
-        this.cam_fg = new THREE.OrthographicCamera(
+        this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
 
-        this.camera = this.cam_fg;
+        this.camera = this.cam_orth;
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
@@ -125,7 +124,7 @@ export class FastCubeScene extends VisScene {
         this.full_beat_clock = new THREE.Clock(true);
 
         this.base_group = new THREE.Group();
-        this.bg = new TunnelMovementBackground(env, this);
+        this.bg = new TunnelMovementBackground(this);
 
         this.vibe_ampl = 0;
 
@@ -332,7 +331,7 @@ export class FastCubeScene extends VisScene {
 
         if (channel == 1) {
             const thirtysecond_note_dur = 60 / this.get_local_bpm() / 8;
-            const delay = this.env.get_beat_delay();
+            const delay = this.get_beat_delay();
             const start_t = this.clock.getElapsedTime() + delay;
             this.laser_on_times.push([
                 start_t,

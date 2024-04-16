@@ -17,8 +17,8 @@ const USE_SHADER = true;
 const SVG_SIZE = 80;
 
 export class ChineseScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -183,7 +183,7 @@ export class ChineseScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.env.get_beat_delay();
+        const delay = this.get_beat_delay();
         setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
     }
 

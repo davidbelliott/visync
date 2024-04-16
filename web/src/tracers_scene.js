@@ -26,8 +26,8 @@ function make_wireframe_polyhedron(radius, detail) {
 }
 
 export class TracersScene extends VisScene {
-    constructor(env) {
-        super(env, 3);
+    constructor() {
+        super(3);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -87,8 +87,7 @@ export class TracersScene extends VisScene {
         this.lightningMaterial = new THREE.MeshBasicMaterial( { color: this.lightningColor } );
 
         this.base_scale = 0.75;
-        this.scale_start = this.min_base_scale;
-        this.scale_end = this.min_base_scale;
+        this.curr_scale = this.base_scale;
 
         this.cubes = [];
         this.ray_params = [];
@@ -141,9 +140,6 @@ export class TracersScene extends VisScene {
         this.target_cube_bounce_ampl = 0;
         this.max_cube_bounce_ampl = 0.5;
 
-        this.start_scale = 1;
-        this.curr_scale = 1;
-        this.target_scale = 1;
 
         this.expand_period_beats = 8;
 
@@ -187,19 +183,11 @@ export class TracersScene extends VisScene {
                         'uniform float ratio;',
                         'uniform sampler2D t1;',
                         'uniform sampler2D t2;',
-                        'uniform sampler2D t3;',
-                        'uniform sampler2D t4;',
-                        'uniform sampler2D t5;',
-                        'uniform sampler2D t6;',
                         'varying vec2 vUv;',
                         'void main() {',
                         '	vec4 texel1 = texture2D( t1, vUv );',
                         '	vec4 texel2 = texture2D( t2, vUv );',
-                        '	vec4 texel3 = texture2D( t3, vUv );',
-                        '	vec4 texel4 = texture2D( t4, vUv );',
-                        '	vec4 texel5 = texture2D( t5, vUv );',
-                        '	vec4 texel6 = texture2D( t6, vUv );',
-                        '	gl_FragColor = max(texel1, ratio * max(texel2, ratio * max(texel3, ratio * max(texel4, ratio * max(texel5, ratio * texel6)))));',
+                        '	gl_FragColor = max(texel1, ratio * texel2);',
                         '}'
                     ].join( '\n' )
             } );
@@ -227,28 +215,12 @@ export class TracersScene extends VisScene {
 
         const scale_frac = beat_time / this.expand_period_beats;
         return this.base_scale + Math.cos(scale_frac * 2 * Math.PI) * this.curr_cube_bounce_ampl;
-        /*return this.curr_cube_bounce_ampl * (t - 0.5) ** 2 * (max_base_scale - min_base_scale) + 
-            min_base_scale;*/
-        this.curr_scale = lerp_scalar(
-            this.start_scale,
-            (this.target_scale - this.min_base_scale) * this.curr_cube_bounce_ampl
-            + this.min_base_scale, scale_frac);
-        return this.curr_scale;
     }
 
     handle_sync(t, bpm, beat) {
         this.sync_clock.updateBPM(bpm);
         this.state_change_clock.updateBPM(bpm);
-        console.log(beat);
-        if (beat % (2 * this.expand_period_beats) == 0) {
-            console.log("expand");
-            this.start_scale = this.curr_scale;
-            this.target_scale = this.max_base_scale;
-            this.sync_clock.start(bpm);
-        } else if (beat % (2 * this.expand_period_beats) == this.expand_period_beats){
-            console.log("contract");
-            this.start_scale = this.curr_scale;
-            this.target_scale = this.min_base_scale;
+        if (beat % this.expand_period_beats == 0) {
             this.sync_clock.start(bpm);
         }
     }
@@ -325,11 +297,15 @@ export class TracersScene extends VisScene {
     render(renderer) {
         const old_autoclear = renderer.autoClearColor;
         const old_render_target = renderer.getRenderTarget();
-        renderer.autoClearColor = false;
+        //renderer.autoClearColor = false;
         //super.render(renderer);
-        //renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
-        //renderer.clear();
+        //
+        //
+        // Last render is stored in buffers[1]
+        // Render new frame to buffers[0]
         renderer.render(this.vbo_scene, this.vbo_camera);
+
+
         /*let tex_values = [];
         let idx = this.cur_buffer_idx;
         for (let i = 0; i < this.buffers.length; i++) {
@@ -354,6 +330,6 @@ export class TracersScene extends VisScene {
         renderer.clearDepth();
         renderer.render(this.scene, this.camera);*/
         //renderer.autoClearColor = old_autoclear;
-        this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
+        //this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
     }
 }

@@ -20,8 +20,8 @@ function radial_wave(u, v, target, t) {
 
 
 export class BackgroundSurfacesScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 200);

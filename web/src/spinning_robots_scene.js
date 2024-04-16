@@ -155,8 +155,8 @@ class Robot extends THREE.Object3D {
 
 
 export class SpinningRobotsScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -220,8 +220,8 @@ export class SpinningRobotsScene extends VisScene {
         this.scene.add(this.base_group);
 
         this.clock = new THREE.Clock(true);
-        this.half_beat_clock = new BeatClock(this, false);
-        this.throw_clock = new BeatClock(this, false);
+        this.half_beat_clock = new BeatClock();
+        this.throw_clock = new BeatClock();
     }
 
     anim_frame(dt) {
@@ -230,8 +230,8 @@ export class SpinningRobotsScene extends VisScene {
         this.base_group.rotation.y += 0.1 * dt;
         this.camera.rotation.x = -0.5 * (1 + Math.sin(this.clock.getElapsedTime() * 0.1)) * isom_angle;
 
-        const half_beat_time = this.half_beat_clock.get_elapsed_beats() / 2.0;;
-        const throw_time = this.throw_clock.get_elapsed_beats();
+        const half_beat_time = this.half_beat_clock.getElapsedBeats(this.get_local_bpm()) / 2.0;;
+        const throw_time = this.throw_clock.getElapsedBeats(this.get_local_bpm());
         for (const r of this.robots) {
             r.anim_frame(dt, half_beat_time, throw_time, this.get_local_bpm());
         }
@@ -240,10 +240,10 @@ export class SpinningRobotsScene extends VisScene {
     handle_sync(t, bpm, beat) {
         if (beat % 2 == 0) {
             // half-note beat
-            this.half_beat_clock.start();
+            this.half_beat_clock.start(this.get_local_bpm());
         }
         if (beat % 16 == 0) {
-            this.throw_clock.start();
+            this.throw_clock.start(this.get_local_bpm());
         }
     }
 

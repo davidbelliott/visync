@@ -3,8 +3,8 @@ import { VisScene } from './vis_scene.js';
 
 
 export class SlideScene extends VisScene {
-    constructor(env, img_paths) {
-        super(env, img_paths.length);
+    constructor(img_paths) {
+        super(img_paths.length);
         this.img_paths = img_paths;
         this.full_overlay = document.getElementById("full-overlay");
         this.full_overlay.children[0].src = this.img_paths[0];

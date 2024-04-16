@@ -113,8 +113,8 @@ class CubeAssembly extends THREE.Group {
 }
 
 export class HexagonScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -205,7 +205,6 @@ export class HexagonScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        console.log("beat");
         if (channel == 2) {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel);

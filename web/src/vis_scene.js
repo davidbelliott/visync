@@ -11,9 +11,9 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(env, num_states=1, max_bpm=150) {
+    constructor(num_states=1, max_bpm=150) {
         this.bpm = 120;
-        this.env = env;
+        this.latency_seconds = 0;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.cam_orth = null;
@@ -48,6 +48,11 @@ export class VisScene {
 
     get_local_bpm() {
         return this.bpm;
+    }
+
+    get_beat_delay() {
+        const sixteenth_note = 60 / this.bpm / 4;
+        return 2 * sixteenth_note - this.latency_seconds;
     }
 
     handle_sync(t, bpm, beat) {

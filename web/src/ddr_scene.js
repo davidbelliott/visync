@@ -198,8 +198,8 @@ class DDRArrow extends THREE.LineSegments {
 }
 
 export class DDRScene extends VisScene {
-    constructor(env) {
-        super(env, 1);
+    constructor() {
+        super(1);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;
@@ -291,10 +291,10 @@ export class DDRScene extends VisScene {
         // Robot rotation, in 90 degree increments starting from 45 degrees
         this.start_robot_rot = 0;
         this.target_robot_rot = 0;
-        this.robot_rot_clock = new BeatClock(this);
+        this.robot_rot_clock = new BeatClock();
 
         // Clock for robot shuffling movement
-        this.half_beat_clock = new BeatClock(this);
+        this.half_beat_clock = new BeatClock();
     }
 
     anim_frame(dt) {
@@ -305,7 +305,7 @@ export class DDRScene extends VisScene {
         const robot_rot = lerp_scalar(this.start_robot_rot, this.target_robot_rot, rot_frac);
         this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
 
-        const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
+        const half_beat_time = this.half_beat_clock.getElapsedBeats(this.get_local_bpm()) / 2.0;
         for (const r of this.robots) {
             r.anim_frame(dt, half_beat_time, this.get_local_bpm());
         }
@@ -326,11 +326,11 @@ export class DDRScene extends VisScene {
         if (beat % 4 == 0) {
             this.start_robot_rot = this.target_robot_rot;
             this.target_robot_rot++;
-            this.robot_rot_clock.start();
+            this.robot_rot_clock.start(this.get_local_bpm());
         }
         if (beat % 2 == 0) {
             // half-note beat
-            this.half_beat_clock.start();
+            this.half_beat_clock.start(this.get_local_bpm());
         }
     }
 

@@ -18,7 +18,6 @@ import {
     ObjectPool,
     BeatClock
 } from './util.js';
-import { Tesseract } from './highdim.js';
 
 class CustomSinCurve extends THREE.Curve {
     constructor( scale = 1 ) {
@@ -100,8 +99,8 @@ class CustomSinCurve extends THREE.Curve {
 
 
 export class CubeLockingScene extends VisScene {
-    constructor(env) {
-        super(env, 3);
+    constructor() {
+        super(3);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

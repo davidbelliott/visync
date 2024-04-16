@@ -11,8 +11,8 @@ const SCALE_LERP_RATE = 5;
 
 
 export class HomeBackgroundScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor() {
+        super();
         this.min_base_scale = 2.0;
         this.max_base_scale = 3.0;
         this.base_scale = this.min_base_scale;
@@ -83,7 +83,7 @@ export class HomeBackgroundScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.env.get_beat_delay();
+        const delay = this.get_beat_delay();
         if (channel == 1) {
             setTimeout(() => { this.base_scale = this.max_base_scale; }, delay * 1000);
         }

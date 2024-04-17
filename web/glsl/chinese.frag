@@ -1,4 +1,5 @@
 uniform vec3      resolution;           // viewport resolution (in pixels)
+uniform float pixel_ratio;
 uniform float time;
 uniform float scroll_time;
 uniform sampler2D tex;
@@ -307,7 +308,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
     float texture_aspect = tex_dims.x / tex_dims.y;
     // Aspect correct screen coordinates.
-    vec2 st = fragCoord.xy / resolution.xx;
+    vec2 st = fragCoord.xy / resolution.xx / pixel_ratio;
     vec2 to_center = vec2(0.5) - st;
 
     fragColor = vec4(1.0);

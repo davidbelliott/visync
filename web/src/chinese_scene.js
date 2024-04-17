@@ -124,6 +124,7 @@ export class ChineseScene extends VisScene {
                 time: { type: 'f', value: 0.0 },
                 scroll_time: { type: 'f', value: 0.0 },
                 resolution: { type: 'v2', value: new THREE.Vector2(width, height) },
+                pixel_ratio: { type: 'f', value: window.devicePixelRatio },
                 tex: { type: 't', value: texture },
                 tex_dims: { type: 'v2', value: new THREE.Vector2(texture.image.width, texture.image.height) }
             };
@@ -171,6 +172,10 @@ export class ChineseScene extends VisScene {
             this.plane.scale.set(width, height, 1);
         }
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
+        if (this.uniforms != null) {
+            this.uniforms.resolution.value.set(width, height);
+            this.uniforms.pixel_ratio.value = window.devicePixelRatio;
+        }
     }
 
     create_buffer(width, height) {

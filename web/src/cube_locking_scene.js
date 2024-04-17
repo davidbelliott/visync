@@ -260,7 +260,7 @@ export class CubeLockingScene extends VisScene {
         // Handle rotation
         {
             const t = this.rot_clock.getElapsedBeats(this.get_local_bpm());
-            const frac = t / this.beats_per_rotation;
+            let frac = t / this.beats_per_rotation;
             this.cur_rot = this.start_rot +
                 lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot);
             this.base_group.rotation.y = Math.PI / 2 * (0.5 + this.cur_rot);

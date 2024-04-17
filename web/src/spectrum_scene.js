@@ -97,6 +97,7 @@ export class SpectrumScene extends VisScene {
 
 
         this.line_length = this.frustum_size * aspect;
+        this.orig_line_length = this.line_length;
         this.ceiling_height = 5;
 
         this.scene = new THREE.Scene();

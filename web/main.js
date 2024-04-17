@@ -59,6 +59,8 @@ const BG_COLOR = 'black';
 
 const SCENES_PER_BANK = 10;
 
+const MIN_SWIPE_LENGTH = 50;
+
 var context = null;
 var stats = new Stats();
 
@@ -106,10 +108,13 @@ function init() {
     stats.dom.style.visibility = 'hidden';
     document.body.appendChild( stats.dom );
 
+
+
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    context.change_scene(0);
+    context.change_scene(1);
+    context.change_scene(3, true);
     animate();
 }
 
@@ -274,8 +279,85 @@ class VisOpening extends VisScene {
     }
 }
 
+const ongoingTouches = [];
 
-function Transition( sceneA, sceneB ) {
+function ongoingTouchIndexById(idToFind) {
+    for (let i = 0; i < ongoingTouches.length; i++) {
+        const id = ongoingTouches[i].identifier;
+
+        if (id === idToFind) {
+        return i;
+        }
+    }
+    return -1; // not found
+}
+
+function copyTouch({ identifier, pageX, pageY }) {
+    return { identifier, pageX, pageY };
+}
+
+function handle_start(evt) {
+    evt.preventDefault();
+    const touches = evt.changedTouches;
+
+    for (let i = 0; i < touches.length; i++) {
+        ongoingTouches.push(copyTouch(touches[i]));
+        /*if (touches[i].pageX < window.innerWidth / 2) {
+            context.change_scene(clamp(0, context.cur_scene_idx - 1, context.scenes.length - 1));
+        } else {
+            context.change_scene(clamp(0, context.cur_scene_idx + 1, context.scenes.length - 1));
+        }*/
+    }
+}
+
+function handle_end(evt) {
+    evt.preventDefault();
+    const touches = evt.changedTouches;
+
+    for (let i = 0; i < touches.length; i++) {
+        let idx = ongoingTouchIndexById(touches[i].identifier);
+        if (idx >= 0) {
+            const start_pos = new THREE.Vector2(ongoingTouches[idx].pageX, ongoingTouches[idx].pageY);
+            const end_pos = new THREE.Vector2(touches[i].pageX, touches[i].pageY);
+            const delta = end_pos.clone();
+            delta.sub(start_pos);
+
+            if (delta.length() > MIN_SWIPE_LENGTH) {
+                // This is a swipe
+                if (Math.abs(delta.x) > Math.abs(delta.y)) {
+                    // Horizontal swipe
+                    if (delta.x > 0) {
+                        context.change_scene(clamp(0, context.cur_scene_idx - 1, context.scenes.length - 1));
+                    } else {
+                        context.change_scene(clamp(0, context.cur_scene_idx + 1, context.scenes.length - 1));
+                    }
+                } else {
+                    // Vertical swipe
+                    if (delta.y > 0) {
+                        context.change_scene(clamp(0, context.cur_bg_scene_idx + 1, context.scenes.length - 1), true);
+                    } else {
+                        context.change_scene(clamp(0, context.cur_bg_scene_idx - 1, context.scenes.length - 1), true);
+                    }
+                }
+            } else {
+                // This is a tap
+                if (touches[i].pageX < window.innerWidth / 4) {
+                    context.scenes[context.cur_scene_idx].advance_state(-1);
+                } else if (touches[i].pageX > window.innerWidth * 3 / 4) {
+                    context.scenes[context.cur_scene_idx].advance_state(1);
+                }
+            }
+            ongoingTouches.splice(idx, 1);
+        }
+    }
+}
+
+function handle_cancel(evt) {
+
+}
+
+function handle_move(evt) {
+
 }
 
 
@@ -289,6 +371,7 @@ class GraphicsContext {
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
         this.scenes = [
+            new VisScene(),
             new HexagonScene(),
             new CubeLockingScene(),
             new TracersScene(),
@@ -297,21 +380,21 @@ class GraphicsContext {
             new GantryScene(),
             new YellowRobotScene(),
             new SurfacesScene(),
+            new SpinningRobotsScene(),
             new BackgroundSurfacesScene(),
             new SpectrumScene(),
             new FastCubeScene(),
             new DDRScene(),
             new DrumboxScene(),
-            new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
-            new IntroScene(),
-            new SpinningRobotsScene(),
-            new ChineseScene(),
+            //new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
+            //new IntroScene(),
+            //new ChineseScene(),
             new TessellateScene(),
             //new FastCarScene(),
             new HomeBackgroundScene(),
         ];
         this.cur_scene_idx = 0;
-        this.cur_bg_scene_idx = 2;
+        this.cur_bg_scene_idx = 3;
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil(this.scenes.length / SCENES_PER_BANK);
 
@@ -333,6 +416,17 @@ class GraphicsContext {
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
+
+
+        // Handle touches
+        {
+            const el = this.renderer.domElement;
+            el.addEventListener("touchstart", handle_start);
+            el.addEventListener("touchend", handle_end);
+            el.addEventListener("touchcancel", handle_cancel);
+            el.addEventListener("touchmove", handle_move);
+        }
+
 
         // Plane in orthographic view with custom shaders for tracers
         {
@@ -514,10 +608,15 @@ class GraphicsContext {
     keydown(e) {
         const num = parseInt(e.key);
         console.log(num);
+        const shift_chars = ')!@#$%^&*(';
         if (!isNaN(num)) {
             const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
                 num % 10, 0, this.scenes.length - 1));
             this.change_scene(scene_idx);
+        } else if (shift_chars.includes(e.key)) {
+            const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
+                shift_chars.indexOf(e.key), 0, this.scenes.length - 1));
+            this.change_scene(scene_idx, true);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
                 this.set_tracer_params(10, 4, 0.8);

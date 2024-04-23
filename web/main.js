@@ -124,9 +124,8 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const relay_url = `${window.location.hostname}:8765`;
+    const relay_url = `${window.location.hostname}/ws/`;
     const socket = new WebSocket(`${protocol}://${relay_url}`);
-    //const socket = new WebSocket(`ws://192.168.1.2:8765`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -372,13 +371,14 @@ class GraphicsContext {
         this.next_scheduled_sync_time = null;
         this.scenes = [
             new VisScene(),
+            new GantryScene(),
             new HexagonScene(),
-            new CubeLockingScene(),
             new TracersScene(),
+            new CubeLockingScene(),
             new IceCreamScene(),
             new BackgroundSurfacesScene(),
-            new GantryScene(),
             new YellowRobotScene(),
+            new ChineseScene(),
             new SurfacesScene(),
             new SpinningRobotsScene(),
             new BackgroundSurfacesScene(),
@@ -387,11 +387,10 @@ class GraphicsContext {
             new DDRScene(),
             new DrumboxScene(),
             //new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
-            //new IntroScene(),
-            //new ChineseScene(),
             new TessellateScene(),
-            //new FastCarScene(),
             new HomeBackgroundScene(),
+            new IntroScene(),
+            //new FastCarScene(),
         ];
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 3;

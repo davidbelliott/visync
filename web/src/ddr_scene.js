@@ -170,11 +170,12 @@ class DDRArrow extends THREE.LineSegments {
         this.base_pos = this.position.clone();
         this.base_quat = this.quaternion.clone();
         this.base_scale = this.scale.clone();
-        this.clock = new BeatClock(parent_scene, false);
+        this.clock = new BeatClock();
+        this.parent_scene = parent_scene;
     }
 
     anim_frame() {
-        const beats_elapsed = this.clock.getElapsedBeats();
+        const beats_elapsed = this.clock.getElapsedBeats(this.parent_scene.get_local_bpm());
         const global_beats_elapsed = DDRArrow.global_clock.getElapsedBeats();
         this.offset_vec = new THREE.Vector3(
             0,
@@ -193,7 +194,7 @@ class DDRArrow extends THREE.LineSegments {
         //const color_options = ["orange", "cyan", "lightgreen", "magenta"];
         //this.material.color = new THREE.Color(color_options[ddr_direction]);
         this.time_till_impact = time_till_impact;
-        this.clock.start();
+        this.clock.start(this.parent_scene.get_local_bpm());
     }
 }
 

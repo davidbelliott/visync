@@ -95,7 +95,7 @@ class Robot {
 
 export class YellowRobotScene extends VisScene {
     constructor() {
-        super(4);
+        super(2);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 10;
@@ -291,13 +291,6 @@ export class YellowRobotScene extends VisScene {
             this.start_zoom = this.curr_zoom;
             this.target_zoom = 1;
         } else if (new_state_idx == 1) {
-            this.start_spacing = this.curr_spacing;
-            this.target_spacing = 0;
-
-            this.start_zoom = this.curr_zoom;
-            this.target_zoom = 1;
-
-        } else if (new_state_idx == 2) {
             this.start_spacing = this.curr_spacing;
             this.target_spacing = 3;
 

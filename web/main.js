@@ -113,8 +113,8 @@ function init() {
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
-    context.change_scene(1);
-    context.change_scene(context.scenes.length - 1, true);
+    context.change_scene(6);
+    context.change_scene(0, true);
     animate();
 }
 
@@ -138,7 +138,7 @@ function connect() {
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
-            context.change_scene(msg.scene);
+            context.change_scene(msg.scene, msg.bg);
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
         }
@@ -341,9 +341,9 @@ function handle_end(evt) {
             } else {
                 // This is a tap
                 if (touches[i].pageX < window.innerWidth / 4) {
-                    context.scenes[context.cur_scene_idx].advance_state(-1);
+                    context.scenes.get(context.cur_scene_idx).advance_state(-1);
                 } else if (touches[i].pageX > window.innerWidth * 3 / 4) {
-                    context.scenes[context.cur_scene_idx].advance_state(1);
+                    context.scenes.get(context.cur_scene_idx).advance_state(1);
                 }
             }
             ongoingTouches.splice(idx, 1);
@@ -369,28 +369,28 @@ class GraphicsContext {
         this.bpm = 120;
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
-        this.scenes = [
-            new VisScene(),
-            new GantryScene(),
-            new HexagonScene(),
-            new SpinningRobotsScene(),
-            new CubeLockingScene(),
-            new IceCreamScene(),
-            new DDRScene(),
-            new DrumboxScene(),
-            new YellowRobotScene(),
-            new ChineseScene(),
-            new SurfacesScene(),
-            new BackgroundSurfacesScene(),
-            new SpectrumScene(),
-            new FastCubeScene(),
+        this.scenes = new Map([
+            [0, new VisScene()],
+            [1, new GantryScene()],
+            [2, new HexagonScene()],
+            [3, new SpinningRobotsScene()],
+            [4, new CubeLockingScene()],
+            [5, new IceCreamScene()],
+            [6, new DDRScene()],
+            [7, new DrumboxScene()],
+            [8, new YellowRobotScene()],
+            [9, new ChineseScene()],
+            [10, new SurfacesScene()],
+            [11, new BackgroundSurfacesScene()],
+            [12, new SpectrumScene()],
+            [13, new FastCubeScene()],
             //new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
-            new TessellateScene(),
-            new HomeBackgroundScene(),
-            new IntroScene(),
-            new TracersScene(),
+            [14, new TessellateScene()],
+            [15, new HomeBackgroundScene()],
+            [16, new IntroScene()],
+            [17, new TracersScene()]
             //new FastCarScene(),
-        ];
+        ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 3;
         this.cur_scene_bank = 0;
@@ -497,9 +497,9 @@ class GraphicsContext {
         //const dt = this.clock.getDelta();
         const dt = 1.0 / 60.0;
         const t_now = this.clock.getElapsedTime();
-        this.scenes[this.cur_scene_idx].anim_frame(dt);
+        this.scenes.get(this.cur_scene_idx).anim_frame(dt);
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes[this.cur_bg_scene_idx].anim_frame(dt);
+            this.scenes.get(this.cur_bg_scene_idx).anim_frame(dt);
         }
     }
 
@@ -535,9 +535,9 @@ class GraphicsContext {
 
         this.renderer.clear();
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes[this.cur_bg_scene_idx].render(this.renderer);
+            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
         }
-        this.scenes[this.cur_scene_idx].render(this.renderer);
+        this.scenes.get(this.cur_scene_idx).render(this.renderer);
 
         if (ENABLE_GLOBAL_TRACERS) {
             let tex_values = [];
@@ -582,11 +582,11 @@ class GraphicsContext {
     }
 
     change_scene(new_scene_idx, bg=false) {
-        if (new_scene_idx >= 0 && new_scene_idx < this.scenes.length) {
+        if (this.scenes.has(new_scene_idx)) {
             const cur_idx = bg ? this.cur_bg_scene_idx : this.cur_scene_idx;
             const other_idx = bg ? this.cur_scene_idx : this.cur_bg_scene_idx;
             if (cur_idx != other_idx) {
-                this.scenes[cur_idx].deactivate();
+                this.scenes.get(cur_idx).deactivate();
             }
             if (bg) {
                 this.cur_bg_scene_idx = new_scene_idx;
@@ -594,13 +594,13 @@ class GraphicsContext {
                 this.cur_scene_idx = new_scene_idx;
             }
             if (new_scene_idx != other_idx) {
-                this.scenes[new_scene_idx].activate();
+                this.scenes.get(new_scene_idx).activate();
             }
         }
     }
 
     advance_state(steps) {
-        this.scenes[this.cur_scene_idx].advance_state(steps);
+        this.scenes.get(this.cur_scene_idx).advance_state(steps);
     }
 
     keydown(e) {
@@ -633,15 +633,15 @@ class GraphicsContext {
                 stats.dom.style.visibility = 'hidden';
             }
         } else if (e.key == "ArrowLeft") {
-            this.scenes[this.cur_scene_idx].advance_state(-1);
+            this.scenes.get(this.cur_scene_idx).advance_state(-1);
         } else if (e.key == "ArrowRight") {
-            this.scenes[this.cur_scene_idx].advance_state(1);
+            this.scenes.get(this.cur_scene_idx).advance_state(1);
         } else if (e.key == "ArrowUp") {
             this.cur_scene_bank = Math.min(this.cur_scene_bank + 1, this.num_scene_banks - 1);
         } else if (e.key == "ArrowDown") {
             this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
         } else {
-            this.scenes[this.cur_scene_idx].handle_key(e.key);
+            this.scenes.get(this.cur_scene_idx).handle_key(e.key);
         }
     }
 

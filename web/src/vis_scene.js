@@ -11,11 +11,11 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(num_states=1, max_bpm=150) {
+    constructor(num_states=1, max_bpm=120) {
         this.raw_bpm = 120;
         this.bpm = this.raw_bpm;
         this.max_bpm = max_bpm;
-        this.latency_seconds = 0;
+        this.est_latency = 0.0;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.cam_orth = null;
@@ -60,9 +60,12 @@ export class VisScene {
         return this.bpm;
     }
 
+    // Returns the time in seconds between a beat event being received and the
+    // beat audio being played, assuming midi events for the beat are placed
+    // an eighth note earlier in the grid than the actual beats. Accounts for
+    // network latency as measured by packet round-trip time.
     get_beat_delay() {
-        const sixteenth_note = 60 / this.raw_bpm / 4;
-        return 2 * sixteenth_note - this.latency_seconds;
+        return this.raw_bpm / 60.0 / 8.0 - this.est_latency;
     }
 
     handle_sync(t, bpm, beat) {

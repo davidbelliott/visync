@@ -56,9 +56,14 @@ function mesh_from_gltf(gltf_mesh, fill_mat, wireframe_mat) {
 }
 
 class DDRRobot extends THREE.Object3D {
+    static num_dance_modes = 3;
     constructor(gltf_parent_object, fill_mat, wireframe_mat) {
         super();
         this.body = mesh_from_gltf(gltf_parent_object, fill_mat, wireframe_mat)
+        this.cur_foot_dir = 0;
+        this.cur_foot_rot = 0;
+        this.clap_dir = 0;
+        this.dance_mode = 2;
         this.add(this.body);
         for (const child_mesh of gltf_parent_object.children) {
             if (child_mesh.name == "leg") {
@@ -126,29 +131,75 @@ class DDRRobot extends THREE.Object3D {
         /*const pos_idx = (Math.floor(t / t_period) +
             ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
         const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.6;
+        return new THREE.Vector3(0, position_options[pos_idx] * 0.6, 0);
     }
 
-    anim_frame(dt, half_beat_time, bpm) {
+    get_arms_clap_offset(side, t) {
+        // t: normalized time since half-note beat that clap happens on (0 - 1)
+        t = t % 1;
+        let x = (2 * Math.abs(t) - 1) ** 8;
+        const y = 1 + Math.cos(2 * Math.PI * t);
+        x *= 1.75 * (side * 2 - 1);
+
+        const vec = new THREE.Vector3(x, y, 0);
+        vec.applyAxisAngle(new THREE.Vector3(1, 0, 0), this.clap_dir * Math.PI / 2);
+        return vec;
+    }
+
+    toggle_clap_mode() {
+        if (this.clap_dir == 0) {
+            this.clap_dir = 1;
+        } else {
+            this.clap_dir = 0;
+        }
+    }
+
+    anim_frame(dt, half_beat_time, measure_time, clap_time, bpm) {
         const beats_per_sec = bpm / 60;
+        if (this.dance_mode == 1) {
+            this.cur_foot_dir = Math.PI / 2 * Math.sin(half_beat_time * Math.PI);
+            this.cur_foot_rot = Math.max(0, this.cur_foot_rot - 0.1);
+        } else if (this.dance_mode == 2) {
+            this.cur_foot_dir = Math.PI / 4 * Math.sin(2 * Math.PI * (measure_time - 0.5));
+            this.cur_foot_rot = Math.PI / 4 * Math.sin(2 * Math.PI * (measure_time - 0.5));
+        } else {
+            this.cur_foot_dir = Math.max(0, this.cur_foot_dir - 0.1);
+            this.cur_foot_rot = Math.max(0, this.cur_foot_rot - 0.1);
+        }
+
 
         const body_offset = this.get_body_shuffle_offset(half_beat_time);
         const arms_offset = this.get_arms_pump_offset(half_beat_time);
 
         for (let side = 0; side < 2; side++) {
             const shuffle_offset = this.get_foot_offset(side, half_beat_time);
-            this.feet[side].position.y = this.feet[side].base_pos.y + shuffle_offset[1];
-            this.feet[side].position.z = this.feet[side].base_pos.z + shuffle_offset[2];
-            this.legs[side].position.y = this.legs[side].base_pos.y + shuffle_offset[1];
-            this.legs[side].position.z = this.legs[side].base_pos.z + shuffle_offset[2];
+            const pos_vec = new THREE.Vector3(shuffle_offset[0], shuffle_offset[1], shuffle_offset[2]);
+            pos_vec.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cur_foot_dir);
+            this.feet[side].position.copy(this.feet[side].base_pos);
+            this.feet[side].position.add(pos_vec);
+            const new_quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.cur_foot_rot);
+            this.feet[side].quaternion.copy(this.feet[side].base_quat);
+            this.feet[side].quaternion.multiply(new_quat);
+            //this.feet[side].position.y = this.feet[side].base_pos.y + shuffle_offset[1];
+            //this.feet[side].position.z = this.feet[side].base_pos.z + shuffle_offset[2];
+            this.legs[side].position.copy(this.legs[side].base_pos);
+            this.legs[side].position.add(pos_vec);
+            this.legs[side].quaternion.copy(this.legs[side].base_quat);
+            this.legs[side].quaternion.multiply(new_quat);
+            //this.legs[side].position.y = this.legs[side].base_pos.y + shuffle_offset[1];
+            //this.legs[side].position.z = this.legs[side].base_pos.z + shuffle_offset[2];
 
-            const leg_base_height = 1;
-            const leg_scale_y = (body_offset - shuffle_offset[side]) / leg_base_height;
+            const leg_base_height = 1.25;
+            const leg_scale_y = 1 - pos_vec.y / leg_base_height;
             this.legs[side].scale.y = leg_scale_y;
+            this.legs[side].position.y -= pos_vec.y / 2;
 
+            const clap_offset = this.get_arms_clap_offset(side, clap_time);
 
             this.body.position.y = this.body.base_pos.y + body_offset;
-            this.hands[side].position.y = this.hands[side].base_pos.y + arms_offset;
+            this.hands[side].position.copy(this.hands[side].base_pos);
+            this.hands[side].position.add(arms_offset);
+            this.hands[side].position.add(clap_offset);
         }
     }
 }
@@ -296,6 +347,8 @@ export class DDRScene extends VisScene {
 
         // Clock for robot shuffling movement
         this.half_beat_clock = new BeatClock();
+        this.clap_clock = new BeatClock();
+        this.measure_clock = new BeatClock();
     }
 
     anim_frame(dt) {
@@ -306,13 +359,15 @@ export class DDRScene extends VisScene {
         const robot_rot = lerp_scalar(this.start_robot_rot, this.target_robot_rot, rot_frac);
         this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
 
-        const half_beat_time = this.half_beat_clock.getElapsedBeats(this.get_local_bpm()) / 2.0;
+        const half_beat_time = clamp(this.half_beat_clock.getElapsedBeats(this.get_local_bpm()) / 2.0, 0, 1);
+        const measure_time = clamp(this.measure_clock.getElapsedBeats(this.get_local_bpm()) / 4.0, 0, 1);
+        const clap_time = clamp(this.clap_clock.getElapsedBeats(this.get_local_bpm()) / 2.0, 0, 1);
         for (const r of this.robots) {
-            r.anim_frame(dt, half_beat_time, this.get_local_bpm());
+            r.anim_frame(dt, half_beat_time, measure_time, clap_time, this.get_local_bpm());
         }
 
         for (const a of this.arrows) {
-            a.anim_frame(dt, half_beat_time, this.get_local_bpm());
+            a.anim_frame(dt, half_beat_time, measure_time, clap_time, this.get_local_bpm());
         }
     }
 
@@ -328,10 +383,24 @@ export class DDRScene extends VisScene {
             this.start_robot_rot = this.target_robot_rot;
             this.target_robot_rot++;
             this.robot_rot_clock.start(this.get_local_bpm());
+            this.measure_clock.start(this.get_local_bpm());
+
+            for (const r of this.robots) {
+                r.toggle_clap_mode();
+            }
+        }
+        if (beat % 2 == 1) {
+            this.clap_clock.start(this.get_local_bpm());
         }
         if (beat % 2 == 0) {
             // half-note beat
             this.half_beat_clock.start(this.get_local_bpm());
+        }
+        if (beat % 8 == 0) {
+            const new_dance_mode = rand_int(0, DDRRobot.num_dance_modes);
+            for (const r of this.robots) {
+                r.toggle_clap_mode();
+            }
         }
     }
 

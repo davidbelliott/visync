@@ -60,13 +60,14 @@ const BG_COLOR = 'black';
 const SCENES_PER_BANK = 10;
 
 const MIN_SWIPE_LENGTH = 50;
+const LATENCY_SMOOTHING = 0.9;
 
 var context = null;
 var stats = new Stats();
 
 class Environment {
     constructor() {
-        this.total_latency = 0.065;
+        this.total_latency = 0.010;
         this.immediate_mode = false;
     }
 }
@@ -129,12 +130,11 @@ function connect() {
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
-
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
             //
-            context.handle_sync(msg.t, msg.bpm, msg.beat);
+            context.handle_sync(msg.latency, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(msg.t, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
@@ -366,6 +366,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.cur_beat = 0;
         this.cur_sync_error = 0;
+        this.est_latency = null;
         this.bpm = 120;
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
@@ -645,55 +646,35 @@ class GraphicsContext {
         }
     }
 
-    send_sync_to_scenes() {
-        const cur_time = this.clock.getElapsedTime();
-        this.indicator_toggle(0, 'red');
-        const t_till_new_scheduled_sync = 60 / this.bpm - this.cur_sync_error;
-        const compensated_bpm = 60 / t_till_new_scheduled_sync;
+    handle_sync(latency, bpm, beat) {
+        console.log(`${beat}: ${bpm}`);
+        this.est_latency = this.est_latency === null ? latency :
+            this.est_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
+        const note_dur = 60 / bpm;
+        const delay = env.immediate_mode ? 0 :
+            note_dur - this.est_latency;
+
+        // Update scene estimated latencies immediately
         this.scenes.forEach((scene) => {
-            scene.handle_sync_raw(compensated_bpm, this.cur_beat);
+            scene.est_latency = this.est_latency;
         });
-        console.log(`Sync sent: ${compensated_bpm} bpm`);
-        this.last_scheduled_sync_time = cur_time;
-        this.next_scheduled_sync_time = cur_time + t_till_new_scheduled_sync;
-        setTimeout(() => { this.send_sync_to_scenes(); },
-            t_till_new_scheduled_sync * 1000);
-    }
 
-    handle_sync(t, bpm, beat) {
-        this.scenes.forEach((scene) => {
-            scene.handle_sync_raw(bpm, beat);
-        });
-        /*const cur_time = this.clock.getElapsedTime();
-
-        if (this.next_scheduled_sync_time == null) {
-            this.send_sync_to_scenes();
-            this.cur_sync_error = 0;
-            this.cur_beat = beat;
-        } else if (
-            Math.abs(this.last_scheduled_sync_time - cur_time) <
-            Math.abs(this.next_scheduled_sync_time - cur_time)) {
-            // The last scheduled sync was closer
-            this.cur_sync_error = this.last_scheduled_sync_time - cur_time;
-            this.cur_beat = beat + 1;
-        } else {
-            // The next scheduled sync is closer
-            this.cur_sync_error = this.next_scheduled_sync_time - cur_time;
-            this.cur_beat = beat;
-        }
-        console.log(`Error: ${this.cur_sync_error}`);
-        this.bpm = bpm;*/
-
+        // Wait until the next beat to deliver the sync message
+        setTimeout(() => {
+            this.scenes.forEach((scene) => {
+                scene.handle_sync_raw(bpm, beat + 1);
+            });
+        }, delay * 1000);
     }
 
     handle_beat(t, channel) {
-        const thirtysecond_note_dur = 60 / env.bpm / 8;
-        const delay = env.immediate_mode ? 0 :
-            4 * thirtysecond_note_dur - env.total_latency;
-        const start_t = this.clock.getElapsedTime() + delay;
         this.scenes.forEach((scene) => {
             scene.handle_beat(t, channel);
         });
+    }
+
+    get_est_latency() {
+        return this.est_latency;
     }
 }
 

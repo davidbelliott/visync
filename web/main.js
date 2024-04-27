@@ -114,7 +114,7 @@ function init() {
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
     context.change_scene(1);
-    context.change_scene(3, true);
+    context.change_scene(context.scenes.length - 1, true);
     animate();
 }
 
@@ -373,23 +373,22 @@ class GraphicsContext {
             new VisScene(),
             new GantryScene(),
             new HexagonScene(),
-            new TracersScene(),
+            new SpinningRobotsScene(),
             new CubeLockingScene(),
             new IceCreamScene(),
             new DDRScene(),
-            new BackgroundSurfacesScene(),
+            new DrumboxScene(),
             new YellowRobotScene(),
             new ChineseScene(),
             new SurfacesScene(),
-            new SpinningRobotsScene(),
             new BackgroundSurfacesScene(),
             new SpectrumScene(),
             new FastCubeScene(),
-            new DrumboxScene(),
             //new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
             new TessellateScene(),
             new HomeBackgroundScene(),
             new IntroScene(),
+            new TracersScene(),
             //new FastCarScene(),
         ];
         this.cur_scene_idx = 0;

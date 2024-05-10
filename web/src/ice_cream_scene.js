@@ -38,7 +38,7 @@ export class IceCreamScene extends VisScene {
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
-        this.beat_clock = new BeatClock();
+        this.beat_clock = new BeatClock(this);
 
         this.base_group = new THREE.Group();
         this.cones = [];
@@ -165,7 +165,7 @@ export class IceCreamScene extends VisScene {
     
         const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
-        const t = this.beat_clock.getElapsedBeats(this.get_local_bpm());
+        const t = this.beat_clock.getElapsedBeats();
         const rot_movement_beats = 2.0;
         const frac = clamp(t / rot_movement_beats, 0, 1);
 

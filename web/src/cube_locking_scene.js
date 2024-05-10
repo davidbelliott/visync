@@ -120,8 +120,8 @@ export class CubeLockingScene extends VisScene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.scene = new THREE.Scene();
-        this.rot_clock = new BeatClock();
-        this.beat_clock = new BeatClock();
+        this.rot_clock = new BeatClock(this);
+        this.beat_clock = new BeatClock(this);
 
         this.beats_per_rotation = 8;
 
@@ -259,7 +259,7 @@ export class CubeLockingScene extends VisScene {
 
         // Handle rotation
         {
-            const t = this.rot_clock.getElapsedBeats(this.get_local_bpm());
+            const t = this.rot_clock.getElapsedBeats();
             let frac = t / this.beats_per_rotation;
             this.cur_rot = this.start_rot +
                 lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot);
@@ -282,7 +282,7 @@ export class CubeLockingScene extends VisScene {
             const beats_per_expansion = 1.0;
             let frac = 1;
             if (this.beat_clock.running) {
-                const t = this.beat_clock.getElapsedBeats(this.get_local_bpm());
+                const t = this.beat_clock.getElapsedBeats();
                 frac = clamp(t / beats_per_expansion - 0.1, 0, 1);
             }
             for (const c of this.cubes) {
@@ -296,7 +296,7 @@ export class CubeLockingScene extends VisScene {
         this.rot_clock.updateBPM(bpm);
         this.beat_clock.updateBPM(bpm);
         if (beat % this.beats_per_rotation == 0 && this.do_rotation) {
-            this.rot_clock.start(this.get_local_bpm());
+            this.rot_clock.start();
             this.start_rot = this.cur_rot;
             this.end_rot = this.start_rot + this.rot_dir;
         }
@@ -306,7 +306,7 @@ export class CubeLockingScene extends VisScene {
         //const delay = 60 / this.get_local_bpm() / 2;
         /*setTimeout(() => {*/
             if (channel == 1) {
-                this.beat_clock.start(this.get_local_bpm());
+                this.beat_clock.start();
             } else if (channel == 2) {
                 this.create_spark();
             }

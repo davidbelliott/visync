@@ -40,8 +40,8 @@ export class DrumboxScene extends VisScene {
         this.base_group.add(this.drums_group);
         this.drums = [];
         this.initialized = false;
-        this.movement_clock = new BeatClock();
-        this.movement_clock.start(this.get_local_bpm());
+        this.movement_clock = new BeatClock(this);
+        this.movement_clock.start();
         this.retreat_pos = new THREE.Vector3(40, 40, 0);
         this.movement_start_pos = this.retreat_pos.clone();
         this.movement_end_pos = this.retreat_pos.clone();
@@ -269,7 +269,7 @@ export class DrumboxScene extends VisScene {
         const target_drum_z = this.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].position.z;
 
         const frac = clamp(
-            this.movement_clock.getElapsedBeats(this.get_local_bpm()) / this.beats_for_this_movement, 0, 1);
+            this.movement_clock.getElapsedBeats() / this.beats_for_this_movement, 0, 1);
         this.paddle_group.position.lerpVectors(this.movement_start_pos, this.movement_end_pos, frac);
         this.paddle_group.position.z = this.paddle_group_movement_y(frac);
 
@@ -354,7 +354,7 @@ export class DrumboxScene extends VisScene {
                 } else {
                     this.cur_drum_idx[1] = clamp(this.cur_drum_idx[1] - 1, 0, this.num_per_side - 1);
                 }
-                this.movement_clock.start(this.get_local_bpm());
+                this.movement_clock.start();
                 this.movement_start_pos.copy(this.paddle_group.position);
                 this.movement_end_pos.copy(this.drum_pos_in_array(
                     this.cur_drum_idx[0], this.cur_drum_idx[1]));
@@ -368,12 +368,12 @@ export class DrumboxScene extends VisScene {
             this.cur_drum_idx = [3, 3];
             this.movement_end_pos.copy(this.drum_pos_in_array(...this.cur_drum_idx));
             this.beats_for_this_movement = this.retreat_movement_beats;
-            this.movement_clock.start(this.get_local_bpm());
+            this.movement_clock.start();
         } else if (new_state_idx == 0) {
             this.movement_start_pos.copy(this.paddle_group.position);
             this.movement_end_pos.copy(this.retreat_pos);
             this.beats_for_this_movement = this.retreat_movement_beats;
-            this.movement_clock.start(this.get_local_bpm());
+            this.movement_clock.start();
         }
         this.drift_vel = this.drift_vels[this.cur_state_idx];
     }

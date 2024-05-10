@@ -11,7 +11,7 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(num_states=1, max_bpm=120) {
+    constructor(num_states=1, max_bpm=140) {
         this.raw_bpm = 120;
         this.bpm = this.raw_bpm;
         this.max_bpm = max_bpm;
@@ -65,7 +65,7 @@ export class VisScene {
     // an eighth note earlier in the grid than the actual beats. Accounts for
     // network latency as measured by packet round-trip time.
     get_beat_delay() {
-        return this.raw_bpm / 60.0 / 8.0 - this.est_latency;
+        return 2 * 60.0 / this.raw_bpm - this.est_latency;
     }
 
     handle_sync(t, bpm, beat) {

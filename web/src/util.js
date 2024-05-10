@@ -308,15 +308,16 @@ export class ObjectPool extends THREE.Group {
 }
 
 export class BeatClock extends THREE.Clock {
-    constructor() {
+    constructor(parent_scene) {
         super(false);
+        this.parent_scene = parent_scene;
         this.elapsed_beats = 0;
-        this.bpm = null;
+        this.bpm = 0;
     }
 
-    start(bpm) {
+    start() {
         super.start();
-        this.bpm = bpm;
+        this.bpm = this.parent_scene.get_local_bpm();
         this.elapsed_beats = 0;
     }
 
@@ -325,12 +326,9 @@ export class BeatClock extends THREE.Clock {
         this.bpm = new_bpm;
     }
 
-    getElapsedBeats(bpm=null) {
-        if (bpm != null) {
-            this.updateBPM(bpm);
-        } else {
-            this.updateBPM(this.bpm);
-        }
+    getElapsedBeats() {
+        const bpm = this.parent_scene.get_local_bpm();
+        this.updateBPM(bpm);
         return this.elapsed_beats;
     }
 }

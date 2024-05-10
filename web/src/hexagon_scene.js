@@ -87,11 +87,11 @@ class CubeAssembly extends THREE.Group {
     }
 
     anim_frame(dt, beats_per_sec) {
-        const explode_movement_beats = (this.max_spacing - this.min_spacing > 3 ? 0.5 : 0.25);
+        const explode_movement_seconds = (this.max_spacing - this.min_spacing > 3 ? 0.25 : 0.1);
         let explode_frac = 1.0;
         if (this.explode_clock.running) {
             explode_frac = clamp(
-                this.explode_clock.getElapsedTime() * beats_per_sec / explode_movement_beats,
+                this.explode_clock.getElapsedTime() / explode_movement_seconds,
                 0, 1);
         }
         if (this.spacing_direction == 1) {

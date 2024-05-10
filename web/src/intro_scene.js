@@ -37,9 +37,9 @@ export class IntroScene extends VisScene {
 
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
-        this.sync_clock = new BeatClock(this, false);
-        this.beat_clock = new BeatClock(this, false);
-        this.dim_change_clock = new BeatClock(this, false);
+        this.sync_clock = new BeatClock(this);
+        this.beat_clock = new BeatClock(this);
+        this.dim_change_clock = new BeatClock(this);
 
         this.base_group = new THREE.Group();
         this.tesseract = new Tesseract(10.0, this.cam_orth);
@@ -57,6 +57,7 @@ export class IntroScene extends VisScene {
 
         this.start_rot = 0;
         this.end_rot = 0;
+        this.cur_rot = this.start_rot;
         this.rot_dir = 1;
 
         this.cur_dim = 1;
@@ -69,27 +70,24 @@ export class IntroScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_lerp = 1.0;
+        const beats_per_lerp = 2;
 
         // Handle rotation
         {
-            const t_sync = this.sync_clock.getElapsedBeats(this.get_local_bpm());
-            const frac = (t_sync - (1 - beats_per_lerp)) / beats_per_lerp;
+            const t_sync = this.sync_clock.getElapsedBeats();
+            const frac = ease(clamp(t_sync / beats_per_lerp, 0, 1));
+            this.cur_rot = lerp_scalar(this.start_rot, this.end_rot, frac);
+            console.log(this.cur_rot);
             if (this.cur_dim == 4) {
-                this.tesseract.rot_xw = Math.PI / 8 * (2 + this.start_rot +
-                    lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
+                this.tesseract.rot_xw = Math.PI / 4 + Math.PI * this.cur_rot / 2;
             } else {
-                this.tesseract.rot_xw = 0;
+                this.tesseract.rot_xw = Math.PI / 4;
             }
-            this.tesseract.rotation.y = Math.PI / 4 * (this.start_rot +
-                lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
+            this.tesseract.rotation.y = Math.PI * this.cur_rot / 4;
         }
 
-
-
-        this.rot++;
     
-        const t = this.beat_clock.getElapsedBeats(this.get_local_bpm());
+        const t = this.beat_clock.getElapsedBeats();
         const bounce_beats = 4;
         const state_change_beats = 8;
 
@@ -112,7 +110,7 @@ export class IntroScene extends VisScene {
         const scaling_idx = this.cur_dim - 1 - this.dim_change_direction;
 
         this.scales[this.cur_dim - 1] = frac;
-        if (this.dim_change_direction == -1) {
+        /*if (this.dim_change_direction == -1) {
             // Going down from higher dim
             this.scales[this.cur_dim - 1] *= 1;
             this.scales[this.cur_dim] = Math.min(this.scales[this.cur_dim],
@@ -135,6 +133,9 @@ export class IntroScene extends VisScene {
             for (let i = 0; i < this.cur_dim - 2; i++) {
                 this.scales[i] = 1;
             }
+        }*/
+        for (let i = 0; i < this.cur_dim - 1; i++) {
+            this.scales[i] = 1;
         }
 
         this.tesseract.scale_vec.set(...this.scales);
@@ -142,16 +143,13 @@ export class IntroScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
-        if (beat % 2 == 0) {
+        if (beat % 4 == 0) {
             if (this.do_rotation) {
-                this.start_rot = this.end_rot;
-                this.end_rot = this.start_rot + this.rot_dir;
-            } else {
-                this.start_rot = this.end_rot;
-                this.end_rot = Math.floor((this.end_rot + this.rot_dir) / 2) * 2;
+                this.start_rot = this.cur_rot;
+                this.end_rot = Math.round(this.start_rot + this.rot_dir);
+                console.log(`rotating ${this.start_rot} -> ${this.end_rot}`);
+                this.sync_clock.start();
             }
-
-            this.sync_clock.start();
         }
         if (beat % 4 == 0) {
             this.beat_clock.start();

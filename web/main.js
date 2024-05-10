@@ -29,8 +29,7 @@ import { DDRScene } from './src/ddr_scene.js';
 import { HomeBackgroundScene } from './src/home_background_scene.js';
 import { SurfacesScene } from './src/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
-import { CopyShader } from 'three/addons/shaders/CopyShader.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { HelixScene } from './src/helix_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -101,22 +100,6 @@ class Queue {
     get is_empty() {
         return this.length === 0;
     }
-}
-
-
-function init() {
-    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
-    stats.dom.style.visibility = 'hidden';
-    document.body.appendChild( stats.dom );
-
-
-
-    context = new GraphicsContext();
-    document.addEventListener('keydown', (e) => { context.keydown(e); });
-    connect();
-    context.change_scene(6);
-    context.change_scene(0, true);
-    animate();
 }
 
 
@@ -360,6 +343,17 @@ function handle_move(evt) {
 }
 
 
+function init() {
+    stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
+    stats.dom.style.visibility = 'hidden';
+    document.body.appendChild( stats.dom );
+    context = new GraphicsContext();
+    document.addEventListener('keydown', (e) => { context.keydown(e); });
+    connect();
+    animate();
+}
+
+
 class GraphicsContext {
     constructor() {
         this.tracers = false;
@@ -389,13 +383,15 @@ class GraphicsContext {
             [14, new TessellateScene()],
             [15, new HomeBackgroundScene()],
             [16, new IntroScene()],
-            [17, new TracersScene()]
+            [17, new TracersScene()],
+            [18, new HelixScene()]
             //new FastCarScene(),
         ]);
-        this.cur_scene_idx = 0;
-        this.cur_bg_scene_idx = 3;
+        this.cur_scene_idx = 16;
+        this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.num_scene_banks = Math.ceil(this.scenes.length / SCENES_PER_BANK);
+        this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
+            / SCENES_PER_BANK);
 
         this.debug_overlay = document.getElementById("debug-overlay");
         this.overlay_indicators = [];
@@ -602,19 +598,21 @@ class GraphicsContext {
 
     advance_state(steps) {
         this.scenes.get(this.cur_scene_idx).advance_state(steps);
+        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+            this.scenes.get(this.cur_bg_scene_idx).advance_state(steps);
+        }
     }
 
     keydown(e) {
         const num = parseInt(e.key);
-        console.log(num);
         const shift_chars = ')!@#$%^&*(';
         if (!isNaN(num)) {
-            const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
-                num % 10, 0, this.scenes.length - 1));
+            const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
+                (num % 10));
             this.change_scene(scene_idx);
         } else if (shift_chars.includes(e.key)) {
-            const scene_idx = Math.trunc(clamp(this.cur_scene_bank * SCENES_PER_BANK + 
-                shift_chars.indexOf(e.key), 0, this.scenes.length - 1));
+            const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
+                shift_chars.indexOf(e.key));
             this.change_scene(scene_idx, true);
         } else if (e.key == 't') {
             if (this.num_traces == 1) {
@@ -624,7 +622,6 @@ class GraphicsContext {
                 this.set_tracer_params(1, 1, 1);
             }
         } else if (e.code == "Tab") {
-            console.log("tab");
             env.immediate_mode = !env.immediate_mode;
             if (this.debug_overlay.style.visibility == 'hidden') {
                 this.debug_overlay.style.visibility = 'visible';
@@ -634,9 +631,9 @@ class GraphicsContext {
                 stats.dom.style.visibility = 'hidden';
             }
         } else if (e.key == "ArrowLeft") {
-            this.scenes.get(this.cur_scene_idx).advance_state(-1);
+            this.advance_state(-1);
         } else if (e.key == "ArrowRight") {
-            this.scenes.get(this.cur_scene_idx).advance_state(1);
+            this.advance_state(1);
         } else if (e.key == "ArrowUp") {
             this.cur_scene_bank = Math.min(this.cur_scene_bank + 1, this.num_scene_banks - 1);
         } else if (e.key == "ArrowDown") {

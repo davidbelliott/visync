@@ -8,8 +8,10 @@ import {
     rand_int,
     arr_eq,
     Spark,
+    BeatClock
 } from './util.js';
 
+const CUBE_WAVE_SPEED = 1.5;
 
 function create_instanced_cube(dims, color) {
     let geometry = new THREE.BoxGeometry(...dims);
@@ -50,7 +52,7 @@ class Gantry {
 
         this.parent_obj = parent_obj;
         this.clock = new THREE.Clock(false);
-        this.move_clock = new THREE.Clock(false);
+        this.move_clock = new BeatClock(parent_scene);
         this.pound_clock = new THREE.Clock(false);
         this.start_sweep_time = null;
         this.end_sweep_time = null;
@@ -92,12 +94,11 @@ class Gantry {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.parent_scene.get_local_bpm() / 60;
         const sweep_beats = 2;
 
         // Sweeping
         {
-            let frac = ease(Math.min(1, this.move_clock.getElapsedTime() * beats_per_sec / sweep_beats));
+            let frac = ease(Math.min(1, this.move_clock.getElapsedBeats() / sweep_beats));
 
             let cur_seg = 0;
             let frac_seg = frac;
@@ -214,10 +215,8 @@ export class GantryScene extends VisScene {
             -this.frustum_size / 2, -1000, 1000);
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
-        this.half_beat_clock = new THREE.Clock(false);
-        this.beat_clock = new THREE.Clock(false);
-        this.rot_clock = new THREE.Clock(false);
-        this.zoom_clock = new THREE.Clock(false);
+        this.rot_clock = new BeatClock(this);
+        this.zoom_clock = new BeatClock(this);
         this.beat_idx = 0;
 
         this.base_group = new THREE.Group();
@@ -310,14 +309,13 @@ export class GantryScene extends VisScene {
     }
 
     anim_frame(dt) {
-        const beats_per_sec = this.get_local_bpm() / 60;
         const cube_moves_per_beat = 4;
 
 
         this.cubes_group.position.z += this.drift_vel * dt;
 
         // Y rotation
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedTime() * beats_per_sec / this.rotation_movement_beats));
+        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
         this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
         const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
         const end_color = new THREE.Color((this.target_rot_y % 2 == 0 ? "magenta" : "blue"));
@@ -325,7 +323,7 @@ export class GantryScene extends VisScene {
         cur_color.lerpColors(start_color, end_color, rot_frac);
 
         // Zoom
-        const zoom_frac = Math.min(1, this.zoom_clock.getElapsedTime() * beats_per_sec / this.zoom_movement_beats);
+        const zoom_frac = Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats);
         const new_zoom = ease(lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac));
         if (new_zoom != this.cam_orth.zoom) {
             this.cam_orth.zoom = new_zoom;
@@ -356,7 +354,6 @@ export class GantryScene extends VisScene {
             }
         }
         const elapsed_time = this.clock.getElapsedTime();
-        const elapsed_beats = elapsed_time * beats_per_sec;
         for (let i = 0; i < this.num_cubes_per_side; i++) {
             for (let j = 0; j < this.num_cubes_per_side; j++) {
                 /*this.cubes[i][j].scale.y = lerp_scalar(
@@ -366,7 +363,7 @@ export class GantryScene extends VisScene {
                 let y_offset = 0.0;
                 const keep_excitations = [];
                 for (const e of this.excitations) {
-                    const t = (elapsed_time - e.init_time) * beats_per_sec;
+                    const t = (elapsed_time - e.init_time) * CUBE_WAVE_SPEED;
                     const cube_pos = this.cubes[i][j].position.clone();
                     cube_pos.y = 0;
                     const x = cube_pos.distanceTo(e.position);
@@ -390,11 +387,9 @@ export class GantryScene extends VisScene {
     handle_sync(t, bpm, beat) {
         this.beat_idx++;
         //if (this.beat_idx % 2 == 0) {
-        this.beat_clock.start();
         //}
         const elapsed_time = this.clock.getElapsedTime();
         const mid_range_cubes = 6;  // target middle 8 rows
-        const beats_per_sec = this.get_local_bpm() / 60;
 
         if (beat % 2 == 0) {
             this.moving_gantry_idx = Math.floor(beat / 2) % 2;
@@ -419,13 +414,13 @@ export class GantryScene extends VisScene {
         if (beat % 4 == 0) {
             if (rand_int(0, 4) == 0 && (
                     (!this.rot_clock.running) ||
-                    (this.rot_clock.getElapsedTime() * beats_per_sec > this.rotation_movement_beats))) {
+                    (this.rot_clock.getElapsedBeats() > this.rotation_movement_beats))) {
 
                 this.start_rot_y = this.target_rot_y;
                 this.target_rot_y += rand_int(0, 2) * 2 - 1;
                 this.rot_clock.start();
             }
-            if (rand_int(0, 8) == 0) {
+            /*if (rand_int(0, 8) == 0) {
                 this.start_zoom = this.target_zoom;
                 if (this.target_zoom == 1) {
                     this.target_zoom = 0.7;
@@ -433,7 +428,7 @@ export class GantryScene extends VisScene {
                     this.target_zoom = 1;
                 }
                 this.zoom_clock.start();
-            }
+            }*/
         }
     }
 

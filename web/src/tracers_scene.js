@@ -38,8 +38,8 @@ export class TracersScene extends VisScene {
         this.trace_spacing = 2;
 
         this.beat_idx = 0;
-        this.sync_clock = new BeatClock();
-        this.state_change_clock = new BeatClock();
+        this.sync_clock = new BeatClock(this);
+        this.state_change_clock = new BeatClock(this);
 
         this.recreate_buffers(window.innerWidth, window.innerHeight);
 

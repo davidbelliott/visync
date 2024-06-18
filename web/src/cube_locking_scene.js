@@ -303,14 +303,14 @@ export class CubeLockingScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        //const delay = 60 / this.get_local_bpm() / 2;
-        /*setTimeout(() => {*/
+        const delay = this.get_beat_delay();
+        setTimeout(() => {
             if (channel == 1) {
                 this.beat_clock.start();
             } else if (channel == 2) {
                 this.create_spark();
             }
-        //}, delay * 1000);
+        }, delay * 1000);
     }
 
     state_transition(old_state_idx, new_state_idx) {

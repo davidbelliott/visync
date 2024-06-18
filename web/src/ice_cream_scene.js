@@ -13,6 +13,8 @@ import {
     make_wireframe_circle,
     ShaderLoader,
     BeatClock,
+    Spark,
+    ObjectPool,
 } from './util.js';
 
 export class IceCreamScene extends VisScene {
@@ -151,6 +153,21 @@ export class IceCreamScene extends VisScene {
         };
 
 
+        const spark_constructor = () => { return new Spark(0.5, "white", [0, 1], false, true); };
+        this.spark_pool = new ObjectPool(spark_constructor, 4);
+
+        // Create a cylinder
+        const cylinder_geom = new THREE.CylinderGeometry(8, 8, 16, 32);
+        const material = new THREE.MeshBasicMaterial( {color: 0xffff00} );
+        const cylinder = new THREE.Mesh( cylinder_geom, material );
+        cylinder.rotation.x = Math.PI / 2;
+        this.spark_pool.position.y = 8;
+        //this.spark_pool.add( cylinder );
+
+
+        this.fg_group.add(this.spark_pool);
+
+
         this.base_group.rotation.y = Math.PI / 4;
 
         this.scene.add(this.base_group);
@@ -175,6 +192,8 @@ export class IceCreamScene extends VisScene {
         });
         this.fg_group.rotation.y += clock_dt * 0.2 * this.target_rot_multiplier;
 
+        this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
+
         this.elapsed_time += dt;
     }
 
@@ -182,9 +201,30 @@ export class IceCreamScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 1) {
-            this.beat_clock.start(this.get_local_bpm());
-            this.target_rot_multiplier *= -1;
-        }
+        const delay = this.get_beat_delay();
+        setTimeout(() => {
+            if (channel == 1) {
+                this.beat_clock.start(this.get_local_bpm());
+                this.target_rot_multiplier *= -1;
+            } else if (channel == 4) {
+                for (let i = 0; i < 4; i++) {
+                    this.create_spark();
+                }
+            }
+        }, delay * 1000);
+    }
+
+    create_spark() {
+        const r = 10;
+        const theta = rand_int(0, 16) / 16 * 2 * Math.PI;
+        const phi = rand_int(0, 16) / 16 * 2 * Math.PI;
+        const pos = new THREE.Vector3(r * Math.sin(theta) * Math.cos(phi), r * Math.sin(theta) * Math.sin(phi), r * Math.cos(theta));
+        const vel = new THREE.Vector3(0, 0, 0);//pos.clone().normalize().multiplyScalar(5);
+        const spark = this.spark_pool.get_pool_object();
+        spark.active = true;
+        spark.position.copy(pos);
+        spark.velocity = vel;
+        spark.acceleration.set(0, 0, 0);
+        spark.material.color.set("white");
     }
 }

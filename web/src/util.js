@@ -225,7 +225,7 @@ export function make_wireframe_rectangle(width, height, color) {
 
 
 export class Spark extends THREE.Object3D {
-    constructor(size, color, axes) {
+    constructor(size, color, axes, flicker=true, always_in_front=false) {
         super();
         this.material = new THREE.LineBasicMaterial( { color: color } );
         const lines = [
@@ -242,6 +242,11 @@ export class Spark extends THREE.Object3D {
             }
             const geometry = new THREE.BufferGeometry().setFromPoints( points );
             const l = new THREE.Line( geometry, this.material );
+            if (always_in_front) {
+                l.renderOrder = 999;
+                this.material.depthTest = false;
+                this.material.depthWrite = false;
+            }
             this.add(l);
         }
         this.velocity = new THREE.Vector3();
@@ -249,6 +254,7 @@ export class Spark extends THREE.Object3D {
         this.flicker_frames = 3;
         this.cur_frame = 0;
         this.active = true;
+        this.flicker = flicker;
     }
 
     anim_frame(dt, camera) {
@@ -263,7 +269,9 @@ export class Spark extends THREE.Object3D {
             this.position.add(dx);
 
             this.visible = true;
-            this.visible = (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
+            if (this.flicker) {
+                this.visible = (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
+            }
             this.quaternion.copy(camera.quaternion);
             if (this.parent != null) {
                 const group_quat = new THREE.Quaternion();

@@ -433,7 +433,7 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel != 2) {
+        if (channel == 1 || channel == 3) {
             this.gantries[this.pounding_gantry_idx].start_pound(true);
         }
     }

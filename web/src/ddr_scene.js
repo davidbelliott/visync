@@ -375,13 +375,17 @@ export class DDRScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (this.arrows) {
-            this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
-            this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
-        }
+        const delay = this.get_beat_delay();
+        setTimeout(() => {
+            if ((channel == 1 || channel == 3) && this.arrows) {
+                this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);
+                this.cur_arrow_idx = (this.cur_arrow_idx + 1) % this.arrows.length;
+            }
+        }, delay * 1000);
     }
 
     handle_sync(t, bpm, beat) {
+        console.log(`ddr beat: ${beat}`);
         if (beat % 4 == 0) {
             this.start_robot_rot = this.target_robot_rot;
             this.target_robot_rot++;

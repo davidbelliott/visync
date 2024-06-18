@@ -18,8 +18,8 @@ const USE_SHADER = true;
 const SVG_SIZE = 80;
 
 export class TessellateScene extends VisScene {
-    constructor() {
-        super();
+    constructor(env) {
+        super(env);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -90,9 +90,7 @@ export class TessellateScene extends VisScene {
 
                         // Create a geometry from the points
                         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                        const inst_geom = new InstancedGeometryCollection(geometry, false);
-                        this.scene.add(inst_geom);
-                        this.inst_geoms.push(inst_geom);
+                        this.inst_geoms.push(new InstancedGeometryCollection(this.base_group, geometry, false));
 
 
                         // Create a line from the geometry and the material
@@ -188,6 +186,7 @@ export class TessellateScene extends VisScene {
         this.base_group.scale.set(1, 1, 1);
 
         this.scene.add(this.base_group);
+        this.evolve_time = 0;
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 
@@ -213,17 +212,18 @@ export class TessellateScene extends VisScene {
         const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;
-        const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
+        const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 8;
         this.evolve_time += 0.5 * clock_dt * beats_per_sec;
-        const cur_rot = this.elapsed_time_beats * Math.PI * 2 / 128
+        if (this.beat_clock.running) {
+            this.evolve_time += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+        }
+        const cur_rot = this.evolve_time * Math.PI * 2 / 128
         this.base_group.rotation.z = cur_rot;
         //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
 
 
         const get_jump_func = (i, r, t) => {
-            const x = t - r / 100 - i;
-            return Math.sin(Math.PI * Math.min(1, x % 3));
-            return 1 * (Math.max(0, 2 * Math.sin(2 * Math.PI * (t + 1 / 3 * i + 1 / 200 * r) - 1)));
+            return 1 * (Math.max(1, 2 * Math.sin(2 * Math.PI * (t - 1 / 3 * i + 1 / 150 * r))) - 1);
         }
 
         const color1 = new THREE.Color("blue");
@@ -231,7 +231,7 @@ export class TessellateScene extends VisScene {
         const start_color = new THREE.Color();
         start_color.lerpColors(color1, color2, Math.abs((3 * cur_rot / (2 * Math.PI) % 2) - 1));
         const end_color = new THREE.Color("white");
-        const t = this.elapsed_time_beats / 4;
+        const t = this.evolve_time / 8;
         this.indices_of_cells.forEach((indices, i) => {
             for (const idx of indices) {
                 const pos = this.inst_geoms[idx[0]].get_pos(idx[1]);
@@ -254,7 +254,10 @@ export class TessellateScene extends VisScene {
 
     handle_beat(t, channel) {
         const delay = this.get_beat_delay();
-        this.beat_clock.stop();
-        //setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
+        setTimeout(() => {
+            if (channel == 1 || channel == 3) {
+                this.beat_clock.start();
+            }
+        }, delay * 1000);
     }
 }

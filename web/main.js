@@ -9,7 +9,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { LightningStrike } from './src/lightning_strike.js';
 import { Tesseract } from './src/highdim.js';
-import { VisScene } from './src/vis_scene.js';
+import { VisScene, EXTRA_LATENCY } from './src/vis_scene.js';
 import { GantryScene } from './src/gantry_scene.js';
 import { HexagonScene } from './src/hexagon_scene.js';
 import { SlideScene } from './src/slide_scene.js';
@@ -387,7 +387,7 @@ class GraphicsContext {
             [18, new HelixScene()]
             //new FastCarScene(),
         ]);
-        this.cur_scene_idx = 16;
+        this.cur_scene_idx = 14;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
@@ -644,12 +644,13 @@ class GraphicsContext {
     }
 
     handle_sync(latency, bpm, beat) {
-        console.log(`${beat}: ${bpm}`);
+        //console.log(`${beat}: ${bpm}`);
+        //console.log(`Latency: ${this.est_latency}`);
         this.est_latency = this.est_latency === null ? latency :
             this.est_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
         const note_dur = 60 / bpm;
         const delay = env.immediate_mode ? 0 :
-            note_dur - this.est_latency;
+            note_dur - this.est_latency - EXTRA_LATENCY;
 
         // Update scene estimated latencies immediately
         this.scenes.forEach((scene) => {

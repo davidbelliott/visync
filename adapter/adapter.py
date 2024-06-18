@@ -16,7 +16,7 @@ USE_STROBE = False
 MIN_BPM = 60
 MAX_BPM = 200
 
-BEAT_RESET_TIMEOUT_BEATS = 4
+BEAT_RESET_TIMEOUT_S = 1
 
 dmx = None
 strobe = None
@@ -39,7 +39,7 @@ class BPMEstimator:
         elapsed = 0
         if self._last_clock != None:
             elapsed = now - self._last_clock
-            if elapsed > BEAT_RESET_TIMEOUT_BEATS * 60 / self.bpm:
+            if elapsed > BEAT_RESET_TIMEOUT_S:
                 self._samples.clear()
                 self.sync = False
             else:
@@ -57,7 +57,7 @@ class BPMEstimator:
                 self.bpm = sum(bpms) / len(bpms)
                 self.sync = True
 
-        print(self.bpm)
+        print(f'bpm: {self.bpm} sync: {self.sync} samples: {self._samples}')
         return elapsed / 60 * self.bpm
 
 
@@ -162,11 +162,11 @@ class MidiInputHandler:
         ws_msg = self.translate_midi_msg(message)
         if ws_msg:
             self.websocket.send(ws_msg.to_json())
-            msg_recv = self.websocket.recv()
-            assert(msg_recv == ws_msg.to_json())
-            t_recv = time.time()
-            self.last_transmit_latency = (t_recv - t_callback) / 2
-            print(f'Latency: {round(self.last_transmit_latency * 1000)}ms')
+            msg_recv = self.websocket.recv(timeout=1.0)
+            if msg_recv == ws_msg.to_json():
+                t_recv = time.time()
+                self.last_transmit_latency = (t_recv - t_callback) / 2
+                print(f'Latency: {round(self.last_transmit_latency * 1000)}ms')
 
     def translate_midi_msg(self, midi_msg):
         ws_msg = None
@@ -176,9 +176,7 @@ class MidiInputHandler:
             note_vel = midi_msg[2]
             if channel == 16:
                 # This channel is used for synchronization
-                elapsed_sixteenths = bpm_estimator.ping()
-                if elapsed_sixteenths > BEAT_RESET_TIMEOUT_BEATS:
-                    self.cur_beat_idx = 0
+                bpm_estimator.ping()
                 if bpm_estimator.sync:
                     ws_msg = MsgSync(self.last_transmit_latency, bpm_estimator.bpm, self.cur_beat_idx)
                 self.cur_beat_idx = self.cur_beat_idx + 1
@@ -198,14 +196,11 @@ class MidiInputHandler:
                 # Remaining channels are used for controlling elements within the scene
                 ws_msg = MsgBeat(self.last_transmit_latency, channel, True)
         elif midi_msg[0] == NOTE_OFF:
-            print(f'note_off\t{channel}\t{note_number}')
             if channel == 15:
                 if USE_STROBE:
                     strobe_off()
             else:
                 ws_msg = MsgBeat(self.last_transmit_latency, channel, False)
-        else:
-            print(midi_msg)
         
 
         if ws_msg != None:
@@ -232,24 +227,24 @@ def main():
         try:
             with connect(f'ws://{args.host}:8765') as websocket:
                 print('Connected to relay')
-                while True:
-                    if not args.fake:
-                        midi_handler = MidiInputHandler(websocket)
-                        midiin.set_callback(midi_handler)
-                        while True:
-                            time.sleep(1)
-                    else:
-                        if beat_idx % 4 == 0:
-                            ws_msg = MsgSync(time.time(), bpm, beat_idx // 4)
-                            #await websocket.send(ws_msg.to_json())
-                            #await websocket.recv()
-                        cur_beats = fake_beat[beat_idx % len(fake_beat)]
-                        for beat in cur_beats:
-                            ws_msg = MsgBeat(time.time(), beat)
-                            #await websocket.send(ws_msg.to_json())
-                            #await websocket.recv()
-                        #await asyncio.sleep(60 / bpm / 4)
-                        beat_idx += 1
+                # while True:
+                if not args.fake:
+                    midi_handler = MidiInputHandler(websocket)
+                    midiin.set_callback(midi_handler)
+                    while True:
+                        time.sleep(1)
+                else:
+                    if beat_idx % 4 == 0:
+                        ws_msg = MsgSync(time.time(), bpm, beat_idx // 4)
+                        #await websocket.send(ws_msg.to_json())
+                        #await websocket.recv()
+                    cur_beats = fake_beat[beat_idx % len(fake_beat)]
+                    for beat in cur_beats:
+                        ws_msg = MsgBeat(time.time(), beat)
+                        #await websocket.send(ws_msg.to_json())
+                        #await websocket.recv()
+                    #await asyncio.sleep(60 / bpm / 4)
+                    beat_idx += 1
         except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:

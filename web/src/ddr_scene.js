@@ -278,6 +278,8 @@ export class DDRScene extends VisScene {
         this.spacing = 8;
         this.num_per_side = 3;
         const this_class = this;
+
+        this.robots = [];
         Promise.all([stl_load_promise, shader_load_promise]).then((results) => {
             const gltf_scene = results[0];
             const dither_pars = results[1][0];
@@ -304,7 +306,6 @@ export class DDRScene extends VisScene {
 
             // Robots
             {
-                this.robots = [];
                 const offset = new THREE.Vector3(-this.spacing * (this.num_per_side - 1) / 2, 0, -this.spacing * (this.num_per_side - 1) / 2);
                 for (let i = 0; i < this.num_per_side; i++) {
                     for (let j = 0; j < this.num_per_side; j++) {

@@ -4,7 +4,8 @@ import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.j
 import {
     create_instanced_cube,
     make_wireframe_special,
-    make_point_cloud
+    make_point_cloud,
+    clamp
 } from "./util.js";
 
 function radial_wave(u, v, target, t) {
@@ -26,27 +27,34 @@ export class SurfacesScene extends VisScene {
         this.cam_persp.position.set(0, 0, 100);
         this.camera = this.cam_persp;
         this.base_group = new THREE.Group();
+        this.beat_clock = new THREE.Clock();
 
         const radialWave = function(u, v, target) {
             radial_wave(u, v, target, 0);
         };
 
-        const meshMaterial = new THREE.MeshPhongMaterial({
-            color: "magenta",
-            shininess: 70,
-            specular: 0xffffff,
-            flatShading: true,
-        });
-        meshMaterial.side = THREE.DoubleSide;
 
         const cube = create_instanced_cube([1, 1, 1], "white");
         //this.base_group.add(cube);
 
         this.geom = new ParametricGeometry(radialWave, 32, 32);
         //const geom = new THREE.ParametricGeometry( THREE.ParametricGeometries.klein, 25, 25 );
-        const mesh = new THREE.Mesh(this.geom, meshMaterial);
-        console.log(mesh);
-        this.base_group.add(mesh);
+        this.meshes = [];
+        for (let i = 0; i < 20; i++) {
+            const meshMaterial = new THREE.MeshPhongMaterial({
+                color: "magenta",
+                shininess: 70,
+                specular: 0xffffff,
+                flatShading: true,
+                transparent: true,
+                opacity: (1 - i / 20) ** 2,
+            });
+            meshMaterial.side = THREE.DoubleSide;
+            const mesh = new THREE.Mesh(this.geom, meshMaterial);
+            mesh.position.y = 10 -i * 4;
+            this.meshes.push(mesh);
+            this.base_group.add(mesh);
+        }
         this.base_group.rotation.x = Math.PI / 4;
         //this.scene.add(mesh);
 
@@ -54,17 +62,21 @@ export class SurfacesScene extends VisScene {
         this.scene.add(this.amblight);
 
         this.light = new THREE.PointLight(0xffffff, 10, 0, 0.75);
-        this.light.position.set(0, 20, 10);
+        this.light.position.set(0, 40, 10);
         this.light.castShadow = true;
         this.scene.add(this.light);
 
         this.scene.add(this.base_group);
+
+        this.rot_vec = new THREE.Vector3(0.01, 0.01, 0.01);
     }
 
     anim_frame(dt) {
-        this.base_group.rotation.y += 0.2 * dt;
-        //this.base_group.rotation.x += 0.04 * dt;
-        //this.base_group.rotation.z += 1.0 * dt;
+        const rot_change = this.rot_vec.clone();
+        rot_change.multiplyScalar(dt);
+        this.base_group.rotation.x += rot_change.x;
+        this.base_group.rotation.y += rot_change.y;
+        this.base_group.rotation.z += rot_change.z;
         // Get the current time
         var time = Date.now() * 0.05;
 
@@ -84,9 +96,24 @@ export class SurfacesScene extends VisScene {
         this.geom.computeVertexNormals();
         this.geom.computeBoundingBox();
         this.geom.computeBoundingSphere();
+
+        const beat_time = this.beat_clock.getElapsedTime() * 2;
+        const num_meshes_visible = clamp((1 - beat_time) * 20, 1, 20);
+        for (let i = 0; i < this.meshes.length; i++) {
+            this.meshes[i].visible = i < num_meshes_visible;
+        }
     }
 
     handle_beat(t, channel) {
+        console.log('beat');
+        const delay = this.get_beat_delay();
+        setTimeout(() => {
+            if (channel == 1 || channel == 3) {
+                this.beat_clock.start();
+                this.rot_vec.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+                this.rot_vec.normalize();
+            }
+        }, delay * 1000);
     }
 
     render(renderer) {

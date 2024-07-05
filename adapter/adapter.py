@@ -7,8 +7,8 @@ import rtmidi
 from collections import deque
 import pathlib
 from websockets.sync.client import connect
-from rtmidi.midiconstants import NOTE_OFF, NOTE_ON
 from rtmidi.midiutil import open_midiinput
+from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE
 import sys
 
 USE_STROBE = False
@@ -57,16 +57,11 @@ class BPMEstimator:
                 self.bpm = sum(bpms) / len(bpms)
                 self.sync = True
 
-        print(f'bpm: {self.bpm} sync: {self.sync} samples: {self._samples}')
+        #print(f'bpm: {self.bpm} sync: {self.sync} samples: {self._samples}')
         return elapsed / 60 * self.bpm
 
 
 bpm_estimator = BPMEstimator()
-
-keyfile=pathlib.Path(__file__).parent / "ssl" / "reuben.key"
-certfile=pathlib.Path(__file__).parent / "ssl" / "reuben.crt"
-
-
 
 
 class Msg:
@@ -76,13 +71,17 @@ class Msg:
         BEAT = 1
         GOTO_SCENE = 2
         ADVANCE_SCENE_STATE = 3
+        PROMOTION = 4
+        PROMOTION_GRANT = 5
+        ACK = 6
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
         self.msg_type = msg_type
+        self.t = time.time()
     
     def __repr__(self) -> str:
-        return f'{self.msg_type}'
+        return f'{self.t}: {self.msg_type}'
 
     def to_json(self):
         return json.dumps(self.__dict__)
@@ -113,6 +112,12 @@ class MsgAdvanceSceneState(Msg):
     def __init__(self, last_transmit_latency, steps):
         super().__init__(MsgSync.Type.ADVANCE_SCENE_STATE, last_transmit_latency)
         self.steps = steps
+
+
+class MsgPromotion(Msg):
+    def __init__(self, secret):
+        super().__init__(MsgSync.Type.PROMOTION, 0)
+        self.secret = secret
 
 
 def to_hex(st):
@@ -162,11 +167,7 @@ class MidiInputHandler:
         ws_msg = self.translate_midi_msg(message)
         if ws_msg:
             self.websocket.send(ws_msg.to_json())
-            msg_recv = self.websocket.recv(timeout=1.0)
-            if msg_recv == ws_msg.to_json():
-                t_recv = time.time()
-                self.last_transmit_latency = (t_recv - t_callback) / 2
-                print(f'Latency: {round(self.last_transmit_latency * 1000)}ms')
+
 
     def translate_midi_msg(self, midi_msg):
         ws_msg = None
@@ -195,13 +196,19 @@ class MidiInputHandler:
             else:
                 # Remaining channels are used for controlling elements within the scene
                 ws_msg = MsgBeat(self.last_transmit_latency, channel, True)
-        elif midi_msg[0] == NOTE_OFF:
+        elif midi_msg[0] & 0xF0 == NOTE_OFF:
             if channel == 15:
                 if USE_STROBE:
                     strobe_off()
             else:
                 ws_msg = MsgBeat(self.last_transmit_latency, channel, False)
-        
+        elif midi_msg[0] & 0xF0 == CONTROL_CHANGE:
+            control_idx = midi_msg[1]
+            control_val = midi_msg[2]
+            # This channel is used for graphics scene switching
+            ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
+        else:
+            print(midi_msg)
 
         if ws_msg != None:
             print(ws_msg)
@@ -213,8 +220,15 @@ def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('--fake', type=float, help='fake MIDI events with given BPM')
     parser.add_argument('host', type=str, help='the URL or IP address to connect to with websockets')
-    parser.add_argument('-d', '--device', type=str, help='MIDI device to use (interactive if not specified)')
+    parser.add_argument('-d', '--device', type=str, default='Volt', help='MIDI device to use (interactive if not specified)')
     args = parser.parse_args()
+
+    try:
+        this_dir = pathlib.Path(__file__).parent.resolve()
+        with open(this_dir / "secret.txt") as f:
+            secret_for_promotion = f.read().strip()
+    except FileNotFoundError:
+        print("Please put adapter secret in secret.txt to authenticate with server")
 
     bpm = args.fake
     beat_idx = 0
@@ -227,6 +241,12 @@ def main():
         try:
             with connect(f'ws://{args.host}:8765') as websocket:
                 print('Connected to relay')
+                promo_msg = MsgPromotion(secret_for_promotion)
+                websocket.send(promo_msg.to_json())
+                #msg_recv = websocket.recv(timeout=1.0)
+                #if msg_recv[type] != Msg.Type.ACK:
+                    #print('Promotion failed')
+                    #break
                 # while True:
                 if not args.fake:
                     midi_handler = MidiInputHandler(websocket)

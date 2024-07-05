@@ -31,8 +31,9 @@ function create_instanced_cube(dims, color) {
 }
 
 class CubeAssembly extends THREE.Group {
-    constructor(start_exploded, template_obj, min_spacing=1.0, max_spacing=3.0) {
+    constructor(parent_scene, start_exploded, template_obj, min_spacing=1.0, max_spacing=3.0) {
         super();
+        this.parent_scene = parent_scene;
         this.max_spacing = max_spacing;
         this.min_spacing = min_spacing;
         if (start_exploded) {
@@ -55,7 +56,7 @@ class CubeAssembly extends THREE.Group {
     }
 
     clone() {
-        return new CubeAssembly(this.spacing_direction == 1, this.cubes[0], this.min_spacing, this.max_spacing);
+        return new CubeAssembly(this.parent_scene, this.spacing_direction == 1, this.cubes[0], this.min_spacing, this.max_spacing);
     }
 
     get_cube_positions(spacing) {
@@ -73,6 +74,9 @@ class CubeAssembly extends THREE.Group {
     }
 
     handle_beat(t, channel, recurse=false, start_depth=0, cur_depth=0) {
+        this.explode_movement_seconds = Math.min(
+            this.parent_scene.get_beat_delay(t),
+            (this.max_spacing - this.min_spacing > 3 ? 0.25 : 0.1));
         if (cur_depth >= start_depth || !recurse) {
             this.spacing_direction *= -1;
             this.explode_clock.start();
@@ -87,11 +91,10 @@ class CubeAssembly extends THREE.Group {
     }
 
     anim_frame(dt, beats_per_sec) {
-        const explode_movement_seconds = (this.max_spacing - this.min_spacing > 3 ? 0.25 : 0.1);
         let explode_frac = 1.0;
         if (this.explode_clock.running) {
             explode_frac = clamp(
-                this.explode_clock.getElapsedTime() / explode_movement_seconds,
+                this.explode_clock.getElapsedTime() / this.explode_movement_seconds,
                 0, 1);
         }
         if (this.spacing_direction == 1) {
@@ -160,8 +163,8 @@ export class HexagonScene extends VisScene {
 
         {
             const cube_template = create_instanced_cube(Array(3).fill(2), "white");
-            const assembly = new CubeAssembly(false, cube_template);
-            const asm2 = new CubeAssembly(false, assembly, 0, this.assembly_spacing);
+            const assembly = new CubeAssembly(this, false, cube_template);
+            const asm2 = new CubeAssembly(this, false, assembly, 0, this.assembly_spacing);
             this.assemblies.push(asm2);
             this.base_group.add(asm2);
         }

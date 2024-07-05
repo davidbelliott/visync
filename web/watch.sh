@@ -1,2 +1,2 @@
 #!/bin/sh
-npx vite --host
+npx --yes vite --host

@@ -376,7 +376,7 @@ export class DDRScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay();
+        const delay = this.get_beat_delay(t);
         setTimeout(() => {
             if ((channel == 1 || channel == 3) && this.arrows) {
                 this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);

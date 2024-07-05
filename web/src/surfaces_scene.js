@@ -106,7 +106,7 @@ export class SurfacesScene extends VisScene {
 
     handle_beat(t, channel) {
         console.log('beat');
-        const delay = this.get_beat_delay();
+        const delay = this.get_beat_delay(t);
         setTimeout(() => {
             if (channel == 1 || channel == 3) {
                 this.beat_clock.start();

@@ -52,6 +52,12 @@ const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
 const MSG_TYPE_GOTO_SCENE = 2;
 const MSG_TYPE_ADVANCE_SCENE_STATE = 3;
+const MSG_TYPE_PROMOTION = 4;
+const MSG_TYPE_PROMOTION_GRANT = 5;
+const MSG_TYPE_ACK = 6;
+
+const SKEW_SMOOTHING = 0.9;
+const STALE_THRESHOLD = 0.1;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -113,19 +119,34 @@ function connect() {
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
+
+        // Estimate clock skew
+        const t_now = Date.now() / 1000;
+        const skew = t_now - msg.t;
+        context.est_avg_skew = context.est_avg_skew ? 
+            context.est_avg_skew * SKEW_SMOOTHING + skew * (1 - SKEW_SMOOTHING) :
+            skew;
+        if (skew - context.est_avg_skew > STALE_THRESHOLD) {
+            return;
+        }
+        const est_latency = skew - context.est_avg_skew // how much later than usual?
+            + context.get_avg_latency();    // how late is "usual"?
+        console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
+
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
             //
-            context.handle_sync(msg.latency, msg.bpm, msg.beat);
+            context.handle_sync(est_latency, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
-            context.handle_beat(msg.t, msg.channel);
+            context.handle_beat(est_latency, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
         }
-        //socket.send(msg.t);	// TODO: re-add for latency estimation
+        const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
+        socket.send(JSON.stringify(resp));
     });
 
     socket.addEventListener('close', function(e) {
@@ -360,7 +381,7 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.cur_beat = 0;
         this.cur_sync_error = 0;
-        this.est_latency = null;
+        this.avg_latency = null;
         this.bpm = 120;
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
@@ -479,6 +500,8 @@ class GraphicsContext {
 
 	this.on_window_resize();    // also creates buffers
         window.addEventListener('resize', () => { this.on_window_resize(); });
+
+        this.est_avg_skew = null;
     }
 
     set_tracer_params(num_traces, spacing, persistence) {
@@ -645,17 +668,13 @@ class GraphicsContext {
 
     handle_sync(latency, bpm, beat) {
         //console.log(`${beat}: ${bpm}`);
-        //console.log(`Latency: ${this.est_latency}`);
-        this.est_latency = this.est_latency === null ? latency :
-            this.est_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
+        //console.log(`Latency: ${this.avg_latency}`);
+        this.avg_latency = this.avg_latency === null ? latency :
+            this.avg_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
+
         const note_dur = 60 / bpm;
         const delay = env.immediate_mode ? 0 :
-            note_dur - this.est_latency - EXTRA_LATENCY;
-
-        // Update scene estimated latencies immediately
-        this.scenes.forEach((scene) => {
-            scene.est_latency = this.est_latency;
-        });
+            note_dur - this.avg_latency - EXTRA_LATENCY;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
@@ -671,8 +690,12 @@ class GraphicsContext {
         });
     }
 
-    get_est_latency() {
-        return this.est_latency;
+    get_avg_skew() {
+        return this.est_avg_skew;
+    }
+
+    get_avg_latency() {
+        return this.avg_latency;
     }
 }
 

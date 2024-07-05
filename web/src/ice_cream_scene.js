@@ -201,7 +201,7 @@ export class IceCreamScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay();
+        const delay = this.get_beat_delay(t);
         setTimeout(() => {
             if (channel == 1) {
                 this.beat_clock.start(this.get_local_bpm());

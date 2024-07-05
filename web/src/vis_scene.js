@@ -10,14 +10,13 @@ import {
     clamp
 } from './util.js';
 
-export const EXTRA_LATENCY = 0.1;
+export const EXTRA_LATENCY = 0.00;
 
 export class VisScene {
-    constructor(num_states=1, max_bpm=125) {
+    constructor(num_states=1, max_bpm=140) {
         this.raw_bpm = 120;
         this.bpm = this.raw_bpm;
         this.max_bpm = max_bpm;
-        this.est_latency = 0.0;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.cam_orth = null;
@@ -48,7 +47,9 @@ export class VisScene {
     handle_sync_raw(bpm, beat) {
         this.raw_bpm = bpm;
         let divisor = 1;
-        while (bpm > this.max_bpm) {
+        //while (bpm > this.max_bpm)
+        for (let i = 0; i < 2; i++)
+        {
             bpm /= 2;
             divisor *= 2;
         }
@@ -66,15 +67,16 @@ export class VisScene {
     // beat audio being played, assuming midi events for the beat are placed
     // an eighth note earlier in the grid than the actual beats. Accounts for
     // network latency as measured by packet round-trip time.
-    get_beat_delay() {
-        return 2 * 60.0 / this.raw_bpm - this.est_latency - EXTRA_LATENCY;
+    get_beat_delay(est_latency) {
+        console.log(est_latency);
+        return 2 * 60.0 / this.raw_bpm - est_latency - EXTRA_LATENCY;
     }
 
-    handle_sync(t, bpm, beat) {
+    handle_sync(latency, bpm, beat) {
 
     }
 
-    handle_beat(t, channel) {
+    handle_beat(latency, channel) {
 
     }
 

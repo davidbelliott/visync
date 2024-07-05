@@ -48,8 +48,6 @@ class Gantry {
         this.paddle_start_y = this.paddle_base_y;
         this.paddle_end_y = (1.5 + 0.5) - this.base_y;
 
-        this.pound_movement_secs = 0.15;
-
         this.parent_obj = parent_obj;
         this.clock = new THREE.Clock(false);
         this.move_clock = new BeatClock(parent_scene);
@@ -91,6 +89,8 @@ class Gantry {
         this.cubes_arr = cubes_arr;
 
         this.clock.start();
+        this.max_pound_s = 0.15;
+        this.pound_movement_secs = this.max_pound_s;
     }
 
     anim_frame(dt) {
@@ -181,13 +181,15 @@ class Gantry {
         return segments;
     }
 
-    start_pound(sparks) {
+    start_pound(latency, sparks) {
         /*if (this.pound_clock.getElapsedTime() * beats_per_sec < 2 * this.pound_movement_beats) {
             // has not fully returned to top position
             this.paddle_start_y = this.paddle.position.y;
         } else {
             this.paddle_start_y = this.paddle_base_y;
         }*/
+        this.pound_movement_secs = Math.min(this.max_pound_s,
+            this.parent_scene.get_beat_delay(latency));
         this.pound_clock.start();
         setTimeout(() => {
             if (sparks) {
@@ -434,7 +436,7 @@ export class GantryScene extends VisScene {
 
     handle_beat(t, channel) {
         if (channel == 1 || channel == 3) {
-            this.gantries[this.pounding_gantry_idx].start_pound(true);
+            this.gantries[this.pounding_gantry_idx].start_pound(t, true);
         }
     }
 

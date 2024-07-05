@@ -2,3 +2,4 @@ node_modules
 dist
 secret.txt
 __pycache__
+venv

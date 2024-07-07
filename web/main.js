@@ -131,7 +131,7 @@ function connect() {
         }
         const est_latency = skew - context.est_avg_skew // how much later than usual?
             + context.get_avg_latency();    // how late is "usual"?
-        console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
+        //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
 
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
@@ -408,8 +408,8 @@ class GraphicsContext {
             [18, new HelixScene()]
             //new FastCarScene(),
         ]);
-        this.cur_scene_idx = 10;
-        this.cur_bg_scene_idx = 7;
+        this.cur_scene_idx = 7;
+        this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);

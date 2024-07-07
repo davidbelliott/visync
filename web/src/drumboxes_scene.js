@@ -95,12 +95,15 @@ class PaddleGroup extends THREE.Group {
                 this.add(this_side_paddle);
             }
 
-            this.damping_coeff = 2;
-            this.spring_constant = 200;
-            this.top_paddle_strike_vel = 20;
-            this.side_paddle_strike_vel = 5;
             this.initialized = true;
         });
+
+        // Last jump axis: 0 = x, 1 = y
+        this.last_jump_axis = 0;
+
+        // Physical constants for paddles
+        this.top_paddle_strike_vel = 20;
+        this.side_paddle_strike_vel = 5;
 
         this.top_paddle_pound_time = 0.08;
         this.side_paddle_pound_time = 0.15;
@@ -183,14 +186,14 @@ class PaddleGroup extends THREE.Group {
                 } else if (this.impacts[i][1] == 2) {
                     strike_vel = this.side_paddle_strike_vel;
                 }
-                //TODO: uncomment
-                //this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z -= strike_vel;
+                this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z -= strike_vel;
                 // It now takes a normal # of beats to move between drums
                 this.time_for_this_movement = this.movement_time_secs;
             }
             this.impacts[i][0] = new_time;
 
             if (this.in_position) {
+                // Look at channel associated with the upcoming impact
                 if (this.impacts[i][1] == 1 || this.impacts[i][1] == 3) {
                     top_paddle_pos = Math.min(top_paddle_pos, this.paddle_pos(
                         this.impacts[i][0] / this.top_paddle_pound_time,
@@ -233,20 +236,16 @@ class PaddleGroup extends THREE.Group {
 
     handle_sync(t, bpm, beat) {
         if (this.in_position) {
-            if (beat % 2 == 0 && this.cur_drum_idx[0] + this.cur_drum_idx[1] > this.num_per_side - 2) {
-                const cur_paddle_world_pos = new THREE.Vector3();
-                this.getWorldPosition(cur_paddle_world_pos);
-                const x = cur_paddle_world_pos.x / this.frustum_size;
-                const left_weight = (Math.tanh(1 * x) + 1) / 2;
-                console.log(`left_weight: ${left_weight}`);
-                if (Math.random() < left_weight) {
-                    this.cur_drum_idx[0] = clamp(this.cur_drum_idx[0] - 1, 0, this.num_per_side - 1);
-                } else {
-                    this.cur_drum_idx[1] = clamp(this.cur_drum_idx[1] - 1, 0, this.num_per_side - 1);
-                }
+            if (this.cur_drum_idx[0] >= this.parent_scene.num_per_side / 2 ||
+                this.cur_drum_idx[1] >= this.parent_scene.num_per_side / 2) {
+                // Do a jump
+                this.last_jump_axis = (this.last_jump_axis + 1) % 2;
+                this.cur_drum_idx[this.last_jump_axis] = clamp(
+                    this.cur_drum_idx[this.last_jump_axis] - 1,
+                    0, this.parent_scene.num_per_side - 1);
                 this.movement_clock.start();
-                this.paddle_group.movement_start_pos.copy(this.paddle_group.position);
-                this.paddle_group.movement_end_pos.copy(this.drum_pos_in_array(
+                this.movement_start_pos.copy(this.position);
+                this.movement_end_pos.copy(this.parent_scene.drum_pos_in_array(
                     this.cur_drum_idx[0], this.cur_drum_idx[1]));
             }
         }
@@ -342,6 +341,10 @@ export class DrumboxScene extends VisScene {
             this.initialized = true;
         });
 
+        // Physical constants for drums
+        this.damping_coeff = 2;
+        this.spring_constant = 200;
+
         this.drums_group.rotation.z = Math.PI / 4 ;
         this.camera.rotation.x = Math.PI / 4;
 
@@ -409,7 +412,6 @@ export class DrumboxScene extends VisScene {
         }
 
         this.paddle_group.anim_frame(dt);
-        return;
 
 
         for (const row of this.drums) {
@@ -419,7 +421,6 @@ export class DrumboxScene extends VisScene {
                 drum.velocity.z += this.drum_spring_accel(drum.position.z, drum.velocity.z) * dt;
             }
         }
-
 
         // Change color of material
         this.color_hue += dt * COLOR_CHANGE_RATES[this.cur_state_idx];

@@ -68,7 +68,7 @@ export class VisScene {
     // an eighth note earlier in the grid than the actual beats. Accounts for
     // network latency as measured by packet round-trip time.
     get_beat_delay(est_latency) {
-        console.log(est_latency);
+        //console.log(est_latency);
         return 2 * 60.0 / this.raw_bpm - est_latency - EXTRA_LATENCY;
     }
 

@@ -325,8 +325,8 @@ export class GantryScene extends VisScene {
         cur_color.lerpColors(start_color, end_color, rot_frac);
 
         // Zoom
-        const zoom_frac = Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats);
-        const new_zoom = ease(lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac));
+        const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
+        const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
         if (new_zoom != this.cam_orth.zoom) {
             this.cam_orth.zoom = new_zoom;
             this.cam_orth.updateProjectionMatrix();
@@ -422,7 +422,7 @@ export class GantryScene extends VisScene {
                 this.target_rot_y += rand_int(0, 2) * 2 - 1;
                 this.rot_clock.start();
             }
-            /*if (rand_int(0, 8) == 0) {
+            if (rand_int(0, 8) == 0) {
                 this.start_zoom = this.target_zoom;
                 if (this.target_zoom == 1) {
                     this.target_zoom = 0.7;
@@ -430,7 +430,7 @@ export class GantryScene extends VisScene {
                     this.target_zoom = 1;
                 }
                 this.zoom_clock.start();
-            }*/
+            }
         }
     }
 

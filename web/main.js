@@ -408,9 +408,11 @@ class GraphicsContext {
             [18, new HelixScene()]
             //new FastCarScene(),
         ]);
-        this.cur_scene_idx = 7;
+        this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
+        this.change_scene(7);
+        this.change_scene(0, true);
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);
 

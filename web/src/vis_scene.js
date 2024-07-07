@@ -17,6 +17,12 @@ export class VisScene {
         this.raw_bpm = 120;
         this.bpm = this.raw_bpm;
         this.max_bpm = max_bpm;
+        this.min_bpm = max_bpm / 2;
+        this.cur_divisor = 1;
+        this.target_divisor = this.cur_divisor;
+        this.div_change_hysteresis_bpm = 5;
+        this.div_change_debounce_cnt = 4;
+        this.div_change_debounce = 0;
         this.scene = new THREE.Scene();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.cam_orth = null;
@@ -25,12 +31,15 @@ export class VisScene {
         this.yscale = 1.0;
         this.cur_state_idx = 0;
         this.num_states = num_states;
+        this.active = false;
     }
 
     activate() {
+        this.active = true;
     }
 
     deactivate() {
+        this.active = false;
     }
 
     anim_frame(dt) {
@@ -46,17 +55,39 @@ export class VisScene {
 
     handle_sync_raw(bpm, beat) {
         this.raw_bpm = bpm;
-        let divisor = 1;
-        //while (bpm > this.max_bpm)
-        for (let i = 0; i < 2; i++)
-        {
-            bpm /= 2;
-            divisor *= 2;
+        let this_sync_divisor = this.cur_divisor;
+
+        while (bpm / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
+            this_sync_divisor *= 2;
         }
-        if (beat % divisor == 0) {
-            this.handle_sync(0, bpm, Math.floor(beat / divisor));
+        while (bpm / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
+            this_sync_divisor /= 2;
         }
-        this.bpm = bpm;
+
+        if (this_sync_divisor != this.cur_divisor) {
+            if (this_sync_divisor == this.target_divisor) {
+                // Decrement debounce counter or change divisor if it reached 0
+                if (this.div_change_debounce > 0) {
+                    this.div_change_debounce--;
+                } else {
+                    console.log(`div change: ${this.cur_divisor} -> ${this.target_divisor}`);
+                    this.cur_divisor = this.target_divisor;
+                }
+            } else {
+                // Restart debounce counter
+                console.log("restart debounce");
+                this.target_divisor = this_sync_divisor;
+                this.div_change_debounce = this.div_change_debounce_cnt;
+            }
+        }
+
+        this.bpm = bpm / this.cur_divisor;
+
+        if (beat % this.cur_divisor == 0) {
+            this.handle_sync(0, this.bpm,
+                Math.floor(beat / this.cur_divisor));
+        }
+        console.log(this.bpm);
     }
 
     get_local_bpm() {

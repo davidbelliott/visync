@@ -21,27 +21,30 @@ async def echo(websocket):
     print("Client connected")
     try:
         async for message in websocket:
-            if adapter == None:
-                # Decode the message to check if it is a promotion request
-                data = json.loads(message)
-                if int(data["msg_type"]) == MSG_TYPE_PROMOTION \
-                        and adapter_secret != None \
-                        and data["secret"] == adapter_secret:
-                    print("Adapter registered")
-                    # Register the adapter client
-                    adapter = websocket
-                    connected.remove(websocket)
+            # Decode the message to check if it is a promotion request
+            data = json.loads(message)
+            if int(data["msg_type"]) == MSG_TYPE_PROMOTION \
+                    and adapter_secret != None \
+                    and data["secret"] == adapter_secret:
+                print("Adapter registered")
+                # Register the adapter client
+                adapter = websocket
+                connected.remove(websocket)
             elif adapter == websocket:
                 # Echo the message to all connected clients
                 websockets.broadcast(connected, message)
             else:
+                print(message)
                 # Send the message to the adapter
-                #await adapter.send(message, timeout=0.1)
-                pass
-    except:
-        # Unregister client
-        connected.remove(websocket)
-        print("Client disconnected")
+                #await adapter.send(message)
+    finally:
+        if adapter == websocket:
+            print("Adapter disconnected")
+            adapter = None
+        else:
+            # Unregister client
+            print("Client disconnected")
+            connected.remove(websocket)
 
 
 async def main():

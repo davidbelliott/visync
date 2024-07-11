@@ -176,7 +176,7 @@ class PaddleGroup extends THREE.Group {
         let top_paddle_pos = this.paddle_pos(1, target_drum_z)[0];
         let side_paddle_pos = this.side_paddle_pos(1, 0);
 
-        this.in_position = this.cur_state_idx != 0 && frac == 1.0;
+        this.in_position = this.cur_state_idx != 0 && frac > 0.9;
 
         for (let i = 0; i < this.impacts.length; i++) {
             const new_time = this.impacts[i][0] - dt;
@@ -188,7 +188,10 @@ class PaddleGroup extends THREE.Group {
                 } else if (this.impacts[i][1] == 2) {
                     strike_vel = this.side_paddle_strike_vel;
                 }
-                this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z -= strike_vel;
+                let new_vel = this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z;
+                new_vel -= strike_vel;
+                new_vel = clamp(new_vel, -this.top_paddle_strike_vel, this.top_paddle_strike_vel);
+                this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z = new_vel;
                 // It now takes a normal # of beats to move between drums
                 this.time_for_this_movement = this.movement_time_secs;
             }
@@ -239,7 +242,7 @@ class PaddleGroup extends THREE.Group {
         if (this.in_position) {
             //if (this.cur_drum_idx[0] >= this.parent_scene.num_per_side / 2 ||
                 //this.cur_drum_idx[1] >= this.parent_scene.num_per_side / 2) {
-            if (beat % 2 == 0) {
+            if (beat % 4 == 3) {
                 // Do a jump
                 this.last_jump_axis = (this.last_jump_axis + 1) % 2;
                 this.cur_drum_idx[this.last_jump_axis] -= 1;

@@ -9,7 +9,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { LightningStrike } from './src/lightning_strike.js';
 import { Tesseract } from './src/highdim.js';
-import { VisScene, EXTRA_LATENCY } from './src/vis_scene.js';
+import { VisScene } from './src/vis_scene.js';
 import { GantryScene } from './src/gantry_scene.js';
 import { HexagonScene } from './src/hexagon_scene.js';
 import { SlideScene } from './src/slide_scene.js';
@@ -56,8 +56,10 @@ const MSG_TYPE_PROMOTION = 4;
 const MSG_TYPE_PROMOTION_GRANT = 5;
 const MSG_TYPE_ACK = 6;
 
-const SKEW_SMOOTHING = 0.9;
+const SKEW_SMOOTHING = 0.99;
+const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
+const EXTRA_LATENCY = 0.00;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -65,14 +67,12 @@ const BG_COLOR = 'black';
 const SCENES_PER_BANK = 10;
 
 const MIN_SWIPE_LENGTH = 50;
-const LATENCY_SMOOTHING = 0.9;
 
 var context = null;
 var stats = new Stats();
 
 class Environment {
     constructor() {
-        this.total_latency = 0.010;
         this.immediate_mode = false;
     }
 }
@@ -126,20 +126,31 @@ function connect() {
         context.est_avg_skew = context.est_avg_skew ? 
             context.est_avg_skew * SKEW_SMOOTHING + skew * (1 - SKEW_SMOOTHING) :
             skew;
+
+        // Discard stale messages
         if (skew - context.est_avg_skew > STALE_THRESHOLD) {
             return;
         }
-        const est_latency = skew - context.est_avg_skew // how much later than usual?
-            + context.get_avg_latency();    // how late is "usual"?
-        //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
+
+        // Update average latency with the one-way latency seen last
+        context.est_avg_latency = context.est_avg_latency ?
+            context.est_avg_latency * LATENCY_SMOOTHING + msg.latency * (1 - LATENCY_SMOOTHING) :
+            msg.latency;
+
+        const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
+            + context.est_avg_latency   // average latency
+            + EXTRA_LATENCY;            // extra latency (manual calibration)
+
+        console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
+        console.log(`Latency: ${context.est_avg_latency}`);
 
         if (type == MSG_TYPE_SYNC) {
             //bg.cubes_group.rotation.y += 0.1;
             //console.log(`Beat ${msg.beat}`);
             //
-            context.handle_sync(est_latency, msg.bpm, msg.beat);
+            context.handle_sync(est_tot_latency, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
-            context.handle_beat(est_latency, msg.channel);
+            context.handle_beat(est_tot_latency, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
@@ -381,7 +392,6 @@ class GraphicsContext {
         this.clock = new THREE.Clock(true);
         this.cur_beat = 0;
         this.cur_sync_error = 0;
-        this.avg_latency = null;
         this.bpm = 120;
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
@@ -434,6 +444,7 @@ class GraphicsContext {
 	this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
+
 
 
         // Handle touches
@@ -504,6 +515,7 @@ class GraphicsContext {
         window.addEventListener('resize', () => { this.on_window_resize(); });
 
         this.est_avg_skew = null;
+        this.est_avg_latency = null;
     }
 
     set_tracer_params(num_traces, spacing, persistence) {
@@ -669,14 +681,8 @@ class GraphicsContext {
     }
 
     handle_sync(latency, bpm, beat) {
-        //console.log(`${beat}: ${bpm}`);
-        //console.log(`Latency: ${this.avg_latency}`);
-        this.avg_latency = this.avg_latency === null ? latency :
-            this.avg_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
-
         const note_dur = 60 / bpm;
-        const delay = env.immediate_mode ? 0 :
-            note_dur - this.avg_latency - EXTRA_LATENCY;
+        const delay = env.immediate_mode ? 0 : note_dur - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
@@ -686,18 +692,14 @@ class GraphicsContext {
         }, delay * 1000);
     }
 
-    handle_beat(t, channel) {
+    handle_beat(latency, channel) {
         this.scenes.forEach((scene) => {
-            scene.handle_beat(t, channel);
+            scene.handle_beat(latency, channel);
         });
     }
 
     get_avg_skew() {
         return this.est_avg_skew;
-    }
-
-    get_avg_latency() {
-        return this.avg_latency;
     }
 }
 

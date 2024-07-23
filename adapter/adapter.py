@@ -6,17 +6,14 @@ import time
 import rtmidi
 from collections import deque
 import pathlib
-from websockets.sync.client import connect
+import websockets
 from rtmidi.midiutil import open_midiinput
 from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE
 import sys
 
 USE_STROBE = False
-
-MIN_BPM = 60
-MAX_BPM = 200
-
 BEAT_RESET_TIMEOUT_S = 1
+WS_PORT = 8765
 
 dmx = None
 strobe = None
@@ -216,19 +213,31 @@ class MidiInputHandler:
         return ws_msg
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
-    parser.add_argument('--fake', type=float, help='fake MIDI events with given BPM')
-    parser.add_argument('host', type=str, help='the URL or IP address to connect to with websockets')
-    parser.add_argument('-d', '--device', type=str, default='Volt', help='MIDI device to use (interactive if not specified)')
-    args = parser.parse_args()
+# Set of connected viewer clients
+connected = set()
 
+# Connected adapter client
+adapter = None
+adapter_secret = None
+
+async def handler(websocket):
+    connected.add(websocket)
+    print("Client connected")
     try:
-        this_dir = pathlib.Path(__file__).parent.resolve()
-        with open(this_dir / "secret.txt") as f:
-            secret_for_promotion = f.read().strip()
-    except FileNotFoundError:
-        print("Please put adapter secret in secret.txt to authenticate with server")
+        async for message in websocket:
+            # TODO: get estimated RTT from message
+            print(message)
+    finally:
+        # Unregister client
+        connected.remove(websocket)
+        print("Client disconnected")
+
+
+async def main():
+    parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
+    parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
+    parser.add_argument('-d', '--device', type=str, default='Volt', help='MIDI device to use (defaults to Volt)')
+    args = parser.parse_args()
 
     bpm = args.fake
     beat_idx = 0
@@ -239,32 +248,23 @@ def main():
 
     while True:
         try:
-            with connect(f'ws://{args.host}:8765') as websocket:
-                print('Connected to relay')
-                promo_msg = MsgPromotion(secret_for_promotion)
-                websocket.send(promo_msg.to_json())
-                #msg_recv = websocket.recv(timeout=1.0)
-                #if msg_recv[type] != Msg.Type.ACK:
-                    #print('Promotion failed')
-                    #break
-                # while True:
+            async with websockets.serve(handler, "0.0.0.0", WS_PORT):
                 if not args.fake:
                     midi_handler = MidiInputHandler(websocket)
                     midiin.set_callback(midi_handler)
                     while True:
                         time.sleep(1)
                 else:
-                    if beat_idx % 4 == 0:
-                        ws_msg = MsgSync(time.time(), bpm, beat_idx // 4)
-                        #await websocket.send(ws_msg.to_json())
-                        #await websocket.recv()
-                    cur_beats = fake_beat[beat_idx % len(fake_beat)]
-                    for beat in cur_beats:
-                        ws_msg = MsgBeat(time.time(), beat)
-                        #await websocket.send(ws_msg.to_json())
-                        #await websocket.recv()
-                    #await asyncio.sleep(60 / bpm / 4)
-                    beat_idx += 1
+                    while True:
+                        # Sync every 16th note
+                        ws_msg = MsgSync(time.time(), 4 * bpm, beat_idx)
+                        websockets.broadcast(connected, ws_msg.to_json())
+                        cur_beats = fake_beat[beat_idx % len(fake_beat)]
+                        for beat in cur_beats:
+                            ws_msg = MsgBeat(time.time(), beat)
+                            websockets.broadcast(connected, ws_msg.to_json())
+                        await asyncio.sleep(60 / (4 * bpm))
+                        beat_idx += 1
         except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:
@@ -273,9 +273,10 @@ def main():
             time.sleep(1)
             continue
         finally:
-            midiin.close_port()
-            del midiin
+            if midiin:
+                midiin.close_port()
+                del midiin
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

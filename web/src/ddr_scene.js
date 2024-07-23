@@ -386,7 +386,6 @@ export class DDRScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
-        console.log(`ddr beat: ${beat}`);
         if (beat % 4 == 0) {
             this.start_robot_rot = this.target_robot_rot;
             this.target_robot_rot++;

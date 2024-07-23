@@ -59,7 +59,7 @@ const MSG_TYPE_ACK = 6;
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
-const EXTRA_LATENCY = 0.00;
+const EXTRA_LATENCY = 0.07;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -137,17 +137,15 @@ function connect() {
             context.est_avg_latency * LATENCY_SMOOTHING + msg.latency * (1 - LATENCY_SMOOTHING) :
             msg.latency;
 
-        const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
+        /*const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
             + context.est_avg_latency   // average latency
-            + EXTRA_LATENCY;            // extra latency (manual calibration)
+            + EXTRA_LATENCY;            // extra latency (manual calibration)*/
+        const est_tot_latency = EXTRA_LATENCY;
 
-        console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
-        console.log(`Latency: ${context.est_avg_latency}`);
+        //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
+        //console.log(`Latency: ${context.est_avg_latency}`);
 
         if (type == MSG_TYPE_SYNC) {
-            //bg.cubes_group.rotation.y += 0.1;
-            //console.log(`Beat ${msg.beat}`);
-            //
             context.handle_sync(est_tot_latency, msg.bpm, msg.beat);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(est_tot_latency, msg.channel);
@@ -169,7 +167,7 @@ function connect() {
     });
 
     socket.addEventListener('error', function(e) {
-        //console.log('Socket encountered error: ', e.message, 'Closing socket');
+        console.log('Socket encountered error: ', e, 'Closing socket');
         socket.close();
     });
 }

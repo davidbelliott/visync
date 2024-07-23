@@ -30,7 +30,7 @@ class HelixCurve extends THREE.Curve {
             const t = (tau - 1) + elapsed_time - this.beats[i];
             if (t >= 0) {
                 //radius += 50 * t * Math.exp(-8 * t);
-                radius += 4 * Math.exp(-4 * t);
+                radius = Math.max(radius, 5 * Math.exp(-4 * t));
             }
             if (t > 10) {
                 this.beats.splice(0, i);

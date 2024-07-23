@@ -149,8 +149,6 @@ class PaddleGroup extends THREE.Group {
         this.movement_end_pos.add(offset);
         this.cur_drum_idx[0] = (this.cur_drum_idx[0] + Math.round(offset.x / this.parent_scene.spacing)) % this.parent_scene.num_per_side;
         this.cur_drum_idx[1] = (this.cur_drum_idx[1] + Math.round(offset.y / this.parent_scene.spacing)) % this.parent_scene.num_per_side;
-
-        console.log(this.cur_drum_idx);
     }
 
     anim_frame(dt) {
@@ -456,7 +454,6 @@ export class DrumboxScene extends VisScene {
         // Update camera zoom
         const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
         const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
-        console.log(new_zoom);
         if (new_zoom != this.camera.zoom) {
             this.camera.zoom = new_zoom;
             this.camera.updateProjectionMatrix();

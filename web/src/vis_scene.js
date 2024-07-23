@@ -68,12 +68,10 @@ export class VisScene {
                 if (this.div_change_debounce > 0) {
                     this.div_change_debounce--;
                 } else {
-                    console.log(`div change: ${this.cur_divisor} -> ${this.target_divisor}`);
                     this.cur_divisor = this.target_divisor;
                 }
             } else {
                 // Restart debounce counter
-                console.log("restart debounce");
                 this.target_divisor = this_sync_divisor;
                 this.div_change_debounce = this.div_change_debounce_cnt;
             }
@@ -85,7 +83,6 @@ export class VisScene {
             this.handle_sync(0, this.bpm,
                 Math.floor(beat / this.cur_divisor));
         }
-        console.log(this.bpm);
     }
 
     get_local_bpm() {
@@ -97,7 +94,6 @@ export class VisScene {
     // an eighth note earlier in the grid than the actual beats. Accounts for
     // network latency as measured by packet round-trip time.
     get_beat_delay(est_latency) {
-        //console.log(est_latency);
         return 2 * 60.0 / this.raw_bpm - est_latency;
     }
 

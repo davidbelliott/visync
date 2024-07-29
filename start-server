@@ -1,5 +1,3 @@
 #!/bin/sh
 filedir="$(dirname "$0")"
-#"$filedir/adapter/venv/bin/python" "$filedir/adapter/adapter.py" --fake 120
 python "$filedir/adapter/adapter.py" --fake 120
-sudo systemctl start nginx

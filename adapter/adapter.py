@@ -140,10 +140,6 @@ def strobe_off():
 
 
 
-def usage():
-    print("Usage: %s [-h | --fake bpm | [port]]" % sys.argv[0])
-
-
 fake_beat = [[] for i in range(0, 16)]
 for i in [0, 8]:
     fake_beat[i].append(1)
@@ -152,7 +148,7 @@ for i in [2, 6, 10, 14]:
 #for i in [0, 6]:
     #fake_beat[i].append(3)
 
-class MidiInputHandler:
+class RtMidiInputHandler:
     def __init__(self, websocket):
         self.websocket = websocket
         self.cur_beat_idx = 0
@@ -233,38 +229,63 @@ async def handler(websocket):
         print("Client disconnected")
 
 
+async def main_loop_rtmidi(rtmidi_device):
+    try:
+        midiin = rtmidi.MidiIn()
+        midiin, _ = open_midiinput(args.rtmidi)
+        async with websockets.serve(handler, "0.0.0.0", WS_PORT):
+            midi_handler = RtMidiInputHandler(websocket)
+            midiin.set_callback(midi_handler)
+            while True:
+                time.sleep(1)
+    finally:
+        midiin.close_port()
+        del midiin
+
+
+async def main_loop_serial(serial_device):
+    midi_handler = RtMidiInputHandler(websocket)
+    midiin.set_callback(midi_handler)
+    while True:
+        time.sleep(1)
+
+
+async def main_loop_fake(bpm):
+    beat_idx = 0
+    while True:
+        # Sync every 16th note
+        ws_msg = MsgSync(time.time(), 4 * bpm, beat_idx)
+        websockets.broadcast(connected, ws_msg.to_json())
+        cur_beats = fake_beat[beat_idx % len(fake_beat)]
+        for beat in cur_beats:
+            ws_msg = MsgBeat(time.time(), beat)
+            websockets.broadcast(connected, ws_msg.to_json())
+        await asyncio.sleep(60 / (4 * bpm))
+        beat_idx += 1
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
-    parser.add_argument('-d', '--device', type=str, default='Volt', help='MIDI device to use (defaults to Volt)')
+    parser.add_argument('-d', '--device', type=str, default='/dev/ttyserial0', help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
+    parser.add_argument('-r', '--rtmidi', type=str, default=None, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     args = parser.parse_args()
 
-    bpm = args.fake
-    beat_idx = 0
-    midiin = None
-    if not args.fake:
-        midiin = rtmidi.MidiIn()
-        midiin, _ = open_midiinput(args.device)
+    args_count = len([1 for x in [args.fake, args.device, args.rtmidi] if x])
+    if args_count != 1:
+        print('Error: must specify exactly one of --fake, --device, or --rtmidi')
+        exit(1)
 
+    # Restart-on-error loop (only exits on KeyboardInterrupt)
     while True:
         try:
             async with websockets.serve(handler, "0.0.0.0", WS_PORT):
-                if not args.fake:
-                    midi_handler = MidiInputHandler(websocket)
-                    midiin.set_callback(midi_handler)
-                    while True:
-                        time.sleep(1)
+                if args.rtmidi:
+                    main_loop_rtmidi(args.rtmidi)
+                elif args.device:
+                    main_loop_serial(args.device)
                 else:
-                    while True:
-                        # Sync every 16th note
-                        ws_msg = MsgSync(time.time(), 4 * bpm, beat_idx)
-                        websockets.broadcast(connected, ws_msg.to_json())
-                        cur_beats = fake_beat[beat_idx % len(fake_beat)]
-                        for beat in cur_beats:
-                            ws_msg = MsgBeat(time.time(), beat)
-                            websockets.broadcast(connected, ws_msg.to_json())
-                        await asyncio.sleep(60 / (4 * bpm))
-                        beat_idx += 1
+                    main_loop_fake(args.fake)
         except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:
@@ -272,10 +293,6 @@ async def main():
             print('Connection failed, retrying...')
             time.sleep(1)
             continue
-        finally:
-            if midiin:
-                midiin.close_port()
-                del midiin
 
 
 if __name__ == "__main__":

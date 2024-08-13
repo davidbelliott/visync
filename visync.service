@@ -1,0 +1,13 @@
+[Unit]
+Description=visync
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=david
+ExecStart=/home/david/visync/start-server
+
+[Install]
+WantedBy=multi-user.target

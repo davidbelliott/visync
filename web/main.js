@@ -146,7 +146,7 @@ function connect() {
         //console.log(`Latency: ${context.est_avg_latency}`);
 
         if (type == MSG_TYPE_SYNC) {
-            context.handle_sync(est_tot_latency, msg.bpm, msg.beat);
+            context.handle_sync(est_tot_latency, msg.sync_rate_hz, msg.sync_idx);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(est_tot_latency, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {

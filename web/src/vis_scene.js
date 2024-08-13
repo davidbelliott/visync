@@ -12,12 +12,12 @@ import {
 
 export class VisScene {
     constructor(num_states=1, max_bpm=140) {
-        this.raw_bpm = 120;
-        this.bpm = this.raw_bpm;
+        this.cur_divisor = 24;
+        this.target_divisor = this.cur_divisor;
+        this.bpm = 120;
+        this.sync_rate_hz = this.bpm / 60 * this.cur_divisor;
         this.max_bpm = max_bpm;
         this.min_bpm = max_bpm / 2;
-        this.cur_divisor = 1;
-        this.target_divisor = this.cur_divisor;
         this.div_change_hysteresis_bpm = 5;
         this.div_change_debounce_cnt = 4;
         this.div_change_debounce = 0;
@@ -51,14 +51,14 @@ export class VisScene {
         }
     }
 
-    handle_sync_raw(bpm, beat) {
-        this.raw_bpm = bpm;
+    handle_sync_raw(sync_rate_hz, beat) {
+        this.sync_rate_hz = sync_rate_hz;
         let this_sync_divisor = this.cur_divisor;
 
-        while (bpm / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
+        while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
             this_sync_divisor *= 2;
         }
-        while (bpm / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
+        while (60 * sync_rate_hz / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
             this_sync_divisor /= 2;
         }
 
@@ -77,9 +77,10 @@ export class VisScene {
             }
         }
 
-        this.bpm = bpm / this.cur_divisor;
+        this.bpm = 60 * sync_rate_hz / this.cur_divisor;
 
         if (beat % this.cur_divisor == 0) {
+            console.log(this.bpm)
             this.handle_sync(0, this.bpm,
                 Math.floor(beat / this.cur_divisor));
         }
@@ -94,7 +95,8 @@ export class VisScene {
     // an eighth note earlier in the grid than the actual beats. Accounts for
     // network latency as measured by packet round-trip time.
     get_beat_delay(est_latency) {
-        return 2 * 60.0 / this.raw_bpm - est_latency;
+        // 24 MIDI syncs per quarter note
+        return 1.0 / this.sync_rate_hz * 24 / 2 - est_latency;
     }
 
     handle_sync(latency, bpm, beat) {

@@ -26,10 +26,10 @@ if USE_STROBE:
     strobe = dmx.add_fixture(Custom, name="ADJ Mega Flash", channels=2)
 
 
-class BPMEstimator:
-    def __init__(self, bpm=120):
-        self.bpm = bpm
-        self.cur_beat_idx = 0
+class ClockTracker:
+    def __init__(self):
+        self.sync_rate_hz = 120 / 60 * 24
+        self.cur_sync_idx = 0
         self._last_clock = None
         self._samples = deque()
         self.sync = False
@@ -38,14 +38,14 @@ class BPMEstimator:
     def ping(self):
         now = time.time()
         elapsed = 0
-        self.cur_beat_idx += 1
+        self.cur_sync_idx += 1
 
         if self._last_clock != None:
             elapsed = now - self._last_clock
             if elapsed > BEAT_RESET_TIMEOUT_S:
                 self._samples.clear()
                 self.sync = False
-                self.cur_beat_idx = 0
+                self.cur_sync_idx = 0
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
@@ -56,17 +56,16 @@ class BPMEstimator:
             self._samples.popleft()
 
         if len(self._samples) >= 4:
-            bpms = [60.0 / x for x in self._samples if x != 0]
-            if (len(bpms) > 0):
-                self.bpm = sum(bpms) / len(bpms)
+            rates = [1 / x for x in self._samples if x != 0]
+            if (len(rates) > 0):
+                self.sync_rate_hz = sum(rates) / len(rates)
                 self.sync = True
 
-        #print(f'bpm: {self.bpm} sync: {self.sync} samples: {self._samples}')
-        return elapsed / 60 * self.bpm
+        return elapsed / 60 * self.sync_rate_hz
     
 
 
-bpm_estimator = BPMEstimator()
+clock_tracker = ClockTracker()
 
 
 class Msg:
@@ -93,35 +92,35 @@ class Msg:
 
 
 class MsgSync(Msg):
-    def __init__(self, last_transmit_latency, bpm, beat):
-        super().__init__(MsgSync.Type.SYNC, last_transmit_latency)
-        self.bpm = bpm
-        self.beat = beat
+    def __init__(self, last_transmit_latency, sync_rate_hz, sync_idx):
+        super().__init__(Msg.Type.SYNC, last_transmit_latency)
+        self.sync_rate_hz = sync_rate_hz
+        self.sync_idx = sync_idx
 
 
 class MsgBeat(Msg):
     def __init__(self, last_transmit_latency, channel, on=True):
-        super().__init__(MsgSync.Type.BEAT, last_transmit_latency)
+        super().__init__(Msg.Type.BEAT, last_transmit_latency)
         self.channel = channel
         self.on = on
 
 
 class MsgGotoScene(Msg):
     def __init__(self, last_transmit_latency, scene, bg=False):
-        super().__init__(MsgSync.Type.GOTO_SCENE, last_transmit_latency)
+        super().__init__(Msg.Type.GOTO_SCENE, last_transmit_latency)
         self.scene = scene
         self.bg = bg
 
 
 class MsgAdvanceSceneState(Msg):
     def __init__(self, last_transmit_latency, steps):
-        super().__init__(MsgSync.Type.ADVANCE_SCENE_STATE, last_transmit_latency)
+        super().__init__(Msg.Type.ADVANCE_SCENE_STATE, last_transmit_latency)
         self.steps = steps
 
 
 class MsgPromotion(Msg):
     def __init__(self, secret):
-        super().__init__(MsgSync.Type.PROMOTION, 0)
+        super().__init__(Msg.Type.PROMOTION, 0)
         self.secret = secret
 
 
@@ -157,16 +156,16 @@ for i in [2, 6, 10, 14]:
     #fake_beat[i].append(3)
 
 
-def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0):
+def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
     if note_vel == 0:
         return None
 
     ws_msg = None
-    if channel == 16:
+    if channel == 16 and use_note_syncs:
         # This channel is used for synchronization
-        bpm_estimator.ping()
-        if bpm_estimator.sync:
-            ws_msg = MsgSync(last_transmit_latency, bpm_estimator.bpm, bpm_estimator.cur_beat_idx)
+        clock_tracker.ping()
+        if clock_tracker.sync:
+            ws_msg = MsgSync(last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
     elif channel == 15:
         # This channel is used for lighting control
         if USE_STROBE:
@@ -253,9 +252,9 @@ class SerialMidiHandler:
         ws_msg = None
         if len(self.bytes) == 0:
             if b == midiconstants.TIMING_CLOCK:
-                bpm_estimator.ping()
-                if bpm_estimator.sync:
-                    ws_msg = MsgSync(self.last_transmit_latency, bpm_estimator.bpm, bpm_estimator.cur_beat_idx)
+                clock_tracker.ping()
+                if clock_tracker.sync:
+                    ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
             elif b & 0xF0 == midiconstants.NOTE_ON:
                 self.bytes = [b]
             elif b & 0xF0 == midiconstants.NOTE_OFF:
@@ -323,21 +322,21 @@ async def main_loop_fake(bpm):
     beat_idx = 0
     while True:
         # Sync every 16th note
-        ws_msg = MsgSync(time.time(), 4 * bpm, beat_idx)
+        ws_msg = MsgSync(time.time(), 24 * bpm, beat_idx)
         websockets.broadcast(connected, ws_msg.to_json())
         cur_beats = fake_beat[beat_idx % len(fake_beat)]
         for beat in cur_beats:
             ws_msg = MsgBeat(time.time(), beat)
             websockets.broadcast(connected, ws_msg.to_json())
-        await asyncio.sleep(60 / (4 * bpm))
+        await asyncio.sleep(60 / (24 * bpm))
         beat_idx += 1
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
-    parser.add_argument('-d', '--device', type=str, default='/dev/serial0', help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
-    parser.add_argument('-r', '--rtmidi', type=str, default=None, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
+    parser.add_argument('-d', '--device', type=str, help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
+    parser.add_argument('-r', '--rtmidi', type=str, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     args = parser.parse_args()
 
     args_count = len([1 for x in [args.fake, args.device, args.rtmidi] if x])

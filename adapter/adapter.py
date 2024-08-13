@@ -1,10 +1,11 @@
 import argparse
 import asyncio
+from collections import deque
 from enum import Enum
 import json
 import time
 import rtmidi
-from collections import deque
+import serial_asyncio
 import pathlib
 import websockets
 from rtmidi.midiutil import open_midiinput
@@ -229,6 +230,14 @@ async def handler(websocket):
         print("Client disconnected")
 
 
+async def serial_reader(serial_device, handler):
+    reader, _ = await serial_asyncio.open_serial_connection(url=serial_device, baudrate=31250)
+    while True:
+        byte = await reader.read(1)
+        #await handler.handle_midi_byte(byte[0])
+        print(byte)
+
+
 async def main_loop_rtmidi(rtmidi_device):
     try:
         midiin = rtmidi.MidiIn()
@@ -244,10 +253,7 @@ async def main_loop_rtmidi(rtmidi_device):
 
 
 async def main_loop_serial(serial_device):
-    midi_handler = RtMidiInputHandler(websocket)
-    midiin.set_callback(midi_handler)
-    while True:
-        time.sleep(1)
+    await serial_reader(serial_device, None)
 
 
 async def main_loop_fake(bpm):

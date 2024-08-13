@@ -10,6 +10,7 @@ import pathlib
 import websockets
 from rtmidi.midiutil import open_midiinput
 from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE
+from rtmidi import midiconstants
 import sys
 
 USE_STROBE = False
@@ -28,18 +29,23 @@ if USE_STROBE:
 class BPMEstimator:
     def __init__(self, bpm=120):
         self.bpm = bpm
+        self.cur_beat_idx = 0
         self._last_clock = None
         self._samples = deque()
+        self.sync = False
 
 
     def ping(self):
         now = time.time()
         elapsed = 0
+        self.cur_beat_idx += 1
+
         if self._last_clock != None:
             elapsed = now - self._last_clock
             if elapsed > BEAT_RESET_TIMEOUT_S:
                 self._samples.clear()
                 self.sync = False
+                self.cur_beat_idx = 0
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
@@ -57,6 +63,7 @@ class BPMEstimator:
 
         #print(f'bpm: {self.bpm} sync: {self.sync} samples: {self._samples}')
         return elapsed / 60 * self.bpm
+    
 
 
 bpm_estimator = BPMEstimator()
@@ -149,10 +156,39 @@ for i in [2, 6, 10, 14]:
 #for i in [0, 6]:
     #fake_beat[i].append(3)
 
+
+def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0):
+    if note_vel == 0:
+        return None
+
+    ws_msg = None
+    if channel == 16:
+        # This channel is used for synchronization
+        bpm_estimator.ping()
+        if bpm_estimator.sync:
+            ws_msg = MsgSync(last_transmit_latency, bpm_estimator.bpm, bpm_estimator.cur_beat_idx)
+    elif channel == 15:
+        # This channel is used for lighting control
+        if USE_STROBE:
+            strobe_on()
+    elif channel == 14:
+        # This channel is used for graphics scene switching
+        ws_msg = MsgGotoScene(last_transmit_latency, note_number - 60, note_vel < 100)
+    elif channel == 13:
+        # This channel is used for moving forward/backward in the graphics scene
+        ws_msg = MsgAdvanceSceneState(last_transmit_latency, 1)
+    elif channel == 12:
+        ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1)
+    else:
+        # Remaining channels are used for controlling elements within the scene
+        ws_msg = MsgBeat(last_transmit_latency, channel, True)
+
+    return ws_msg
+
+
 class RtMidiInputHandler:
     def __init__(self, websocket):
         self.websocket = websocket
-        self.cur_beat_idx = 0
         self.last_transmit_latency = 0
 
     def __call__(self, event, data=None):
@@ -169,33 +205,10 @@ class RtMidiInputHandler:
             channel = (midi_msg[0] & 0xF) + 1
             note_number = midi_msg[1]
             note_vel = midi_msg[2]
-            if channel == 16:
-                # This channel is used for synchronization
-                bpm_estimator.ping()
-                if bpm_estimator.sync:
-                    ws_msg = MsgSync(self.last_transmit_latency, bpm_estimator.bpm, self.cur_beat_idx)
-                self.cur_beat_idx = self.cur_beat_idx + 1
-            elif channel == 15:
-                # This channel is used for lighting control
-                if USE_STROBE:
-                    strobe_on()
-            elif channel == 14:
-                # This channel is used for graphics scene switching
-                ws_msg = MsgGotoScene(self.last_transmit_latency, note_number - 60, note_vel < 100)
-            elif channel == 13:
-                # This channel is used for moving forward/backward in the graphics scene
-                ws_msg = MsgAdvanceSceneState(self.last_transmit_latency, 1)
-            elif channel == 12:
-                ws_msg = MsgAdvanceSceneState(self.last_transmit_latency, -1)
-            else:
-                # Remaining channels are used for controlling elements within the scene
-                ws_msg = MsgBeat(self.last_transmit_latency, channel, True)
         elif midi_msg[0] & 0xF0 == NOTE_OFF:
             if channel == 15:
                 if USE_STROBE:
                     strobe_off()
-            else:
-                ws_msg = MsgBeat(self.last_transmit_latency, channel, False)
         elif midi_msg[0] & 0xF0 == CONTROL_CHANGE:
             control_idx = midi_msg[1]
             control_val = midi_msg[2]
@@ -223,19 +236,63 @@ async def handler(websocket):
     try:
         async for message in websocket:
             # TODO: get estimated RTT from message
-            print(message)
+            #print(message)
+            pass
     finally:
         # Unregister client
         connected.remove(websocket)
         print("Client disconnected")
 
 
-async def serial_reader(serial_device, handler):
-    reader, _ = await serial_asyncio.open_serial_connection(url=serial_device, baudrate=31250)
-    while True:
-        byte = await reader.read(1)
-        #await handler.handle_midi_byte(byte[0])
-        print(byte)
+class SerialMidiHandler:
+    def __init__(self):
+        self.bytes = []
+        self.last_transmit_latency = 0
+
+    def handle_midi_byte(self, b):
+        ws_msg = None
+        if len(self.bytes) == 0:
+            if b == midiconstants.TIMING_CLOCK:
+                bpm_estimator.ping()
+                if bpm_estimator.sync:
+                    ws_msg = MsgSync(self.last_transmit_latency, bpm_estimator.bpm, bpm_estimator.cur_beat_idx)
+            elif b & 0xF0 == midiconstants.NOTE_ON:
+                self.bytes = [b]
+            elif b & 0xF0 == midiconstants.NOTE_OFF:
+                self.bytes = [b]
+            elif b & 0xF0 == midiconstants.CONTROL_CHANGE:
+                self.bytes = [b]
+            elif b & 0xF0 == midiconstants.PROGRAM_CHANGE:
+                self.bytes = [b]
+            else:
+                print(f'unknown status byte: {b}')
+        else:
+            if self.bytes[0] & 0xF0 == midiconstants.NOTE_ON:
+                self.bytes.append(b)
+                if len(self.bytes) == 3:
+                    channel = (self.bytes[0] & 0xF) + 1
+                    note_number, note_vel = self.bytes[1:]
+                    ws_msg = translate_note_to_msg(channel, note_number, note_vel)
+                    self.bytes = []
+            elif self.bytes[0] & 0xF0 == midiconstants.NOTE_OFF:
+                self.bytes.append(b)
+                if len(self.bytes) == 3:
+                    channel = (self.bytes[0] & 0xF) + 1
+                    note_number, note_vel = self.bytes[1:]
+                    ws_msg = None
+                    self.bytes = []
+            elif self.bytes[0] & 0xF0 == CONTROL_CHANGE:
+                self.bytes.append(b)
+                if len(self.bytes) == 3:
+                    control_idx, control_val = self.bytes[1:]
+                    # This channel is used for graphics scene switching
+                    ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
+                    self.bytes = []
+            else:
+                self.bytes = []
+
+        return ws_msg
+
 
 
 async def main_loop_rtmidi(rtmidi_device):
@@ -253,7 +310,13 @@ async def main_loop_rtmidi(rtmidi_device):
 
 
 async def main_loop_serial(serial_device):
-    await serial_reader(serial_device, None)
+    reader, _ = await serial_asyncio.open_serial_connection(url=serial_device, baudrate=31250)
+    handler = SerialMidiHandler()
+    while True:
+        byte = int.from_bytes(await reader.read(1))
+        ws_msg = handler.handle_midi_byte(byte)
+        if ws_msg:
+            websockets.broadcast(connected, ws_msg.to_json())
 
 
 async def main_loop_fake(bpm):
@@ -273,7 +336,7 @@ async def main_loop_fake(bpm):
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
-    parser.add_argument('-d', '--device', type=str, default='/dev/ttyserial0', help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
+    parser.add_argument('-d', '--device', type=str, default='/dev/serial0', help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
     parser.add_argument('-r', '--rtmidi', type=str, default=None, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     args = parser.parse_args()
 
@@ -287,11 +350,11 @@ async def main():
         try:
             async with websockets.serve(handler, "0.0.0.0", WS_PORT):
                 if args.rtmidi:
-                    main_loop_rtmidi(args.rtmidi)
+                    await main_loop_rtmidi(args.rtmidi)
                 elif args.device:
-                    main_loop_serial(args.device)
+                    await main_loop_serial(args.device)
                 else:
-                    main_loop_fake(args.fake)
+                    await main_loop_fake(args.fake)
         except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:

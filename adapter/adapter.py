@@ -246,14 +246,25 @@ class SerialMidiHandler:
     def __init__(self):
         self.bytes = []
         self.last_transmit_latency = 0
+        self.playing = True
 
     def handle_midi_byte(self, b):
         ws_msg = None
         if len(self.bytes) == 0:
             if b == midiconstants.TIMING_CLOCK:
                 clock_tracker.ping()
-                if clock_tracker.sync:
+                if clock_tracker.sync and self.playing:
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                self.bytes = []
+            elif b == midiconstants.SONG_STOP:
+                self.playing = False
+                self.bytes = []
+            elif b == midiconstants.SONG_START:
+                self.playing = True
+                self.bytes = []
+            elif b == midiconstants.SONG_CONTINUE:
+                self.playing = True
+                self.bytes = []
             elif b & 0xF0 == midiconstants.NOTE_ON:
                 self.bytes = [b]
             elif b & 0xF0 == midiconstants.NOTE_OFF:

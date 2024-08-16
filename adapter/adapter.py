@@ -4,7 +4,6 @@ from collections import deque
 from enum import Enum
 import json
 import time
-import rtmidi
 import serial_asyncio
 import pathlib
 import websockets

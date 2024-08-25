@@ -225,13 +225,19 @@ export function make_wireframe_rectangle(width, height, color) {
 
 
 export class Spark extends THREE.Object3D {
-    constructor(size, color, axes, flicker=true, always_in_front=false) {
+    constructor(size, color, axes, flicker=true, always_in_front=false, is_cross=false, billboard=true) {
         super();
         this.material = new THREE.LineBasicMaterial( { color: color } );
-        const lines = [
-            [-1, -1, 1, 1],
-            [-1, 1, 1, -1],
-            [-1.25, 0, 1.25, 0]];
+        var lines = [
+                [-1, -1, 1, 1],
+                [-1, 1, 1, -1],
+                [-1.25, 0, 1.25, 0]];
+
+        if (is_cross) {
+            lines = [
+                [-1, 0, 1, 0],
+                [0, -1, 0, 1]];
+        }
         for (const line of lines) {
             const points = [];
             for (let i = 0; i < 2; i++) {
@@ -255,6 +261,7 @@ export class Spark extends THREE.Object3D {
         this.cur_frame = 0;
         this.active = true;
         this.flicker = flicker;
+        this.billboard = billboard;
     }
 
     anim_frame(dt, camera) {
@@ -272,12 +279,14 @@ export class Spark extends THREE.Object3D {
             if (this.flicker) {
                 this.visible = (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
             }
-            this.quaternion.copy(camera.quaternion);
-            if (this.parent != null) {
-                const group_quat = new THREE.Quaternion();
-                this.parent.getWorldQuaternion(group_quat);
-                group_quat.conjugate();
-                this.quaternion.premultiply(group_quat);
+            if (this.billboard) {
+                this.quaternion.copy(camera.quaternion);
+                if (this.parent != null) {
+                    const group_quat = new THREE.Quaternion();
+                    this.parent.getWorldQuaternion(group_quat);
+                    group_quat.conjugate();
+                    this.quaternion.premultiply(group_quat);
+                }
             }
         } else {
             this.cur_frame = 0;

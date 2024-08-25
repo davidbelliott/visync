@@ -1,3 +1,0 @@
-#!/bin/sh
-filedir="$(dirname "$0")"
-"$filedir/venv/bin/python" "$filedir/adapter/adapter.py" --fake 120

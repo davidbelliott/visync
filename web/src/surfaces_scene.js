@@ -5,7 +5,7 @@ import {
     create_instanced_cube,
     make_wireframe_special,
     make_point_cloud,
-    clamp
+    clamp,
 } from "./util.js";
 
 function radial_wave(u, v, target, t) {

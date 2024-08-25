@@ -30,6 +30,7 @@ import { HomeBackgroundScene } from './src/home_background_scene.js';
 import { SurfacesScene } from './src/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
 import { HelixScene } from './src/helix_scene.js';
+import { TriangularPrismScene } from './src/triangular_prism_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -114,7 +115,8 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const relay_url = `${window.location.hostname}/ws/`;
+    //const relay_url = `${window.location.hostname}/ws/`;
+    const relay_url = '192.168.4.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -146,7 +148,7 @@ function connect() {
         //console.log(`Latency: ${context.est_avg_latency}`);
 
         if (type == MSG_TYPE_SYNC) {
-            context.handle_sync(est_tot_latency, msg.bpm, msg.beat);
+            context.handle_sync(est_tot_latency, msg.sync_rate_hz, msg.sync_idx);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(est_tot_latency, msg.channel);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
@@ -413,13 +415,13 @@ class GraphicsContext {
             [15, new HomeBackgroundScene()],
             [16, new IntroScene()],
             [17, new TracersScene()],
-            [18, new HelixScene()]
-            //new FastCarScene(),
+            [18, new HelixScene()],
+            [19, new TriangularPrismScene()],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(7);
+        this.change_scene(19);
         this.change_scene(0, true);
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);

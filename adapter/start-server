@@ -1,0 +1,3 @@
+#!/bin/sh
+filedir="$(dirname "$0")"
+"$filedir/../venv/bin/python" "$filedir/adapter.py" -d /dev/serial0

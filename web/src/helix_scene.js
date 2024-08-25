@@ -120,6 +120,7 @@ export class HelixScene extends VisScene {
         const line2 = line.clone();
         line2.rotation.y = Math.PI;
         this.base_group.add(line2);
+        // Create the top plane
 
         // Create the vectors (arrows)
         {

@@ -80,12 +80,14 @@ class TunnelMovementBackground {
     }
 
     add_square(color) {
-        const sq = this.squares.pop();
-        sq.material.color.set(color);
-        sq.material.needsUpdate = true;
-        sq.position.z = this.start_square_offset - this.squares_group.position.z;
-        sq.visible = true;
-        this.squares.unshift(sq);
+        for (let i = 0; i < 12; i++) {
+            const sq = this.squares.pop();
+            sq.material.color.set(color);
+            sq.material.needsUpdate = true;
+            sq.position.z = this.start_square_offset - this.squares_group.position.z + i;
+            sq.visible = true;
+            this.squares.unshift(sq);
+        }
     }
 
     handle_sync(t, bpm, beat) {

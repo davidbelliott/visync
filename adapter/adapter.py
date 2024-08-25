@@ -147,12 +147,12 @@ def strobe_off():
 
 
 fake_beat = [[] for i in range(0, 16)]
-for i in [0, 8]:
+for i in range(0, 16, 4):
     fake_beat[i].append(1)
 for i in [2, 6, 10, 14]:
     fake_beat[i].append(2)
-#for i in [0, 6]:
-    #fake_beat[i].append(3)
+for i in range(0, 16):
+    fake_beat[i].append(4)
 
 
 def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
@@ -329,17 +329,21 @@ async def main_loop_serial(serial_device):
 
 
 async def main_loop_fake(bpm):
+    sync_idx = 0
     beat_idx = 0
+    sync_rate_hz = (bpm * 24) / 60
     while True:
-        # Sync every 16th note
-        ws_msg = MsgSync(time.time(), 24 * bpm, beat_idx)
-        websockets.broadcast(connected, ws_msg.to_json())
-        cur_beats = fake_beat[beat_idx % len(fake_beat)]
-        for beat in cur_beats:
-            ws_msg = MsgBeat(time.time(), beat)
-            websockets.broadcast(connected, ws_msg.to_json())
-        await asyncio.sleep(60 / (24 * bpm))
-        beat_idx += 1
+        sync_msg = MsgSync(time.time(), sync_rate_hz, sync_idx)
+        websockets.broadcast(connected, sync_msg.to_json())
+        new_beat_idx = sync_idx // 6
+        if new_beat_idx != beat_idx:
+            beat_idx = new_beat_idx
+            cur_beats = fake_beat[beat_idx % len(fake_beat)]
+            for beat in cur_beats:
+                beat_msg = MsgBeat(time.time(), beat)
+                websockets.broadcast(connected, beat_msg.to_json())
+        await asyncio.sleep(1 / sync_rate_hz)
+        sync_idx += 1
 
 
 async def main():

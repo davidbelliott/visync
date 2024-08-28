@@ -83,7 +83,7 @@ export function make_line(points, color) {
     return l;
 }
 
-export function make_wireframe_cone(r, h, segments, color) {
+export function make_wireframe_cone(r, h, segments, color, depth_test=true) {
     let geometry = new THREE.ConeGeometry(r, h, segments);
     let wireframe = new THREE.EdgesGeometry(geometry);
     const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
@@ -93,7 +93,8 @@ export function make_wireframe_cone(r, h, segments, color) {
         color: "black",
         polygonOffset: true,
         polygonOffsetFactor: 1, // positive value pushes polygon further away
-        polygonOffsetUnits: 1
+        polygonOffsetUnits: 1,
+        depthTest: depth_test,
     });
     const inner_geom = new THREE.ConeGeometry(r, h, segments);
     mesh.add(new THREE.Mesh(inner_geom, fill_mat));

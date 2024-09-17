@@ -7,7 +7,7 @@ import { InstancedGeometryCollection } from './instanced_geom.js';
 
 export class TriangularPrismScene extends VisScene {
     constructor() {
-        super();
+        super(2, 180);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;
@@ -19,8 +19,6 @@ export class TriangularPrismScene extends VisScene {
             -1000,
             1000
         );
-        this.camera.position.set(0, 0, 0);
-        this.camera.lookAt(0, 0, 0);
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x000000);
@@ -29,7 +27,10 @@ export class TriangularPrismScene extends VisScene {
 
         this.projectionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
-        this.clock = new THREE.Clock(true);
+        this.wave_color_clock = new BeatClock(this);
+        this.wave_color_clock.start();
+        this.wave_scale_clock = new BeatClock(this);
+        this.wave_scale_clock.start();
         this.sync_clock = new BeatClock(this);
         this.camera_rot_clock = new BeatClock(this);
 
@@ -70,6 +71,7 @@ export class TriangularPrismScene extends VisScene {
         this.rolls_per_sync = 1;
         this.camera_movement_syncs = 8;
         this.cube_rot = [0, 0];
+        this.roll_dir = 2;
     }
 
     createProjectedCube() {
@@ -166,21 +168,41 @@ export class TriangularPrismScene extends VisScene {
         this.camera.rotation.x = Math.PI / 4 * ease(clamp(1 / 0.6 *
             (Math.abs(2 * (camera_rot_beats / this.camera_movement_syncs) - 1) - 0.2),
             0, 1));
-        //this.camera.rotation.x = Math.PI / 4;
-        this.camera.rotation.z += 0.05 * dt;
+        //this.camera.rotation.x = 0;
+        //this.camera.rotation.z += 0.05 * dt;
         //this.tri_group.rotation.z += 0.05 * dt;
         //this.camera.position.x += this.scrollSpeed * dt;
         console.log(num_rots);
         console.log(cube_roll_frac);
-        this.cube.rotation.z = cube_roll_frac * Math.PI / 2;//0.4 * dt;
+
+        const axis_arr = [0, 0, 0];
+        const sign = [1, -1, 1];
+        axis_arr[this.roll_dir] = 1;
+        const theta = sign[this.roll_dir] * cube_roll_frac * Math.PI / 2;
+        const quat = new THREE.Quaternion();
+        quat.setFromAxisAngle(new THREE.Vector3().fromArray(axis_arr), theta);
+        this.cube.setRotationFromQuaternion(quat);
+        if (this.roll_dir == 0) {
+            this.cube.position.y = 
+                (3 * this.prismSize / 2) * Math.sin(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+            this.cube.position.z = 
+                -(3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+        } else if (this.roll_dir == 1) {
+            this.cube.position.x = 
+                -(3 * this.prismSize / 2) * Math.sin(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+            this.cube.position.z = 
+                -(3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+        } else if (this.roll_dir == 2) {
+            this.cube.position.y = 
+                -(3 * this.prismSize / 2) * Math.sin(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+            this.cube.position.x = 
+                -(3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
+        }
         //let num_rots = Math.trunc(this.cube.rotation.z / (Math.PI / 2));
         //num_rots = 0;
-        const theta = this.cube.rotation.z;
-        /*this.cube.position.x = 
-            (3 * this.prismSize / 2) * Math.sin(theta + Math.PI / 4) - 1/2 * this.cube_side_len;*/
-        this.cube.position.x = 0;
-        this.cube.position.y = (num_rots - 1/2) * this.cube_side_len -
-            (3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4);
+        //this.cube.position.x = 0;
+        /*this.cube.position.y = (num_rots - 1/2) * this.cube_side_len -
+            (3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4);*/
 
         // Camera tracks cube, without the "bounce" orthogonal to plane
         const cube_world_pos = new THREE.Vector3(0, 0, 0);
@@ -189,13 +211,10 @@ export class TriangularPrismScene extends VisScene {
         this.camera.position.y = cube_world_pos.y;
         this.camera.position.x = cube_world_pos.x;
 
-        this.cube.position.x = 
-            (3 * this.prismSize / 2) * Math.sin(theta + Math.PI / 4) - 1/2 * this.cube_side_len;
 
         this.updateProjectedCube();
 
 
-        const elapsed_time = this.clock.getElapsedTime();
         const tri_camera_offset = this.tri_group.position.clone();
         tri_camera_offset.sub(this.camera.position);
         if (tri_camera_offset.y > 2 * this.prismSize * 1.5) {
@@ -210,11 +229,17 @@ export class TriangularPrismScene extends VisScene {
         if (tri_camera_offset.x < -this.prismSize * Math.sqrt(3)) {
             this.tri_group.position.x += this.prismSize * Math.sqrt(3);
         }
+
+        const elapsed_scale_beats = this.wave_scale_clock.getElapsedBeats();
+        const elapsed_color_beats = this.wave_color_clock.getElapsedBeats();
         for (let i = 0; i < this.prism_collection.instancedGeometry.instanceCount; i++) {
             const from_camera = this.prism_collection.get_pos(i).clone();
             this.tri_group.localToWorld(from_camera);
             from_camera.sub(this.camera.position);
-            const scale = clamp(0.9 + 0.3 * Math.sin(-2 * Math.PI * elapsed_time + from_camera.length()), 0, 1);
+            let scale = 1;
+            if (this.cur_state_idx > 0) {
+                scale = clamp(0.9 + 0.3 * Math.sin(-2 * Math.PI * elapsed_scale_beats + from_camera.length()), 0, 1);
+            }
             //const scale = clamp(0.7 + 0.05 * from_camera.length() * Math.sin(2 * 2 * Math.PI * elapsed_time), 0, 1) ** 2;
             const scale_vec = new THREE.Vector3(scale, scale, 1);
             this.prism_collection.set_scale(i, scale_vec);
@@ -223,7 +248,7 @@ export class TriangularPrismScene extends VisScene {
             const lightness = 0.5;
             
             const color = new THREE.Color();
-            color.setHSL(Math.sin(0.1 * elapsed_time + 0.1 * from_camera.length()), saturation, lightness);
+            color.setHSL(Math.sin(1 / 8 * elapsed_color_beats + 0.1 * from_camera.length()), saturation, lightness);
             this.prism_collection.set_color(i, color);
             /*if (from_camera.y > (this.gridSize - 1) * this.prismSize * 1.5) {
                 pos.y -= (this.gridSize * 2) * this.prismSize * 1.5;
@@ -249,9 +274,11 @@ export class TriangularPrismScene extends VisScene {
             for (const i in this.cube_rot) {
                 this.cube_rot[i] += 1;
             }
+            this.roll_dir = Math.floor(Math.random() * 3);
         }
         if (beat % this.camera_movement_syncs == 0) {
             this.camera_rot_clock.start();
+            this.wave_scale_clock.start();
         }
     }
 

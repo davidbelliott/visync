@@ -42,9 +42,7 @@ class ClockTracker:
         if self._last_clock != None:
             elapsed = now - self._last_clock
             if elapsed > BEAT_RESET_TIMEOUT_S:
-                self._samples.clear()
-                self.sync = False
-                self.cur_sync_idx = 0
+                self.reset_sync()
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
@@ -61,6 +59,12 @@ class ClockTracker:
                 self.sync = True
 
         return elapsed / 60 * self.sync_rate_hz
+
+
+    def reset_sync(self):
+        self.cur_sync_idx = 0
+        self._samples.clear()
+        self.sync = False
     
 
 
@@ -258,6 +262,7 @@ class SerialMidiHandler:
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
                 self.playing = False
+                clock_tracker.reset_sync()
                 self.bytes = []
             elif b == midiconstants.SONG_START:
                 self.playing = True

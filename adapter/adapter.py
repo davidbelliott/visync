@@ -42,7 +42,9 @@ class ClockTracker:
         if self._last_clock != None:
             elapsed = now - self._last_clock
             if elapsed > BEAT_RESET_TIMEOUT_S:
-                self.reset_sync()
+                self.cur_sync_idx = 0
+                self._samples.clear()
+                self.sync = False
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
@@ -63,8 +65,6 @@ class ClockTracker:
 
     def reset_sync(self):
         self.cur_sync_idx = 0
-        self._samples.clear()
-        self.sync = False
     
 
 
@@ -81,6 +81,7 @@ class Msg:
         PROMOTION = 4
         PROMOTION_GRANT = 5
         ACK = 6
+        PITCH_BEND = 7
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -113,6 +114,12 @@ class MsgGotoScene(Msg):
         super().__init__(Msg.Type.GOTO_SCENE, last_transmit_latency)
         self.scene = scene
         self.bg = bg
+
+
+class MsgPitchBend(Msg):
+    def __init__(self, last_transmit_latency, value):
+        super().__init__(Msg.Type.PITCH_BEND, last_transmit_latency)
+        self.value = value
 
 
 class MsgAdvanceSceneState(Msg):
@@ -262,10 +269,12 @@ class SerialMidiHandler:
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
                 self.playing = False
-                clock_tracker.reset_sync()
                 self.bytes = []
             elif b == midiconstants.SONG_START:
                 self.playing = True
+                clock_tracker.reset_sync()
+                if clock_tracker.sync:
+                    ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 self.bytes = []
             elif b == midiconstants.SONG_CONTINUE:
                 self.playing = True
@@ -277,6 +286,8 @@ class SerialMidiHandler:
             elif b & 0xF0 == midiconstants.CONTROL_CHANGE:
                 self.bytes = [b]
             elif b & 0xF0 == midiconstants.PROGRAM_CHANGE:
+                self.bytes = [b]
+            elif b & 0xF0 == midiconstants.PITCH_BEND:
                 self.bytes = [b]
             else:
                 print(f'unknown status byte: {b}')
@@ -302,6 +313,12 @@ class SerialMidiHandler:
                     # This channel is used for graphics scene switching
                     ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
                     self.bytes = []
+            elif self.bytes[0] & 0xF0 == PITCH_BEND:
+                self.bytes.append(b)
+                if len(self.bytes) == 3:
+                    value_lo, value_hi = self.bytes[1:]
+                    value = (value_hi << 7) | value_lo
+                    ws_msg = MsgPitchBend(self.last_transmit_latency, value)
             else:
                 self.bytes = []
 

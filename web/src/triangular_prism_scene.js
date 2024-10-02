@@ -160,7 +160,7 @@ export class TriangularPrismScene extends VisScene {
 
     anim_frame(dt) {
         // Cube roll on 16th notes
-        const sync_clock_beats = this.sync_clock.getElapsedBeats();
+        const sync_clock_beats = clamp(this.sync_clock.getElapsedBeats(), 0, 1);
         const camera_rot_beats = this.camera_rot_clock.getElapsedBeats();
         const cube_roll_frac = (sync_clock_beats * this.rolls_per_sync) % 1;
         //const num_rots = this.cube_rot[1];
@@ -172,8 +172,6 @@ export class TriangularPrismScene extends VisScene {
         //this.camera.rotation.z += 0.05 * dt;
         //this.tri_group.rotation.z += 0.05 * dt;
         //this.camera.position.x += this.scrollSpeed * dt;
-        console.log(num_rots);
-        console.log(cube_roll_frac);
 
         const axis_arr = [0, 0, 0];
         const sign = [1, -1, 1];

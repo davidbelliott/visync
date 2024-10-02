@@ -7,7 +7,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=david
-ExecStart=/home/david/visync/start-server
+ExecStart=/home/david/visync-dist/start-server
 
 [Install]
 WantedBy=multi-user.target

@@ -8,7 +8,8 @@ import {
     make_wireframe_circle,
     rand_int,
     arr_eq,
-    clamp
+    clamp,
+    BeatClock
 } from './util.js';
 import { BoxDef } from './geom_def.js';
 import { VisScene } from './vis_scene.js';
@@ -106,10 +107,10 @@ export class YellowRobotScene extends VisScene {
             this.frustum_size / 2,
             -this.frustum_size / 2, -8, 1000);
         this.scene = new THREE.Scene();
-        this.move_clock = new THREE.Clock(false);
-        this.half_beat_clock = new THREE.Clock(false);
-        this.beat_clock = new THREE.Clock(false);
-        this.state_change_clock = new THREE.Clock(false);
+        this.move_clock = new BeatClock(this);
+        this.half_beat_clock = new BeatClock(this);
+        this.beat_clock = new BeatClock(this);
+        this.state_change_clock = new BeatClock(this);
 
         this.beat_idx = 0;
 
@@ -246,6 +247,7 @@ export class YellowRobotScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
+        console.log("robot sync");
         this.beat_clock.start();
         if (beat % 2 == 0) {
             // half-note beat
@@ -304,18 +306,15 @@ export class YellowRobotScene extends VisScene {
         const div = 512;    // # of divisions per pi radians
         const float_rate = 1;
         const track_rate = 2;
-        const beats_per_sec = this.get_local_bpm() / 60;
 
         this.tesseract.rot_xw -= 0.05;
         this.tesseract.update_geom();
 
 
         if (this.go_to_target) {
-            const num_beats_to_lerp = 1.0;
-            let elapsed = this.move_clock.getElapsedTime();
+            let elapsed = this.move_clock.getElapsedBeats();
             for (var i = 0; i < 2; i++) {
-                const full_time = 1.0 / beats_per_sec * num_beats_to_lerp;
-                const ang_vel = (this.target_rot[i] - this.start_rot[i]) * 1.0 / full_time;
+                const ang_vel = (this.target_rot[i] - this.start_rot[i]);
                 const sign_before = Math.sign(this.target_rot[i] - this.rot[i]);
                 this.rot[i] = this.start_rot[i] + ang_vel * elapsed;
                 const sign_after = Math.sign(this.target_rot[i] - this.rot[i]);
@@ -335,7 +334,7 @@ export class YellowRobotScene extends VisScene {
         // Update spacing
         const spacing_change_beats = 4;
         {
-            const frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / spacing_change_beats, 0, 1);
+            const frac = clamp(this.state_change_clock.getElapsedBeats() / spacing_change_beats, 0, 1);
             this.curr_spacing = lerp_scalar(this.start_spacing, this.target_spacing, frac);
             let idx = 0;
             for (let i = 0; i < 3; i++) {
@@ -352,14 +351,14 @@ export class YellowRobotScene extends VisScene {
         // Update zoom
         const zoom_change_beats = 1;
         {
-            const frac = clamp((this.state_change_clock.getElapsedTime() * beats_per_sec - spacing_change_beats) / zoom_change_beats, 0, 1);
+            const frac = clamp((this.state_change_clock.getElapsedBeats() - spacing_change_beats) / zoom_change_beats, 0, 1);
             this.curr_zoom = lerp_scalar(this.start_zoom, this.target_zoom, frac);
             this.cam_orth.zoom = this.curr_zoom;
             this.cam_orth.updateProjectionMatrix();
         }
 
 
-        let half_beat_time = this.half_beat_clock.getElapsedTime() * beats_per_sec / 2.0;
+        let half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         let furthest_forward_z_touching_ground = null;
         for (let side = 0; side < 2; side++) {
             const shuffle_offset = this.get_foot_shuffle_offset(side, half_beat_time);
@@ -401,7 +400,7 @@ export class YellowRobotScene extends VisScene {
         }
         this.circle_group.position.z = furthest_forward_z_touching_ground;
 
-        let beat_time = this.beat_clock.getElapsedTime() * beats_per_sec;
+        let beat_time = this.beat_clock.getElapsedBeats();
         this.circle_scale = lerp_scalar(this.circle_scale_base, this.circle_scale_max, beat_time);
         for (const circle of this.circles) {
             circle.scale.setScalar(this.circle_scale);

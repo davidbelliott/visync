@@ -8,7 +8,7 @@ import serial_asyncio
 import pathlib
 import websockets
 from rtmidi.midiutil import open_midiinput
-from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE
+from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE, PITCH_BEND
 from rtmidi import midiconstants
 import sys
 
@@ -82,6 +82,7 @@ class Msg:
         PROMOTION_GRANT = 5
         ACK = 6
         PITCH_BEND = 7
+        CONTROL_CHANGE = 8
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -114,6 +115,13 @@ class MsgGotoScene(Msg):
         super().__init__(Msg.Type.GOTO_SCENE, last_transmit_latency)
         self.scene = scene
         self.bg = bg
+
+
+class MsgControlChange(Msg):
+    def __init__(self, last_transmit_latency, wheel_idx, value):
+        super().__init__(Msg.Type.CONTROL_CHANGE, last_transmit_latency)
+        self.wheel_idx = wheel_idx
+        self.value = value
 
 
 class MsgPitchBend(Msg):
@@ -222,9 +230,8 @@ class RtMidiInputHandler:
             control_idx = midi_msg[1]
             control_val = midi_msg[2]
             # This channel is used for graphics scene switching
-            ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
-        else:
-            print(midi_msg)
+            #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
+            ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
 
         if ws_msg != None:
             print(ws_msg)
@@ -309,9 +316,11 @@ class SerialMidiHandler:
             elif self.bytes[0] & 0xF0 == CONTROL_CHANGE:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
+                    print(f"control change: {self.bytes[1:]}")
                     control_idx, control_val = self.bytes[1:]
                     # This channel is used for graphics scene switching
-                    ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
+                    ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
+                    #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == PITCH_BEND:
                 self.bytes.append(b)
@@ -319,6 +328,7 @@ class SerialMidiHandler:
                     value_lo, value_hi = self.bytes[1:]
                     value = (value_hi << 7) | value_lo
                     ws_msg = MsgPitchBend(self.last_transmit_latency, value)
+                    self.bytes = []
             else:
                 self.bytes = []
 
@@ -346,6 +356,10 @@ async def main_loop_serial(serial_device):
     while True:
         byte = int.from_bytes(await reader.read(1))
         ws_msg = handler.handle_midi_byte(byte)
+
+        if ws_msg and ws_msg.msg_type != Msg.Type.SYNC:
+            print(ws_msg)
+
         if ws_msg:
             websockets.broadcast(connected, ws_msg.to_json())
 

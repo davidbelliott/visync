@@ -57,11 +57,12 @@ const MSG_TYPE_PROMOTION = 4;
 const MSG_TYPE_PROMOTION_GRANT = 5;
 const MSG_TYPE_ACK = 6;
 const MSG_TYPE_PITCH_BEND = 7;
+const MSG_TYPE_CONTROL_CHANGE = 8;
 
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
-const EXTRA_LATENCY = 0.07;
+const EXTRA_LATENCY = 0.000;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -152,10 +153,18 @@ function connect() {
             context.handle_sync(est_tot_latency, msg.sync_rate_hz, msg.sync_idx);
         } else if (type == MSG_TYPE_BEAT) {
             context.handle_beat(est_tot_latency, msg.channel);
-        } else if (type == MSG_TYPE_GOTO_SCENE) {
-            context.change_scene(msg.scene, msg.bg);
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
+        } else if (type == MSG_TYPE_CONTROL_CHANGE) {
+            console.log("control change");
+            console.log(msg);
+            if (msg.wheel_idx == 1) {
+                // Foreground scene
+                context.change_scene(Math.floor(msg.value / 5), false);
+            } else if (msg.wheel_idx == 2) {
+                // Background scene
+                context.change_scene(Math.floor(msg.value / 5), true);
+            }
         }
         const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
         socket.send(JSON.stringify(resp));
@@ -411,13 +420,13 @@ class GraphicsContext {
             [11, new BackgroundSurfacesScene()],
             [12, new SpectrumScene()],
             [13, new FastCubeScene()],
-            //new SlideScene(["img/cover.png", "img/santa-claus.jpg", "img/santa-claus-2.png"]),
             [14, new TessellateScene()],
             [15, new HomeBackgroundScene()],
             [16, new IntroScene()],
             [17, new TracersScene()],
             [18, new HelixScene()],
             [19, new TriangularPrismScene()],
+            [20, new SlideScene(["img/hitem.png"])],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
@@ -681,14 +690,13 @@ class GraphicsContext {
         }
     }
 
-    handle_sync(latency, bpm, beat) {
-        const note_dur = 60 / bpm;
-        const delay = env.immediate_mode ? 0 : note_dur - latency;
+    handle_sync(latency, sync_rate_hz, beat) {
+        const delay = env.immediate_mode ? 0 : 1.0 / sync_rate_hz - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
             this.scenes.forEach((scene) => {
-                scene.handle_sync_raw(bpm, beat + 1);
+                scene.handle_sync_raw(sync_rate_hz, beat + 1);
             });
         }, delay * 1000);
     }

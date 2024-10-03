@@ -145,7 +145,7 @@ export class BackgroundSurfacesScene extends VisScene {
         //
         let add_dt = dt;
         if (this.beat_clock.running) {
-            add_dt *= (this.beat_clock.getElapsedBeats() < 0.5 ? 2 : 1);
+            add_dt *= (this.beat_clock.getElapsedBeats() < 0.5 ? 6 : 1);
         }
         this.evolve_time += add_dt;
 

@@ -237,6 +237,7 @@ export class GantryScene extends VisScene {
         this.starting_scales = [];
         this.target_scales = [];
         this.cube_base_size = 3;
+        this.cube_base_height = 3;
         this.cube_base_spacing = 1;
         this.drift_vel = 3.0;
 
@@ -273,7 +274,7 @@ export class GantryScene extends VisScene {
                     j * (this.cube_base_size + this.cube_base_spacing) + center_offset,
                     0,
                     i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
-                const cube_mesh = create_instanced_cube(Array(3).fill(this.cube_base_size), "magenta");
+                const cube_mesh = create_instanced_cube([this.cube_base_size, this.cube_base_height, this.cube_base_size], "magenta");
                 cube_mesh.position.copy(position);
                 cube_row.push(cube_mesh);
                 starting_scale_row.push(1);
@@ -369,8 +370,8 @@ export class GantryScene extends VisScene {
                     const cube_pos = this.cubes[i][j].position.clone();
                     cube_pos.y = 0;
                     const x = cube_pos.distanceTo(e.position);
-                    y_offset -= 2 * Math.sin(Math.max(0, Math.min(2 * Math.PI,
-                        -0.3 * x + 2 * Math.PI * t))) * Math.exp(-0.5 * t);
+                    y_offset -= 3 * Math.sin(Math.max(0, Math.min(2 * Math.PI,
+                        -0.2 * x + 8 * t))) * Math.exp(-1.5 * t);
                 }
                 this.cubes[i][j].position.y = y_offset;
                 this.cubes[i][j].material.color.copy(cur_color);

@@ -218,7 +218,7 @@ export class FastCubeScene extends VisScene {
                 this.camera.top - this.camera.bottom);
             this.plane = new THREE.Mesh(geometry, this.vbo_material);
             this.plane.position.z = -100;
-            this.scene.add(this.plane);
+            //this.scene.add(this.plane);
         });
 
         this.scene.add(this.base_group);
@@ -351,12 +351,12 @@ export class FastCubeScene extends VisScene {
         if (this.vbo_material == null) {
             return;
         }
-        const renderTarget = renderer.getRenderTarget();
+        /*const renderTarget = renderer.getRenderTarget();
         renderer.setRenderTarget(this.buffer);
         renderer.clear();
         renderer.render(this.bg.scene, this.bg.camera);
         this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
-        renderer.setRenderTarget(renderTarget);
+        renderer.setRenderTarget(renderTarget);*/
         renderer.render(this.scene, this.camera);
         //renderer.render(this.scene, this.camera);
     }

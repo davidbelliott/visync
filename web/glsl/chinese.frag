@@ -349,7 +349,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec2 to_center = vec2(0.5) - st;
 
     fragColor = vec4(0.0);
-    const int num_loops = 15;
+    const int num_loops = 10;
     const float evolve_rate = 1.0 / 16.0;
     const float scroll_rate = 1.0 / 64.0;
     const float scale = 2.0;
@@ -363,7 +363,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
 
 
     for (int i = 0; i < num_loops; i++) {
-        float time_offset = 0.01 * float(i);
+        float time_offset = 0.015 * float(i);
         float t = time * evolve_rate + time_offset;
 
         float offset_complexity = 3.5;

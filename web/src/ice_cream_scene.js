@@ -51,7 +51,7 @@ export class IceCreamScene extends VisScene {
         this.cone_spacing = 7;
         this.cone_scale = 0.25;
 
-        this.light = new THREE.PointLight("white", 20, 0, 0.8);
+        this.light = new THREE.PointLight("white", 40, 0, 0.8);
         this.light.position.set(0, 40, 20);
         this.scene.add(this.light);
 
@@ -78,13 +78,13 @@ export class IceCreamScene extends VisScene {
 
                 this.ice_cream_cone_mat = new THREE.MeshLambertMaterial({
                     color: this.ice_cream_color,
+                    transparent: true,
+                    opacity: 0.8
                 });
-                this.ice_cream_cone_mat.flatShading = false;
 
                 this.brain_mat = new THREE.MeshLambertMaterial({
-                    color: 'lightblue',
+                    color: '#40a0a0',
                 });
-                this.brain_mat.flatShading = true;
 
                 for (const mat of [this.ice_cream_cone_mat, this.brain_mat]) {
                     mat.onBeforeCompile = (shader) => {

@@ -45,9 +45,9 @@ float hex(in vec2 p)
 
 vec3 palette(in float t)
 {
-    vec3 a = vec3(0.5, 0.5, 0.5);
-    vec3 b = vec3(0.5, 0.5, 0.5);
-    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 a = vec3(1.0, 0.0, 0.5);
+    vec3 b = vec3(0.0, 1.0, 0.0);
+    vec3 c = vec3(0.2, 0.3, 0.5);
     vec3 d = vec3(0.0, 0.1, 0.2);
     return a + b*cos( 6.28318*(c*t+d) );
 }
@@ -311,13 +311,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec2 st = fragCoord.xy / resolution.xx / pixel_ratio;
     vec2 to_center = vec2(0.5) - st;
 
-    fragColor = vec4(1.0);
-    const int num_loops = 15;
+    fragColor = vec4(0.0);
+    const int num_loops = 5;
     const float evolve_rate = 1.0 / 16.0;
     const float scroll_rate = 1.0 / 64.0;
     const float scale = 2.0;
     for (int i = 0; i < num_loops; i++) {
-        float time_offset = 0.02 * float(i);
+        float time_offset = 0.06 * float(i);
         float t = time * evolve_rate + time_offset;
 
         float offset_complexity = 3.5;
@@ -335,7 +335,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor.a *= sin(time * 2. * PI);
         float alpha = pow(float(i + 1) / float(num_loops), 1.6);
-        fragColor = rainbow_color * tex_val.r * alpha + fragColor * (1.0 - tex_val.r * alpha);
+        fragColor = tex_val.r * alpha * rainbow_color + (1.0 - tex_val.r * alpha) * fragColor;
     }
 }
 

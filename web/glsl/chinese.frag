@@ -28,28 +28,65 @@ float hash21(vec2 p)
     return fract(sin(dot(p, vec2(141.13, 289.97)))*43758.5453);
 }
 
-// The 2D hexagonal isosuface function: If you were to render a horizontal line and one that
-// slopes at 60 degrees, mirror, then combine them, you'd arrive at the following. As an aside,
-// the function is a bound -- as opposed to a Euclidean distance representation, but either
-// way, the result is hexagonal boundary lines.
-float hex(in vec2 p)
-{    
-    p = abs(p);
-    
-    #ifdef FLAT_TOP_HEXAGON
-    return max(dot(p, s*.5), p.y); // Hexagon.
-    #else
-    return max(dot(p, s*.5), p.x); // Hexagon.
-    #endif    
+float luma(vec3 color) {
+  return dot(color, vec3(0.299, 0.587, 0.114));
+}
+
+float luma(vec4 color) {
+  return dot(color.rgb, vec3(0.299, 0.587, 0.114));
+}
+
+
+float dither4x4(vec2 position, float brightness) {
+  int x = int(mod(position.x, 4.0));
+  int y = int(mod(position.y, 4.0));
+  int index = x + y * 4;
+  float limit = 0.0;
+
+  if (x < 8) {
+    if (index == 0) limit = 0.0625;
+    if (index == 1) limit = 0.5625;
+    if (index == 2) limit = 0.1875;
+    if (index == 3) limit = 0.6875;
+    if (index == 4) limit = 0.8125;
+    if (index == 5) limit = 0.3125;
+    if (index == 6) limit = 0.9375;
+    if (index == 7) limit = 0.4375;
+    if (index == 8) limit = 0.25;
+    if (index == 9) limit = 0.75;
+    if (index == 10) limit = 0.125;
+    if (index == 11) limit = 0.625;
+    if (index == 12) limit = 1.0;
+    if (index == 13) limit = 0.5;
+    if (index == 14) limit = 0.875;
+    if (index == 15) limit = 0.375;
+  }
+
+  return brightness < limit ? 0.0 : 1.0;
+}
+
+vec3 dither4x4(vec2 position, vec3 color) {
+  return color * dither4x4(position, luma(color));
+}
+
+vec4 dither4x4(vec2 position, vec4 color) {
+  return vec4(color.rgb * dither4x4(position, luma(color)), color.a);
+}
+
+vec3 cosPalette(in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d)
+{
+    return a + b*cos( 6.28318*(c*t+d) );
 }
 
 vec3 palette(in float t)
 {
+    return 
+    cosPalette(t,vec3(0.87,0.38,0.70),vec3(0.83,0.35,0.05),vec3(0.89,0.65,0.87),vec3(0.69,0.61,0.01))
+    ;
     vec3 a = vec3(0.5, 0.5, 0.5);
     vec3 b = vec3(0.5, 0.5, 0.5);
     vec3 c = vec3(1.0, 1.0, 1.0);
     vec3 d = vec3(0.0, 0.1, 0.2);
-    return a + b*cos( 6.28318*(c*t+d) );
 }
 
 // This function returns the hexagonal grid coordinate for the grid cell, and the corresponding 
@@ -349,12 +386,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         // Average the sampled values
         vec4 tex_val = (tex_val1 + tex_val2 + tex_val3 + tex_val4) / 4.0;
         //vec4 tex_val = texture2D(tex, fract(tex_coords * scale), 0.5);
-        float color_t = mod(color_noise * 2.0 - t * 2.0, 1.0);
+        float color_t = color_noise * 2.0 - t * 2.0;
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor.a *= sin(time * 2. * PI);
         float alpha = pow(float(i + 1) / float(num_loops), 1.6);
         fragColor = tex_val.r * alpha * rainbow_color + (1.0 - tex_val.r * alpha) * fragColor;
     }
+    fragColor = dither4x4(fragCoord.xy, fragColor);
 }
 
 void main() {

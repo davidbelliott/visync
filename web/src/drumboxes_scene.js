@@ -40,10 +40,12 @@ class PaddleGroup extends THREE.Group {
             const dither_pars = results[results.length - 1][0];
             const dither = results[results.length - 1][1];
             const paddle_mat = new THREE.MeshLambertMaterial({
-                color: "pink",
+                color: "white",
                 polygonOffset: true,
                 polygonOffsetFactor: 1,
-                polygonOffsetUnits: 1
+                polygonOffsetUnits: 1,
+                transparent: true,
+                opacity: 0.90,
             });
             const paddle_wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1, transparent: true } );
             const side_paddle_wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1, transparent: true } );
@@ -308,7 +310,9 @@ export class DrumboxScene extends VisScene {
                 color: START_COLOR,
                 polygonOffset: true,
                 polygonOffsetFactor: 1,
-                polygonOffsetUnits: 1
+                polygonOffsetUnits: 1,
+                transparent: true,
+                opacity: 0.9,
             });
             this.wireframe_mat = new THREE.LineBasicMaterial( { color: START_COLOR, linewidth: 1, transparent: true } );
 

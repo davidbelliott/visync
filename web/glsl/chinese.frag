@@ -45,9 +45,9 @@ float hex(in vec2 p)
 
 vec3 palette(in float t)
 {
-    vec3 a = vec3(1.0, 0.0, 0.5);
-    vec3 b = vec3(0.0, 1.0, 0.0);
-    vec3 c = vec3(0.2, 0.3, 0.5);
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
     vec3 d = vec3(0.0, 0.1, 0.2);
     return a + b*cos( 6.28318*(c*t+d) );
 }
@@ -312,12 +312,21 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec2 to_center = vec2(0.5) - st;
 
     fragColor = vec4(0.0);
-    const int num_loops = 5;
+    const int num_loops = 15;
     const float evolve_rate = 1.0 / 16.0;
     const float scroll_rate = 1.0 / 64.0;
     const float scale = 2.0;
+
+    // Define the supersampling offsets for 4x supersampling
+    vec2 pixelSize = 1.0 / resolution.xy / pixel_ratio;
+    vec2 offset1 = vec2(-0.25, -0.25) * pixelSize;
+    vec2 offset2 = vec2(0.25, -0.25) * pixelSize;
+    vec2 offset3 = vec2(-0.25, 0.25) * pixelSize;
+    vec2 offset4 = vec2(0.25, 0.25) * pixelSize;
+
+
     for (int i = 0; i < num_loops; i++) {
-        float time_offset = 0.06 * float(i);
+        float time_offset = 0.01 * float(i);
         float t = time * evolve_rate + time_offset;
 
         float offset_complexity = 3.5;
@@ -328,9 +337,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         float width = 1.0;
         
         float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
-        vec2 tex_coords = st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset));
+        // Supersampling: sample the texture at 4 sub-pixel locations and average them
+        vec2 tex_coords = (st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset))) * scale;
         tex_coords.y *= texture_aspect;
-        vec4 tex_val = texture2D(tex, fract(tex_coords * scale), 0.5);
+
+        vec4 tex_val1 = texture2D(tex, fract(tex_coords + offset1), 0.5);
+        vec4 tex_val2 = texture2D(tex, fract(tex_coords + offset2), 0.5);
+        vec4 tex_val3 = texture2D(tex, fract(tex_coords + offset3), 0.5);
+        vec4 tex_val4 = texture2D(tex, fract(tex_coords + offset4), 0.5);
+
+        // Average the sampled values
+        vec4 tex_val = (tex_val1 + tex_val2 + tex_val3 + tex_val4) / 4.0;
+        //vec4 tex_val = texture2D(tex, fract(tex_coords * scale), 0.5);
         float color_t = mod(color_noise * 2.0 - t * 2.0, 1.0);
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor.a *= sin(time * 2. * PI);

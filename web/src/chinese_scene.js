@@ -112,14 +112,15 @@ export class ChineseScene extends VisScene {
             this.base_group.scale.set(1, 1, 1);
 
             this.inner_scene.add(this.base_group);
-            this.create_buffer(4096, 4096);
+            this.create_buffer(1024, 1024);
         }
 
         // Create top-level scene
         this.shader_loader = new ResourceLoader(['glsl/chinese.vert', 'glsl/chinese.frag']);
         Promise.all([this.shader_loader.load(), load_texture('img/chinese.png')]).then(
             ([[vertex_shader, fragment_shader], texture]) => {
-            texture.minFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.NearestFilter;
+            texture.magFilter = THREE.NearestFilter;
             this.uniforms = {
                 time: { type: 'f', value: 0.0 },
                 scroll_time: { type: 'f', value: 0.0 },
@@ -201,15 +202,15 @@ export class ChineseScene extends VisScene {
         if (USE_SHADER) {
             renderer.autoClearColor = false;
             renderer.setRenderTarget(this.buffer);
-            renderer.clear();
+            //renderer.clear();
         }
-        renderer.render(this.inner_scene, this.inner_camera);
+
+        //renderer.render(this.inner_scene, this.inner_camera);
         if (USE_SHADER) {
             if (this.uniforms != null) {
                 //this.uniforms.tex.value = this.buffer.texture;
             }
             renderer.setRenderTarget(prev_render_target);
-            renderer.clear();
             renderer.clearDepth();
             renderer.render(this.scene, this.camera);
             renderer.autoClearColor = prev_autoclear;

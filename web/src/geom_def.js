@@ -27,7 +27,7 @@ export class BoxDef extends GeomDef {
     }
     create() {
         super.create();
-        const created_mesh = create_instanced_cube(this.dims, this.color);
+        const created_mesh = create_instanced_cube(this.dims, this.color, false);
         /*let geometry = new THREE.BoxGeometry(...this.dims);
         let wireframe = new THREE.EdgesGeometry(geometry);
         const wireframe_mat = new THREE.LineBasicMaterial( { color: "yellow", linewidth: 1 } );

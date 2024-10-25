@@ -294,7 +294,7 @@ export class YellowRobotScene extends VisScene {
             this.target_zoom = 1;
         } else if (new_state_idx == 1) {
             this.start_spacing = this.curr_spacing;
-            this.target_spacing = 3;
+            this.target_spacing = 4;
 
             this.start_zoom = this.curr_zoom;
             this.target_zoom = 0.8;

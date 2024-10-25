@@ -201,10 +201,10 @@ export class IceCreamScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay(t);
+        const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1) {
-                this.beat_clock.start(this.get_local_bpm());
+                this.beat_clock.start();
                 this.target_rot_multiplier *= -1;
             } else if (channel == 4) {
                 for (let i = 0; i < 4; i++) {

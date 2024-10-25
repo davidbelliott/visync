@@ -83,21 +83,25 @@ export function make_line(points, color) {
     return l;
 }
 
-export function make_wireframe_cone(r, h, segments, color, depth_test=true) {
+export function make_wireframe_cone(r, h, segments, color, depth_test=true, fill=true, fill_color="black", fill_opacity=1.0) {
     let geometry = new THREE.ConeGeometry(r, h, segments);
     let wireframe = new THREE.EdgesGeometry(geometry);
     const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
     const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
 
-    const fill_mat = new THREE.MeshBasicMaterial({
-        color: "black",
-        polygonOffset: true,
-        polygonOffsetFactor: 1, // positive value pushes polygon further away
-        polygonOffsetUnits: 1,
-        depthTest: depth_test,
-    });
-    const inner_geom = new THREE.ConeGeometry(r, h, segments);
-    mesh.add(new THREE.Mesh(inner_geom, fill_mat));
+    if (fill) {
+        const fill_mat = new THREE.MeshBasicMaterial({
+            color: "black",
+            polygonOffset: true,
+            polygonOffsetFactor: 1, // positive value pushes polygon further away
+            polygonOffsetUnits: 1,
+            depthTest: depth_test,
+            transparent: true,
+            opacity: fill_opacity,
+        });
+        const inner_geom = new THREE.ConeGeometry(r, h, segments);
+        mesh.add(new THREE.Mesh(inner_geom, fill_mat));
+    }
 
     return mesh;
 }
@@ -177,20 +181,24 @@ export function make_wireframe_cube(dims, color) {
 }
 
 
-export function create_instanced_cube(dims, color) {
+export function create_instanced_cube(dims, color, add_fill=true, fill_color="black", fill_opacity=0.5) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);
     const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
     const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
 
-    const fill_mat = new THREE.MeshBasicMaterial({
-        color: "black",
-        polygonOffset: true,
-        polygonOffsetFactor: 1, // positive value pushes polygon further away
-        polygonOffsetUnits: 1
-    });
-    const inner_geom = new THREE.BoxGeometry(...dims);
-    mesh.add(new THREE.Mesh(inner_geom, fill_mat));
+    if (add_fill) {
+        const fill_mat = new THREE.MeshBasicMaterial({
+            color: fill_color,
+            polygonOffset: true,
+            polygonOffsetFactor: 1, // positive value pushes polygon further away
+            polygonOffsetUnits: 1,
+            transparent: (fill_opacity < 1.0),
+            opacity: fill_opacity,
+        });
+        const inner_geom = new THREE.BoxGeometry(...dims);
+        mesh.add(new THREE.Mesh(inner_geom, fill_mat));
+    }
 
     return mesh;
 }

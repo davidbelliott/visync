@@ -69,7 +69,7 @@ class TunnelMovementBackground {
         //this.camera.position.setY(Math.cos(pos_frac * 2 * Math.PI) * this.wave_ampl);
         const seconds_per_lerp = 0.1;
         const frac = clamp(this.sync_clock.getElapsedTime() / seconds_per_lerp, 0, 1);
-        this.squares_group.rotation.z = Math.PI / 4 * (this.start_rot +
+        this.squares_group.rotation.z = Math.PI / 8 * (this.start_rot +
             lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
 
     }
@@ -98,6 +98,9 @@ class TunnelMovementBackground {
         }
     }
 }
+
+const FILL_COLOR = "black";
+const FILL_OPACITY = 0.5;
 
 export class FastCubeScene extends VisScene {
     constructor() {
@@ -130,22 +133,22 @@ export class FastCubeScene extends VisScene {
 
         this.vibe_ampl = 0;
 
-        this.cube = create_instanced_cube([6, 6, 6], "white");
+        this.cube = create_instanced_cube([6, 6, 6], "white", true, FILL_COLOR, FILL_OPACITY);
         this.front_speaker = make_wireframe_circle(2, 32, "white");
         this.front_speaker.add(make_wireframe_circle(0.7, 32, "white"));
         this.front_speaker.position.z = 3;
         this.cube.add(this.front_speaker);
         this.base_group.add(this.cube);
         this.feet = [
-            create_instanced_cube([3, 1.5, 6], "white"),
-            create_instanced_cube([3, 1.5, 6], "white")];
+            create_instanced_cube([3, 1.5, 6], "white", true, FILL_COLOR, FILL_OPACITY),
+            create_instanced_cube([3, 1.5, 6], "white", true, FILL_COLOR, FILL_OPACITY)];
         this.feet_base_pos = [
             new THREE.Vector3(-1.5, -6, 0),
             new THREE.Vector3(1.5, -6, 0)];
         this.feet.forEach((f, i) => {
             for (let i = 0; i < 2; i++) {
                 for (let j = 0; j < 4; j++) {
-                    const spike = make_wireframe_cone(Math.sqrt(2) * 3/4, 3/4, 4, "white");
+                    const spike = make_wireframe_cone(Math.sqrt(2) * 3/4, 3/4, 4, "white", true, true, FILL_COLOR, FILL_OPACITY);
                     spike.rotation.set(0, Math.PI / 4, Math.PI);
                     spike.position.set(i * 3/2 - (3/2 * (2/2 - 1/2)),
                         -1.5 / 2 - 3/8,
@@ -161,15 +164,15 @@ export class FastCubeScene extends VisScene {
         this.laser_on_times = [];
         this.cur_frame = 0;
         this.hands = [
-            create_instanced_cube([3, 3, 1.5], "white"),
-            create_instanced_cube([3, 3, 1.5], "white")];
+            create_instanced_cube([3, 3, 1.5], "white", false),
+            create_instanced_cube([3, 3, 1.5], "white", false)];
         this.hands_base_pos = [
             new THREE.Vector3(-5, 0, 0),
             new THREE.Vector3(5, 0, 0)];
         this.hands.forEach((h, i) => {
             for (let i = 0; i < 4; i++) {
                 const height = (i == 0 || i == 3) ? 2.25 : 3;
-                const finger = create_instanced_cube([3/4, height, 1.0], "white");
+                const finger = create_instanced_cube([3/4, height, 1.0], "white", true, FILL_COLOR, FILL_OPACITY);
                 finger.position.set(3/4 * i + (-3/4 * 2 + 3/8), height / 2 + 3 / 2, 0);
                 h.add(finger);
             }
@@ -310,7 +313,7 @@ export class FastCubeScene extends VisScene {
     handle_sync(t, bpm, beat) {
         this.bg.handle_sync(t, bpm, beat);
         if (Math.abs(this.end_rot) == 4) {
-            this.rot_dir *= -1;
+            //this.rot_dir *= -1;
         }
         this.start_rot = this.end_rot;
         this.end_rot = this.start_rot + this.rot_dir;

@@ -7,6 +7,7 @@ import time
 import serial_asyncio
 import pathlib
 import websockets
+import random
 from rtmidi.midiutil import open_midiinput
 from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE, PITCH_BEND
 from rtmidi import midiconstants
@@ -165,13 +166,15 @@ def strobe_off():
 
 
 
-fake_beat = [[] for i in range(0, 16)]
-for i in range(0, 16, 4):
-    fake_beat[i].append(1)
-for i in [2, 6, 10, 14]:
-    fake_beat[i].append(2)
-for i in range(0, 16):
-    fake_beat[i].append(4)
+NUM_BARS = 4
+fake_beat = [[] for i in range(0, NUM_BARS * 16)]
+for bar in range(0, NUM_BARS):
+    for i in [0, 8, 14]:
+        fake_beat[16 * bar + i].append(1)
+    for i in [8]:
+        fake_beat[16 * bar + i].append(2)
+    for i in range(0, 16):
+        fake_beat[16 * bar + i].append(4)
 
 
 def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
@@ -368,6 +371,9 @@ async def main_loop_fake(bpm):
     sync_idx = 0
     beat_idx = 0
     sync_rate_hz = (bpm * 24) / 60
+    state_advancing = True
+    cur_advance_step = 1
+    cur_advance_state = 0
     while True:
         sync_msg = MsgSync(time.time(), sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
@@ -375,6 +381,24 @@ async def main_loop_fake(bpm):
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx
             cur_beats = fake_beat[beat_idx % len(fake_beat)]
+
+            if new_beat_idx % 16 == 0 and random.random() < 0.5:
+                # Advance or decrease state
+                adv_msg = MsgAdvanceSceneState(0, cur_advance_step)
+                websockets.broadcast(connected, adv_msg.to_json())
+                cur_advance_state += cur_advance_step
+                if (cur_advance_state > 4 or cur_advance_state <= 0):
+                    cur_advance_step *= -1
+
+            elif new_beat_idx % 64 == 0:
+                # Change foreground or background scene
+                bg = (random.random() < 0.5)
+                new_scene = (int(random.random() * 20) + 1)
+                if bg and random.random() < 0.1:
+                    new_scene = 0   # blank background
+                chscene_msg = MsgGotoScene(0, new_scene, bg)
+                websockets.broadcast(connected, chscene_msg.to_json())
+
             for beat in cur_beats:
                 beat_msg = MsgBeat(time.time(), beat)
                 websockets.broadcast(connected, beat_msg.to_json())

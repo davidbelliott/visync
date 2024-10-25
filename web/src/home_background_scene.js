@@ -45,7 +45,7 @@ export class HomeBackgroundScene extends VisScene {
         this.ls = make_wireframe_special("white");
         this.ls.material.color.copy(new THREE.Color("gray"));
         this.ls.renderOrder = -1;
-        this.scene.add(this.ls);
+        //this.scene.add(this.ls);
         this.pc = make_point_cloud();
         this.pc.position.copy(this.camera.position);
         this.scene.add(this.pc);

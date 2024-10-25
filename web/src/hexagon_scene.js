@@ -9,68 +9,90 @@ import {
     clamp,
     arr_eq,
     load_texture,
-    ResourceLoader
+    ResourceLoader,
+    create_instanced_cube,
 } from './util.js';
 
-function create_instanced_cube(dims, color) {
-    let geometry = new THREE.BoxGeometry(...dims);
-    let wireframe = new THREE.EdgesGeometry(geometry);
-    const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
-    const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
-
-    const fill_mat = new THREE.MeshBasicMaterial({
-        color: "black",
-        polygonOffset: true,
-        polygonOffsetFactor: 1, // positive value pushes polygon further away
-        polygonOffsetUnits: 1
-    });
-    const inner_geom = new THREE.BoxGeometry(...dims);
-    mesh.add(new THREE.Mesh(inner_geom, fill_mat));
-
-    return mesh;
-}
+const ROT_DIV = 1024;
 
 class CubeAssembly extends THREE.Group {
-    constructor(parent_scene, start_exploded, template_obj, min_spacing=1.0, max_spacing=3.0) {
+    constructor(parent_scene, start_exploded, template_obj, min_spacing, max_spacing, depth) {
         super();
+        this.depth = depth;
         this.parent_scene = parent_scene;
         this.max_spacing = max_spacing;
         this.min_spacing = min_spacing;
+        let spacing = min_spacing;
         if (start_exploded) {
-            this.spacing = this.max_spacing;
             this.spacing_direction = 1;
+            spacing = max_spacing;
         } else {
-            this.spacing = this.min_spacing;
             this.spacing_direction = -1;
+            spacing = min_spacing;
         }
-        this.cubes = [];
-        const cube_positions = this.get_cube_positions(this.spacing);
+        this.cur_rotation = 0;
         this.explode_clock = new THREE.Clock(false);
+        this.axes = [[], [], []];
+        this.orbit = [];
+        this.axis_group = new THREE.Group();
+        this.orbit_group = new THREE.Group();
 
-        for (const pos of cube_positions) {
-            const cube_mesh = template_obj.clone();
-            cube_mesh.position.copy(pos);
-            this.cubes.push(cube_mesh);
-            this.add(cube_mesh);
-        }
-    }
-
-    clone() {
-        return new CubeAssembly(this.parent_scene, this.spacing_direction == 1, this.cubes[0], this.min_spacing, this.max_spacing);
-    }
-
-    get_cube_positions(spacing) {
-        const cube_positions = [];
         for (let axis = 0; axis < 3; axis++) {
-            for (let i = 0; i < 3; i++) {
-                if (axis == 0 || i != 1) {
-                    const pos = new THREE.Vector3();
-                    pos.setComponent(axis, spacing * (i - 1));
-                    cube_positions.push(pos);
+            for (let i = 0; i < (axis == 1 ? 3 : 2); i++) {
+                const obj = template_obj.clone()
+                this.axes[axis].push(obj);
+                if (axis == 1) {
+                    //this.add(cube_mesh);
+                    this.axis_group.add(obj);
+                } else {
+                    //this.add(cube_mesh);
+                    this.orbit_group.add(obj);
                 }
             }
         }
-        return cube_positions;
+        this.update_cube_positions(spacing, this.cur_rotation);
+        //this.parent_scene.scene.add(this.axis_group);
+        this.add(this.axis_group);
+        //
+        //this.axis_group.rotation.x = 2 * Math.asin(1 / Math.sqrt(3));
+        //this.orbit_group.rotation.x = -2 * Math.asin(1 / Math.sqrt(3));
+        this.axis_group.rotation.x = (this.depth == 1 ? 1 : 0) * Math.asin(1 / Math.sqrt(3));
+        this.orbit_group.rotation.x = (this.depth == 1 ? 1 : 0) * Math.asin(1 / Math.sqrt(3));
+        this.add(this.orbit_group);
+    }
+
+    clone() {
+        return new CubeAssembly(this.parent_scene, this.spacing_direction == 1, this.axes[0][0], this.min_spacing, this.max_spacing, this.depth);
+    }
+
+    update_cube_positions(spacing, rotation) {
+        for (let axis = 0; axis < 3; axis++) {
+            for (let i = 0; i < (axis == 1 ? 3 : 2); i++) {
+                const pos = new THREE.Vector3(0, 0, 0);
+                if (axis != 1) {
+                    pos.setComponent(axis, spacing * (2 * i - 1));
+                    this.axes[axis][i].position.copy(pos);
+                    if (this.depth == 1 && axis == 0) {
+                        const world_offset = new THREE.Vector3(0, 0, 100 *
+                            Math.sign(rotation / ROT_DIV - 0.5) * 
+                            -Math.sign(2 * i - 1));
+                        console.log(world_offset);
+                        const world_quat = new THREE.Quaternion();
+                        this.axes[axis][i].getWorldQuaternion(world_quat);
+                        world_quat.invert();
+                        world_offset.applyQuaternion(world_quat);
+                        this.axes[axis][i].position.add(world_offset);
+                    }
+                } else {
+                    pos.setComponent(axis, spacing * (i - 1));
+                    this.axes[axis][i].position.copy(pos);
+                    if (this.depth == 0) {
+                        //pos.setComponent(0, spacing * (i - 1));
+                    }
+                    //pos.setComponent(axis, spacing * (i - 1));
+                }
+            }
+        }
     }
 
     handle_beat(t, channel, recurse=false, start_depth=0, cur_depth=0) {
@@ -80,37 +102,57 @@ class CubeAssembly extends THREE.Group {
         if (cur_depth >= start_depth || !recurse) {
             this.spacing_direction *= -1;
             this.explode_clock.start();
+            console.log("reversing");
         }
         if (recurse) {
-            this.cubes.forEach((cube, i) => {
-                if (typeof cube.handle_beat === 'function') {
-                    cube.handle_beat(t, channel, recurse, start_depth, cur_depth + 1);
-                }
+            this.axes.forEach((cubes) => {
+                cubes.forEach((cube) => {
+                    if (typeof cube.handle_beat === 'function') {
+                        cube.handle_beat(t, channel, recurse, start_depth, cur_depth + 1);
+                    }
+                });
             });
         }
     }
 
     anim_frame(dt, beats_per_sec) {
+        this.cur_rotation = (this.cur_rotation + 2) % ROT_DIV;
+        if (this.depth == 1) {
+            this.axis_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
+            this.orbit_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
+            for (const axis of [0, 2]) {
+                this.axes[axis].forEach(cube => {
+                    //cube.rotation.y = 2 * Math.PI / 1024 * this.cur_rotation;
+                });
+            }
+        }
         let explode_frac = 1.0;
         if (this.explode_clock.running) {
             explode_frac = clamp(
                 this.explode_clock.getElapsedTime() / this.explode_movement_seconds,
                 0, 1);
         }
+        let spacing = 0;
         if (this.spacing_direction == 1) {
-            this.spacing = lerp_scalar(this.min_spacing, this.max_spacing, explode_frac);
+            spacing = lerp_scalar(this.min_spacing, this.max_spacing, explode_frac);
         } else {
-            this.spacing = lerp_scalar(this.max_spacing, this.min_spacing, explode_frac);
+            spacing = lerp_scalar(this.max_spacing, this.min_spacing, explode_frac);
         }
 
-        this.get_cube_positions(this.spacing).forEach((pos, i) => {
-            this.cubes[i].position.copy(pos);
-        });
+        this.update_cube_positions(spacing, this.cur_rotation);
 
-        this.cubes.forEach((cube, i) => {
-            if (typeof cube.anim_frame === 'function') {
-                cube.anim_frame(dt, beats_per_sec);
-            }
+        /*for (let axis = 0; axis < 3; axis++) {
+            this.get_cube_positions(axis, spacing, this.cur_rotation).forEach((pos, i) => {
+                this.axes[axis][i].position.copy(pos);
+            });
+        }*/
+
+        this.axes.forEach(cubes => {
+            cubes.forEach((cube, i) => {
+                if (typeof cube.anim_frame === 'function') {
+                    cube.anim_frame(dt, beats_per_sec);
+                }
+            });
         });
     }
 }
@@ -132,7 +174,6 @@ export class HexagonScene extends VisScene {
         this.scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
 
-        this.cur_rotation = 0;
 
         this.shader_loader = new ResourceLoader(['glsl/hex_shader.vert', 'glsl/hex_shader.frag']);
         Promise.all([this.shader_loader.load(), load_texture('img/romaO.png')]).then(
@@ -151,6 +192,7 @@ export class HexagonScene extends VisScene {
             });
             //material = new THREE.MeshBasicMaterial({ color: "red" });
             this.plane = this.create_plane(this.cam_orth, this.background_material);
+            this.plane.position.z = -900;
             this.scene.add(this.plane);
         });
 
@@ -162,18 +204,21 @@ export class HexagonScene extends VisScene {
         this.num_assemblies_per_side = 6;
 
         {
-            const cube_template = create_instanced_cube(Array(3).fill(2), "white");
-            const assembly = new CubeAssembly(this, false, cube_template);
-            const asm2 = new CubeAssembly(this, false, assembly, 0, this.assembly_spacing);
+            const cube_template = create_instanced_cube(Array(3).fill(2), "white", true, "black", 0.9);
+            const assembly = new CubeAssembly(this, false, cube_template, 1.0, 3.0, false, 1);
+            const asm2 = new CubeAssembly(this, false, assembly, 0, this.assembly_spacing, true, 0);
             this.assemblies.push(asm2);
             this.base_group.add(asm2);
         }
 
-        this.base_group.rotation.x = Math.asin(1 / Math.sqrt(3));     // isometric angle
-        this.base_group.rotation.y = Math.PI / 4;
+        //this.base_group.rotation.x = Math.asin(1 / Math.sqrt(3));
+        this.camera.rotation.y = Math.PI / 4;
 
         this.scene.add(this.base_group);
         this.camera = this.cam_orth;
+
+        //this.base_group.rotation.x = -Math.asin(1 / Math.sqrt(3));
+        this.rotation_dir = 1;
 
         this.elapsed_beats = 0.0;
     }
@@ -188,8 +233,7 @@ export class HexagonScene extends VisScene {
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        this.cur_rotation += 1;
-        this.base_group.rotation.y = this.cur_rotation * Math.PI / 1024;
+        //console.log(this.rotation_dir);
 
         for (const asm of this.assemblies) {
             //asm.rotation.y += 0.005;

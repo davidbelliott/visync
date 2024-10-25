@@ -352,7 +352,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     const int num_loops = 10;
     const float evolve_rate = 1.0 / 16.0;
     const float scroll_rate = 1.0 / 64.0;
-    const float scale = 2.0;
+    const float scale = 1.5;
 
     // Define the supersampling offsets for 4x supersampling
     vec2 pixelSize = 1.0 / resolution.xy / pixel_ratio;
@@ -375,7 +375,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         
         float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
         // Supersampling: sample the texture at 4 sub-pixel locations and average them
-        vec2 tex_coords = (st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset))) * scale;
+        vec2 tex_coords = (st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset))) / scale;
         tex_coords.y *= texture_aspect;
 
         vec4 tex_val1 = texture2D(tex, fract(tex_coords + offset1), 0.5);
@@ -389,7 +389,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         float color_t = color_noise * 2.0 - t * 2.0;
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor.a *= sin(time * 2. * PI);
-        float alpha = pow(float(i + 1) / float(num_loops), 1.6);
+        float alpha = pow(float(i + 1) / float(num_loops), 1.4);
         fragColor = tex_val.r * alpha * rainbow_color + (1.0 - tex_val.r * alpha) * fragColor;
     }
     fragColor = dither4x4(fragCoord.xy, fragColor);

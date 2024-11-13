@@ -62,7 +62,8 @@ const MSG_TYPE_CONTROL_CHANGE = 8;
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
-const EXTRA_LATENCY = 0.008;
+//const EXTRA_LATENCY = 0.120;
+const EXTRA_LATENCY = 0.120;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -117,8 +118,8 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const relay_url = `${window.location.hostname}/ws/`;
-    //const relay_url = '192.168.4.1/ws/';
+    //const relay_url = `${window.location.hostname}/ws/`;
+    const relay_url = '192.168.4.1/ws/';
     //const relay_url = '192.168.4.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
@@ -434,7 +435,7 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(2);
+        this.change_scene(13);
         this.change_scene(0, true);
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);

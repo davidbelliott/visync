@@ -266,7 +266,7 @@ export class SpectrumScene extends VisScene {
             this.target_rot_x = 0;
             this.rotating_y = false;
             this.start_noise_ampl = this.target_noise_ampl;
-            this.target_noise_ampl = 5.0;
+            this.target_noise_ampl = 1.0;
             this.doubletime = false;
             this.show_traces = false;
         } else if (new_state_idx == 1) {
@@ -274,7 +274,7 @@ export class SpectrumScene extends VisScene {
             this.target_rot_x = isom_angle;
             this.rotating_y = true;
             this.start_noise_ampl = this.target_noise_ampl;
-            this.target_noise_ampl = 1.0;
+            this.target_noise_ampl = 0.5;
             this.doubletime = false;
             this.show_traces = true;
         } else if (new_state_idx == 2) {

@@ -169,7 +169,7 @@ def strobe_off():
 NUM_BARS = 4
 fake_beat = [[] for i in range(0, NUM_BARS * 16)]
 for bar in range(0, NUM_BARS):
-    for i in [0, 8, 14]:
+    for i in [0, 10, 14]:
         fake_beat[16 * bar + i].append(1)
     for i in [8]:
         fake_beat[16 * bar + i].append(2)
@@ -374,15 +374,18 @@ async def main_loop_fake(bpm):
     state_advancing = True
     cur_advance_step = 1
     cur_advance_state = 0
+    last_changed_fg = True
+    cur_scenes = [1, 0] # fg, bg
     while True:
-        sync_msg = MsgSync(time.time(), sync_rate_hz, sync_idx)
+        sync_msg = MsgSync(0, sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
+        time_sent = time.time()
         new_beat_idx = sync_idx // 6
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx
             cur_beats = fake_beat[beat_idx % len(fake_beat)]
 
-            if new_beat_idx % 16 == 0 and random.random() < 0.5:
+            if new_beat_idx % 16 == 0:
                 # Advance or decrease state
                 adv_msg = MsgAdvanceSceneState(0, cur_advance_step)
                 websockets.broadcast(connected, adv_msg.to_json())
@@ -390,19 +393,27 @@ async def main_loop_fake(bpm):
                 if (cur_advance_state > 4 or cur_advance_state <= 0):
                     cur_advance_step *= -1
 
-            elif new_beat_idx % 64 == 0:
-                # Change foreground or background scene
-                bg = (random.random() < 0.5)
+            if new_beat_idx % 128 == 0:
+                # Change scene
                 new_scene = (int(random.random() * 20) + 1)
-                if bg and random.random() < 0.1:
-                    new_scene = 0   # blank background
-                chscene_msg = MsgGotoScene(0, new_scene, bg)
-                websockets.broadcast(connected, chscene_msg.to_json())
+                if cur_scenes[0] == 0:
+                    cur_scenes[0] = new_scene
+                elif cur_scenes[1] == 0:
+                    cur_scenes[0] = new_scene
+                else:
+                    # TODO: change state here and propagate to frontend!
+                    bg = last_changed_fg
+                    new_scene = 0
+                ch_scene_msg = MsgGotoScene(0, new_scene, bg)
+                websockets.broadcast(connected, ch_scene_msg.to_json())
+                last_changed_fg = not bg
+                cur_scenes[1 if bg else 0] = new_scene
 
             for beat in cur_beats:
                 beat_msg = MsgBeat(time.time(), beat)
                 websockets.broadcast(connected, beat_msg.to_json())
-        await asyncio.sleep(1 / sync_rate_hz)
+        time_elapsed_this_iter = time.time() - time_sent
+        await asyncio.sleep(1 / sync_rate_hz - time_elapsed_this_iter)
         sync_idx += 1
 
 

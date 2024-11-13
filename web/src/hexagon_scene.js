@@ -102,7 +102,6 @@ class CubeAssembly extends THREE.Group {
         if (cur_depth >= start_depth || !recurse) {
             this.spacing_direction *= -1;
             this.explode_clock.start();
-            console.log("reversing");
         }
         if (recurse) {
             this.axes.forEach((cubes) => {

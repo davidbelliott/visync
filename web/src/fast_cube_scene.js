@@ -33,6 +33,7 @@ class TunnelMovementBackground {
         this.wave_ampl = 2;
         this.start_square_offset = 0;
         this.start_rot = 0;
+        this.cur_rot = this.start_rot;
         this.end_rot = 0;
         for (let i = 0; i < this.num_squares; i++) {
                 const sq = make_wireframe_rectangle(2.0, 2.0, "white");
@@ -69,8 +70,9 @@ class TunnelMovementBackground {
         //this.camera.position.setY(Math.cos(pos_frac * 2 * Math.PI) * this.wave_ampl);
         const seconds_per_lerp = 0.1;
         const frac = clamp(this.sync_clock.getElapsedTime() / seconds_per_lerp, 0, 1);
-        this.squares_group.rotation.z = Math.PI / 8 * (this.start_rot +
+        this.cur_rot = (this.start_rot +
             lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
+        this.squares_group.rotation.z = Math.PI / 8 * this.cur_rot;
 
     }
 
@@ -221,7 +223,7 @@ export class FastCubeScene extends VisScene {
                 this.camera.top - this.camera.bottom);
             this.plane = new THREE.Mesh(geometry, this.vbo_material);
             this.plane.position.z = -100;
-            //this.scene.add(this.plane);
+            this.scene.add(this.plane);
         });
 
         this.scene.add(this.base_group);
@@ -354,13 +356,16 @@ export class FastCubeScene extends VisScene {
         if (this.vbo_material == null) {
             return;
         }
-        /*const renderTarget = renderer.getRenderTarget();
+        const renderTarget = renderer.getRenderTarget();
         renderer.setRenderTarget(this.buffer);
-        renderer.clear();
+        //renderer.clear();
         renderer.render(this.bg.scene, this.bg.camera);
         this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
-        renderer.setRenderTarget(renderTarget);*/
+        renderer.setRenderTarget(renderTarget);
         renderer.render(this.scene, this.camera);
+        renderer.setRenderTarget(this.buffer);
+        renderer.clear();
+        renderer.setRenderTarget(renderTarget);
         //renderer.render(this.scene, this.camera);
     }
 

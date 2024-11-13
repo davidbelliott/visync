@@ -247,7 +247,6 @@ export class YellowRobotScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
-        console.log("robot sync");
         this.beat_clock.start();
         if (beat % 2 == 0) {
             // half-note beat

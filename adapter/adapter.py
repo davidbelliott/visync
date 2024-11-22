@@ -11,6 +11,7 @@ import random
 from rtmidi.midiutil import open_midiinput
 from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE, PITCH_BEND
 from rtmidi import midiconstants
+from blink import led_update_loop
 import sys
 
 USE_STROBE = False
@@ -49,6 +50,10 @@ class ClockTracker:
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
+                if self.sync:
+                    self.cur_sync_idx += round(elapsed * self.sync_rate_hz)
+                else:
+                    self.cur_sync_idx += 1
 
         self._last_clock = now
 
@@ -353,7 +358,7 @@ async def main_loop_rtmidi(rtmidi_device):
         del midiin
 
 
-async def main_loop_serial(serial_device):
+async def main_loop_serial(serial_device, msg_queue):
     reader, _ = await serial_asyncio.open_serial_connection(url=serial_device, baudrate=31250)
     handler = SerialMidiHandler()
     while True:
@@ -365,6 +370,7 @@ async def main_loop_serial(serial_device):
 
         if ws_msg:
             websockets.broadcast(connected, ws_msg.to_json())
+            msg_queue.put_nowait(ws_msg)
 
 
 async def main_loop_fake(bpm):
@@ -432,19 +438,22 @@ async def main():
     # Restart-on-error loop (only exits on KeyboardInterrupt)
     while True:
         try:
-            async with websockets.serve(handler, "0.0.0.0", WS_PORT):
+            async with websockets.serve(handler, "0.0.0.0", WS_PORT), \
+                    asyncio.TaskGroup() as tg:
+                queue = asyncio.Queue()
                 if args.rtmidi:
-                    await main_loop_rtmidi(args.rtmidi)
+                    t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
                 elif args.device:
-                    await main_loop_serial(args.device)
+                    t1 = tg.create_task(main_loop_serial(args.device, queue))
                 else:
-                    await main_loop_fake(args.fake)
+                    t1 = tg.create_task(main_loop_fake(args.fake))
+                t2 = tg.create_task(led_update_loop(queue))
         except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:
             print(f'Error: {e}')
             print('Connection failed, retrying...')
-            time.sleep(1)
+            await asyncio.sleep(1)
             continue
 
 

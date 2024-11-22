@@ -63,7 +63,7 @@ const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
 //const EXTRA_LATENCY = 0.120;
-const EXTRA_LATENCY = 0.120;
+const EXTRA_LATENCY = 0.050;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -703,6 +703,10 @@ class GraphicsContext {
                 scene.handle_sync_raw(sync_rate_hz, beat + 1);
             });
         }, delay * 1000);
+
+        /*this.scenes.forEach((scene) => {
+            scene.handle_sync_raw(sync_rate_hz, beat);
+        });*/
     }
 
     handle_beat(latency, channel) {

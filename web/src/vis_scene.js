@@ -78,9 +78,10 @@ export class VisScene {
         }
 
         this.bpm = 60 * sync_rate_hz / this.cur_divisor;
+        console.log(beat);
 
         if (beat % this.cur_divisor == 0) {
-            //console.log(this.bpm)
+            console.log(this.bpm)
             this.handle_sync(0, this.bpm,
                 Math.floor(beat / this.cur_divisor));
         }

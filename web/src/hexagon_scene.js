@@ -76,7 +76,6 @@ class CubeAssembly extends THREE.Group {
                         const world_offset = new THREE.Vector3(0, 0, 100 *
                             Math.sign(rotation / ROT_DIV - 0.5) * 
                             -Math.sign(2 * i - 1));
-                        console.log(world_offset);
                         const world_quat = new THREE.Quaternion();
                         this.axes[axis][i].getWorldQuaternion(world_quat);
                         world_quat.invert();
@@ -232,7 +231,6 @@ export class HexagonScene extends VisScene {
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        //console.log(this.rotation_dir);
 
         for (const asm of this.assemblies) {
             //asm.rotation.y += 0.005;

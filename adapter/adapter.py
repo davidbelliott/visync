@@ -39,7 +39,6 @@ class ClockTracker:
     def ping(self):
         now = time.time()
         elapsed = 0
-        self.cur_sync_idx += 1
 
         if self._last_clock != None:
             elapsed = now - self._last_clock
@@ -287,6 +286,7 @@ class SerialMidiHandler:
                 self.bytes = []
             elif b == midiconstants.SONG_START:
                 self.playing = True
+                print("Reset sync")
                 clock_tracker.reset_sync()
                 if clock_tracker.sync:
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)

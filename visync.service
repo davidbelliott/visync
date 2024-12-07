@@ -6,8 +6,8 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-User=david
-ExecStart=/home/david/visync-dist/start-server
+User=root
+ExecStart=/home/david/visync-dist/adapter/start-server
 
 [Install]
 WantedBy=multi-user.target

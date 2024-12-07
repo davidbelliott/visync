@@ -9,7 +9,6 @@ import pathlib
 import websockets
 import random
 from rtmidi.midiutil import open_midiinput
-from rtmidi.midiconstants import NOTE_ON, NOTE_OFF, CONTROL_CHANGE, PITCH_BEND
 from rtmidi import midiconstants
 from blink import led_update_loop
 import sys
@@ -30,7 +29,7 @@ if USE_STROBE:
 class ClockTracker:
     def __init__(self):
         self.sync_rate_hz = 120 / 60 * 24
-        self.cur_sync_idx = 0
+        self.cur_sync_idx = -1      # Starts at -1 so first beat (ping, then send) will be beat 0
         self._last_clock = None
         self._samples = deque()
         self.sync = False
@@ -43,9 +42,7 @@ class ClockTracker:
         if self._last_clock != None:
             elapsed = now - self._last_clock
             if elapsed > BEAT_RESET_TIMEOUT_S:
-                self.cur_sync_idx = 0
-                self._samples.clear()
-                self.sync = False
+                self.reset_sync()
             else:
                 if elapsed != 0:
                     self._samples.append(elapsed)
@@ -69,7 +66,10 @@ class ClockTracker:
 
 
     def reset_sync(self):
-        self.cur_sync_idx = 0
+        self.cur_sync_idx = -1
+        self._last_clock = None
+        self._samples.clear()
+        self.sync = False
     
 
 
@@ -276,22 +276,26 @@ class SerialMidiHandler:
     def handle_midi_byte(self, b):
         ws_msg = None
         if len(self.bytes) == 0:
+            # First byte
             if b == midiconstants.TIMING_CLOCK:
+                # Single-byte message
                 clock_tracker.ping()
                 if clock_tracker.sync and self.playing:
+                    print(f'Sync idx: {clock_tracker.cur_sync_idx}')
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
+                # Single-byte message
                 self.playing = False
                 self.bytes = []
             elif b == midiconstants.SONG_START:
+                # Single-byte message
                 self.playing = True
                 print("Reset sync")
                 clock_tracker.reset_sync()
-                if clock_tracker.sync:
-                    ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 self.bytes = []
             elif b == midiconstants.SONG_CONTINUE:
+                # Single-byte message
                 self.playing = True
                 self.bytes = []
             elif b & 0xF0 == midiconstants.NOTE_ON:
@@ -307,6 +311,7 @@ class SerialMidiHandler:
             else:
                 print(f'unknown status byte: {b}')
         else:
+            # This is not the first byte
             if self.bytes[0] & 0xF0 == midiconstants.NOTE_ON:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
@@ -321,7 +326,7 @@ class SerialMidiHandler:
                     note_number, note_vel = self.bytes[1:]
                     ws_msg = None
                     self.bytes = []
-            elif self.bytes[0] & 0xF0 == CONTROL_CHANGE:
+            elif self.bytes[0] & 0xF0 == midiconstants.CONTROL_CHANGE:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
                     print(f"control change: {self.bytes[1:]}")
@@ -330,13 +335,20 @@ class SerialMidiHandler:
                     ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
                     #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
                     self.bytes = []
-            elif self.bytes[0] & 0xF0 == PITCH_BEND:
+            elif self.bytes[0] & 0xF0 == midiconstants.PITCH_BEND:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
                     value_lo, value_hi = self.bytes[1:]
                     value = (value_hi << 7) | value_lo
                     ws_msg = MsgPitchBend(self.last_transmit_latency, value)
                     self.bytes = []
+            elif self.bytes[0] & 0xF0 == midiconstants.PROGRAM_CHANGE:
+                self.bytes.append(b)
+                channel = (self.bytes[0] & 0xF) + 1
+                value = self.bytes[1]
+                # Currently this message isn't used except to reset sync idx
+                clock_tracker.cur_sync_idx = -1
+                self.bytes = []
             else:
                 self.bytes = []
 
@@ -437,24 +449,24 @@ async def main():
 
     # Restart-on-error loop (only exits on KeyboardInterrupt)
     while True:
-        try:
-            async with websockets.serve(handler, "0.0.0.0", WS_PORT), \
-                    asyncio.TaskGroup() as tg:
-                queue = asyncio.Queue()
-                if args.rtmidi:
-                    t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
-                elif args.device:
-                    t1 = tg.create_task(main_loop_serial(args.device, queue))
-                else:
-                    t1 = tg.create_task(main_loop_fake(args.fake))
-                t2 = tg.create_task(led_update_loop(queue))
-        except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
+        #try:
+        async with websockets.serve(handler, "0.0.0.0", WS_PORT), \
+                asyncio.TaskGroup() as tg:
+            queue = asyncio.Queue()
+            if args.rtmidi:
+                t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
+            elif args.device:
+                t1 = tg.create_task(main_loop_serial(args.device, queue))
+            else:
+                t1 = tg.create_task(main_loop_fake(args.fake))
+            t2 = tg.create_task(led_update_loop(queue))
+        '''except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:
             print(f'Error: {e}')
             print('Connection failed, retrying...')
             await asyncio.sleep(1)
-            continue
+            continue'''
 
 
 if __name__ == "__main__":

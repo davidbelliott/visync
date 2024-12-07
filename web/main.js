@@ -119,7 +119,7 @@ function connect() {
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     //const relay_url = `${window.location.hostname}/ws/`;
-    const relay_url = '192.168.4.1/ws/';
+    const relay_url = 'raspberrypi/ws/';
     //const relay_url = '192.168.4.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {

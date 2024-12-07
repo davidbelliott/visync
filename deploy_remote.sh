@@ -3,7 +3,7 @@
 # Build + deploy the current working version of the site to nginx's html
 # directory
 
-REMOTE="pi"
+REMOTE="raspberrypi"
 REMOTE_DIR="visync-dist"
 
 cd "$(dirname "$0")"

@@ -31,6 +31,7 @@ import { SurfacesScene } from './src/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
 import { HelixScene } from './src/helix_scene.js';
 import { TriangularPrismScene } from './src/triangular_prism_scene.js';
+import { CelticKnotScene } from './src/celtic_knot_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -62,8 +63,8 @@ const MSG_TYPE_CONTROL_CHANGE = 8;
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
-//const EXTRA_LATENCY = 0.120;
-const EXTRA_LATENCY = 0.000;
+//const EXTRA_LATENCY = 0.220;
+const EXTRA_LATENCY = 0.020;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -119,8 +120,8 @@ function connect() {
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     //const relay_url = `${window.location.hostname}/ws/`;
-    const relay_url = 'raspberrypi/ws/';
-    //const relay_url = '192.168.4.1/ws/';
+    //const relay_url = 'raspberrypi/ws/';
+    const relay_url = '192.168.4.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -430,13 +431,13 @@ class GraphicsContext {
             [17, new TracersScene()],
             [18, new HelixScene()],
             [19, new TriangularPrismScene()],
+            //[20, new CelticKnotScene()],
             //[20, new SlideScene(["img/hitem.png"])],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(13);
-        this.change_scene(0, true);
+        this.change_scene(9);
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);
 
@@ -622,7 +623,7 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-	this.renderer.setPixelRatio(window.devicePixelRatio);
+	this.renderer.setPixelRatio(window.devicePixelRatio / 1);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);
@@ -672,7 +673,7 @@ class GraphicsContext {
             } else {
                 this.set_tracer_params(1, 1, 1);
             }
-        } else if (e.code == "Tab") {
+        } else if (e.code == "Space") {
             env.immediate_mode = !env.immediate_mode;
             if (this.debug_overlay.style.visibility == 'hidden') {
                 this.debug_overlay.style.visibility = 'visible';

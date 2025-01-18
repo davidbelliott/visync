@@ -361,19 +361,29 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     vec2 offset3 = vec2(-0.25, 0.25) * pixelSize;
     vec2 offset4 = vec2(0.25, 0.25) * pixelSize;
 
+    float offset_complexity = 3.5;
+    float color_complexity = 1.5;
+    float position_noise_magnitude = 0.0;
+
+    float color_noise_base = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, time * evolve_rate * PI / 2.0));
+    float y_noise_base = position_noise_magnitude * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, time * evolve_rate * PI));
+    float x_noise_base = position_noise_magnitude * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, time * evolve_rate * PI / 2.0));
+
 
     for (int i = 0; i < num_loops; i++) {
-        float time_offset = 0.015 * float(i);
+        float time_offset = 0.025 * float(i);
         float t = time * evolve_rate + time_offset;
 
-        float offset_complexity = 3.5;
-        float color_complexity = 1.5;
-        float y_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI));
-        float x_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI / 2.0));
+        //float y_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI));
+        //float x_noise = 0.05 * simplex3d(vec3(offset_complexity * to_center.x, offset_complexity * to_center.y, t * PI / 2.0));
+
+        float y_noise = y_noise_base + 0.05 * sin(offset_complexity * (to_center.x + to_center.y) + PI * t);
+        float x_noise = x_noise_base + 0.05 * cos(offset_complexity * (to_center.x + to_center.y) + PI * t);
 
         float width = 1.0;
         
-        float color_noise = simplex3d(vec3(color_complexity * to_center.x, color_complexity * to_center.y, t * PI / 2.0));
+        float color_noise = color_noise_base + 0.05 * sin(PI * time_offset);
+        //float color_noise = 0.0;
         // Supersampling: sample the texture at 4 sub-pixel locations and average them
         vec2 tex_coords = (st + vec2(x_noise, y_noise + scroll_rate * (scroll_time + time_offset))) / scale;
         tex_coords.y *= texture_aspect;
@@ -385,14 +395,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
 
         // Average the sampled values
         vec4 tex_val = (tex_val1 + tex_val2 + tex_val3 + tex_val4) / 4.0;
-        //vec4 tex_val = texture2D(tex, fract(tex_coords * scale), 0.5);
+        //vec4 tex_val = texture2D(tex, fract(tex_coords), 0.5);
         float color_t = color_noise * 2.0 - t * 2.0;
         vec4 rainbow_color = vec4(palette(color_t), 1.0);
         //fragColor.a *= sin(time * 2. * PI);
         float alpha = pow(float(i + 1) / float(num_loops), 1.4);
         fragColor = tex_val.r * alpha * rainbow_color + (1.0 - tex_val.r * alpha) * fragColor;
     }
-    fragColor = dither4x4(fragCoord.xy, fragColor);
+    fragColor = dither4x4(fragCoord.xy / 2.0, fragColor);
 }
 
 void main() {

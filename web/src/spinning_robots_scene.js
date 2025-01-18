@@ -94,6 +94,8 @@ class Robot extends THREE.Object3D {
             this.spinners[i].rotation.x += Math.PI * dt * beats_per_sec;
             this.spinners[i].position.y = cur_throw_y;
             this.spinners[i].material.color.setHSL(Math.sin(this.spinners[i].rotation.x / 32), 1, 0.5);
+            this.spinners[i].children[0].material.color.setHSL(Math.sin(this.spinners[i].rotation.x / 32), 1, 0.5);
+            this.spinners[i].children[0].material.opacity = 0.0;
         }
 
         for (let side = 0; side < 2; side++) {
@@ -189,7 +191,9 @@ export class SpinningRobotsScene extends VisScene {
                     color: "black",
                     polygonOffset: true,
                     polygonOffsetFactor: 1, // positive value pushes polygon further away
-                    polygonOffsetUnits: 1
+                    polygonOffsetUnits: 1,
+                    transparent: true,
+                    opacity: 0.5
                 });
                 const edges = new THREE.EdgesGeometry(geometry, 30);
                 const mesh = new THREE.LineSegments(edges, wireframe_mat);

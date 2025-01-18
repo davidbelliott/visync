@@ -50,6 +50,7 @@ vec4 dither4x4(vec2 position, vec4 color) {
 }
 
 void main() {
+  gl_FragCoord /= 2.0;
   gl_FragColor = dither4x4(
       gl_FragCoord.xy
     , texture2D(uTexture, vUv)

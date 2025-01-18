@@ -281,7 +281,7 @@ class SerialMidiHandler:
                 # Single-byte message
                 clock_tracker.ping()
                 if clock_tracker.sync and self.playing:
-                    print(f'Sync idx: {clock_tracker.cur_sync_idx}')
+                    #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:

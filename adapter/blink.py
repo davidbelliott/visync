@@ -159,7 +159,10 @@ async def wait_then_update_color(strip, new_color, delay):
     await asyncio.sleep(delay)
     strip.cur_brush_color = new_color
     strip.update_step()
-    led_queue.put({'color': new_color})
+    try:
+        led_queue.put({'color': new_color}, block=False)
+    except Queue.Full:
+        print('full queue')
     print('updating color')
 
 async def led_update_loop(queue):

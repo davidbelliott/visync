@@ -3,7 +3,7 @@
 # Build + deploy the current working version of the site to nginx's html
 # directory
 
-REMOTE="raspberrypi"
+REMOTE="192.168.4.1"
 REMOTE_DIR="visync-dist"
 
 cd "$(dirname "$0")"
@@ -25,4 +25,5 @@ EOF
 
 ssh $REMOTE <<EOF
     sudo cp -r $REMOTE_DIR/bin /usr/share/nginx/html/life
+    sudo systemctl restart visync
 EOF

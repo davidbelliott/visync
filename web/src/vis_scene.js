@@ -55,7 +55,9 @@ export class VisScene {
         this.sync_rate_hz = sync_rate_hz;
         let this_sync_divisor = this.cur_divisor;
 
-        while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
+        this.cur_divisor = 24;
+
+        /*while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
             this_sync_divisor *= 2;
         }
         while (60 * sync_rate_hz / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
@@ -75,10 +77,9 @@ export class VisScene {
                 this.target_divisor = this_sync_divisor;
                 this.div_change_debounce = this.div_change_debounce_cnt;
             }
-        }
+        }*/
 
         this.bpm = 60 * sync_rate_hz / this.cur_divisor;
-        console.log(beat);
 
         if (beat % this.cur_divisor == 0) {
             console.log(this.bpm)

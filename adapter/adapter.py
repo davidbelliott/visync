@@ -14,8 +14,13 @@ from blink import led_update_loop
 import sys
 
 USE_STROBE = False
+USE_LEDS = True
 BEAT_RESET_TIMEOUT_S = 1
 WS_PORT = 8765
+NUM_BPM_SAMPLES = 24
+
+LOG_MSGS = False
+LOG_SYNC = False
 
 dmx = None
 strobe = None
@@ -53,14 +58,12 @@ class ClockTracker:
 
         self._last_clock = now
 
-        while len(self._samples) > 4:
+        while len(self._samples) > NUM_BPM_SAMPLES:
             self._samples.popleft()
 
-        if len(self._samples) >= 4:
-            rates = [1 / x for x in self._samples if x != 0]
-            if (len(rates) > 0):
-                self.sync_rate_hz = sum(rates) / len(rates)
-                self.sync = True
+        if len(self._samples) >= NUM_BPM_SAMPLES and sum(self._samples) > 0:
+            self.sync_rate_hz = len(self._samples) / sum(self._samples)
+            self.sync = True
 
         return elapsed / 60 * self.sync_rate_hz
 
@@ -191,6 +194,8 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         clock_tracker.ping()
         if clock_tracker.sync:
             ws_msg = MsgSync(last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+            if LOG_SYNC:
+                print(f'sync_rate_hz: {clock_tracker.sync_rate_hz}')
     elif channel == 15:
         # This channel is used for lighting control
         if USE_STROBE:
@@ -240,7 +245,7 @@ class RtMidiInputHandler:
             #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
             ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
 
-        if ws_msg != None:
+        if ws_msg != None and LOG_MSGS:
             print(ws_msg)
 
         return ws_msg
@@ -283,6 +288,8 @@ class SerialMidiHandler:
                 if clock_tracker.sync and self.playing:
                     #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                    if LOG_SYNC:
+                        print(f'sync_rate_hz: {clock_tracker.sync_rate_hz}')
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
                 # Single-byte message
@@ -291,7 +298,6 @@ class SerialMidiHandler:
             elif b == midiconstants.SONG_START:
                 # Single-byte message
                 self.playing = True
-                print("Reset sync")
                 clock_tracker.reset_sync()
                 self.bytes = []
             elif b == midiconstants.SONG_CONTINUE:
@@ -377,7 +383,7 @@ async def main_loop_serial(serial_device, msg_queue):
         byte = int.from_bytes(await reader.read(1))
         ws_msg = handler.handle_midi_byte(byte)
 
-        if ws_msg and ws_msg.msg_type != Msg.Type.SYNC:
+        if ws_msg and ws_msg.msg_type != Msg.Type.SYNC and LOG_MSGS:
             print(ws_msg)
 
         if ws_msg:
@@ -459,7 +465,9 @@ async def main():
                 t1 = tg.create_task(main_loop_serial(args.device, queue))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake))
-            t2 = tg.create_task(led_update_loop(queue))
+
+            if USE_LEDS:
+                t2 = tg.create_task(led_update_loop(queue))
         '''except (KeyboardInterrupt, asyncio.exceptions.CancelledError):
             break
         except Exception as e:

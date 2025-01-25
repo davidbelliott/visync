@@ -81,7 +81,7 @@ class Signal {
 
 export class SpectrumScene extends VisScene {
     constructor() {
-        super(3);
+        super(3, 200);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

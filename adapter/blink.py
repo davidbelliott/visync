@@ -24,12 +24,12 @@ LED_PIN        = 18      # GPIO pin connected to the pixels (18 uses PWM!).
 #LED_PIN        = 10      # GPIO pin connected to the pixels (10 uses SPI /dev/spidev0.0).
 LED_FREQ_HZ    = 800000  # LED signal frequency in hertz (usually 800khz)
 LED_DMA        = 10      # DMA channel to use for generating a signal (try 10)
-LED_BRIGHTNESS = 0.10
+LED_BRIGHTNESS = 0.20
 LED_INVERT     = False   # True to invert the signal (when using NPN transistor level shift)
 LED_CHANNEL    = 0       # set to '1' for GPIOs 13, 19, 41, 45 or 53
-STRIP_FRAMERATE = 30
+STRIP_FRAMERATE = 60
 
-EXTRA_LATENCY = 1.0 / STRIP_FRAMERATE
+EXTRA_LATENCY = 1.0 / STRIP_FRAMERATE + 0.010
 
 
 # Define functions which animate LEDs in various ways.
@@ -107,14 +107,13 @@ class LedStrip(neopixel.NeoPixel):
         RAINBOW = enum.auto()
         RAINBOW_CYCLE = enum.auto()
         ALL_IN = enum.auto()
-        STROBE = enum.auto()
         MAX = enum.auto()
 
     def __init__(self):
         super().__init__(n=LED_COUNT, pin=LED_PIN, brightness=LED_BRIGHTNESS, auto_write=False)
-        self.mode = LedStrip.Mode.STROBE
+        self.mode = LedStrip.Mode.WIPE
         self.num_leds = 600
-        self.cur_brush_color = (0, 0, 255)
+        self.cur_brush_color = Color(0, 0, 255)
         self.cur_wheel_pos = 0
         self.cur_sync_rate_hz = 120 / 60 * 24
         self.background_tasks = set()
@@ -124,7 +123,6 @@ class LedStrip(neopixel.NeoPixel):
 
     def update_step(self):
         if self.mode == LedStrip.Mode.WIPE:
-            print('wipe')
             step = 4
             num_steps = (self.num_leds + step - 1) // step
             for i in range(num_steps - 1, 0, -1):
@@ -145,11 +143,6 @@ class LedStrip(neopixel.NeoPixel):
         elif self.mode == LedStrip.Mode.RAINBOW_CYCLE:
             for i in range(0, self.num_leds):
                 self[i] = wheel(int(i * 256 / self.num_leds + self.update_n) & 0xFF)
-        elif self.mode == LedStrip.Mode.STROBE:
-            for i in range(0, self.num_leds):
-                color = wheel(int(i * 256 / self.num_leds + self.update_n) & 0xFF)
-                alpha = math.exp(-0.25 * (self.updates_since_beat))
-                self[i] = Color(int(alpha * color.r), int(alpha * color.g), int(alpha * color.b))
 
         self.update_n += 1
         self.updates_since_beat += 1
@@ -173,7 +166,6 @@ class LedStrip(neopixel.NeoPixel):
             task.add_done_callback(self.background_tasks.discard)
 
         elif msg.msg_type == Msg.Type.SYNC:
-            print('sync')
             self.cur_sync_rate_hz = msg.sync_rate_hz
 
         elif msg.msg_type == Msg.Type.PROGRAM_CHANGE:
@@ -200,35 +192,8 @@ async def led_handle_msgs(queue):
     background_tasks = set()
     try:
         while True:
-            '''print ('Color wipe animations.')
-            colorWipe(strip, Color(255, 0, 0), 0)  # Red wipe
-            colorWipe(strip, Color(0, 255, 0), 0)  # Blue wipe
-            colorWipe(strip, Color(0, 0, 255), 0)  # Green wipe
-            print ('Theater chase animations.')
-            theaterChase(strip, Color(127, 127, 127), 50)  # White theater chase
-            theaterChase(strip, Color(127,   0,   0), 50)  # Red theater chase
-            theaterChase(strip, Color(  0,   0, 127), 50)  # Blue theater chase
-            print ('Rainbow animations.')
-            rainbow(strip)
-            rainbowCycle(strip)
-            theaterChaseRainbow(strip, 50)'''
             msg = await queue.get()
             strip.update(msg)
-            '''if msg.msg_type == Msg.Type.BEAT and msg.channel == 1:
-                strip.cur_wheel_pos = (strip.cur_wheel_pos + 40) % 256
-                #delay = 1.0 / cur_sync_rate_hz * 24 / 2 - EXTRA_LATENCY
-                delay = 1.0
-                task = asyncio.create_task(wait_then_update_color(strip, wheel(strip.cur_wheel_pos), delay))
-                background_tasks.add(task)
-                task.add_done_callback(background_tasks.discard)
-
-            elif msg.msg_type == Msg.Type.SYNC:
-                cur_sync_rate_hz = msg.sync_rate_hz'''
-
-            '''strip.update_step()
-            strip.show()
-            wait_ms = 3
-            await asyncio.sleep(wait_ms/1000.0)'''
     finally:
         strip.hide()
 

@@ -18,10 +18,11 @@ USE_STROBE = False
 USE_LEDS = True
 BEAT_RESET_TIMEOUT_S = 1
 WS_PORT = 8765
-NUM_BPM_SAMPLES = 24
+MIN_BPM_SAMPLES = 4 * 24
+NUM_BPM_SAMPLES = 16 * 24
 
 LOG_MSGS = False
-LOG_SYNC = False
+LOG_SYNC = True
 
 dmx = None
 strobe = None
@@ -36,7 +37,7 @@ class ClockTracker:
     def __init__(self):
         self.sync_rate_hz = 120 / 60 * 24
         self.cur_sync_idx = -1      # Starts at -1 so first beat (ping, then send) will be beat 0
-        self._last_clock = None
+        self._last_clock_est = None
         self._samples = deque()
         self.sync = False
 
@@ -45,28 +46,31 @@ class ClockTracker:
         now = time.time()
         elapsed = 0
 
-        if self._last_clock != None:
-            elapsed = now - self._last_clock
+
+
+
+        if self._last_clock_est != None:
+            elapsed = now - self._last_clock_est
             if elapsed > BEAT_RESET_TIMEOUT_S:
                 self.reset_sync()
-            else:
-                if elapsed != 0:
-                    self._samples.append(elapsed)
-                if self.sync:
-                    self.cur_sync_idx += round(elapsed * self.sync_rate_hz)
-                else:
-                    self.cur_sync_idx += 1
 
-        self._last_clock = now
+        self._last_clock_est = now
+
+        self._samples.append(now)
+
+        if self.sync:
+            est_syncs_elapsed = round(elapsed * self.sync_rate_hz)
+            #print(f'est syncs elapsed: {est_syncs_elapsed}')
+
+        self.cur_sync_idx += 1
 
         while len(self._samples) > NUM_BPM_SAMPLES:
             self._samples.popleft()
 
-        if len(self._samples) >= NUM_BPM_SAMPLES and sum(self._samples) > 0:
-            self.sync_rate_hz = len(self._samples) / sum(self._samples)
+        if len(self._samples) >= MIN_BPM_SAMPLES and sum(self._samples) > 0:
+            self.sync_rate_hz = len(self._samples) / (self._samples[-1] - self._samples[0])
             self.sync = True
 
-        return elapsed / 60 * self.sync_rate_hz
 
 
     def reset_sync(self):
@@ -125,7 +129,8 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         if clock_tracker.sync:
             ws_msg = MsgSync(last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
             if LOG_SYNC:
-                print(f'sync_rate_hz: {clock_tracker.sync_rate_hz}')
+                print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                print(f'beat: {clock_tracker.cur_sync_idx // 24}')
     elif channel == 15:
         # This channel is used for lighting control
         if USE_STROBE:
@@ -219,7 +224,8 @@ class SerialMidiHandler:
                     #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
                     ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                     if LOG_SYNC:
-                        print(f'sync_rate_hz: {clock_tracker.sync_rate_hz}')
+                        print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                        print(f'beat: {clock_tracker.cur_sync_idx // 24}')
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
                 # Single-byte message

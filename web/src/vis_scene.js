@@ -30,6 +30,7 @@ export class VisScene {
         this.cur_state_idx = 0;
         this.num_states = num_states;
         this.active = false;
+        this.prev_sync_idx = 0;
     }
 
     activate() {
@@ -51,13 +52,13 @@ export class VisScene {
         }
     }
 
-    handle_sync_raw(sync_rate_hz, beat) {
+    handle_sync_raw(sync_rate_hz, sync_idx) {
         this.sync_rate_hz = sync_rate_hz;
         let this_sync_divisor = this.cur_divisor;
 
         this.cur_divisor = 24;
 
-        /*while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
+        while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
             this_sync_divisor *= 2;
         }
         while (60 * sync_rate_hz / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
@@ -77,14 +78,15 @@ export class VisScene {
                 this.target_divisor = this_sync_divisor;
                 this.div_change_debounce = this.div_change_debounce_cnt;
             }
-        }*/
+        }
 
         this.bpm = 60 * sync_rate_hz / this.cur_divisor;
 
-        if (beat % this.cur_divisor == 0) {
-            console.log(this.bpm)
-            this.handle_sync(0, this.bpm,
-                Math.floor(beat / this.cur_divisor));
+        const cur_beat = Math.floor(sync_idx / this.cur_divisor);
+        if (cur_beat != this.prev_beat) {
+            console.log(`beat: ${cur_beat}`);
+            this.handle_sync(0, this.bpm, cur_beat);
+            this.prev_beat = cur_beat;
         }
     }
 

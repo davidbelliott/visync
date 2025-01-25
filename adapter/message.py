@@ -16,6 +16,7 @@ class Msg:
         ACK = 6
         PITCH_BEND = 7
         CONTROL_CHANGE = 8
+        PROGRAM_CHANGE = 8
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -54,6 +55,13 @@ class MsgControlChange(Msg):
     def __init__(self, last_transmit_latency, wheel_idx, value):
         super().__init__(Msg.Type.CONTROL_CHANGE, last_transmit_latency)
         self.wheel_idx = wheel_idx
+        self.value = value
+
+
+class MsgProgramChange(Msg):
+    def __init__(self, last_transmit_latency, channel, value):
+        super().__init__(Msg.Type.PROGRAM_CHANGE, last_transmit_latency)
+        self.channel = channel
         self.value = value
 
 

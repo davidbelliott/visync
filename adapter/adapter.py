@@ -22,7 +22,7 @@ MIN_BPM_SAMPLES = 4 * 24
 NUM_BPM_SAMPLES = 16 * 24
 
 LOG_MSGS = False
-LOG_SYNC = True
+LOG_SYNC = False
 
 dmx = None
 strobe = None

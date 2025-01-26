@@ -66,7 +66,7 @@ class HelixCurve extends THREE.Curve {
         return this.getPointWithRadius(tau, 0, offset);
     }
 
-    handle_beat(t, channel) {
+    handle_beat(est_latency, channel) {
         const elapsed_time = this.clock.getElapsedTime();
         this.beats.push(elapsed_time);
     }
@@ -194,12 +194,12 @@ export class HelixScene extends VisScene {
         }
     }
 
-    handle_beat(t, channel) {
-        const delay = this.get_beat_delay();
+    handle_beat(est_latency, channel) {
+        const delay = this.get_beat_delay(est_latency);
         setTimeout(() => {
             if (channel == 1 || channel == 3) {
                 for (const c of this.curves) {
-                    c.handle_beat(t, channel);
+                    c.handle_beat(est_latency, channel);
                 }
             }
         }, delay * 1000);

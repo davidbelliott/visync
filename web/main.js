@@ -64,7 +64,7 @@ const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
 //const EXTRA_LATENCY = 0.220;
-const EXTRA_LATENCY = 0.010;
+const EXTRA_LATENCY = 0.050;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';

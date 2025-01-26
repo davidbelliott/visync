@@ -84,7 +84,7 @@ export class VisScene {
 
         const cur_beat = Math.floor(sync_idx / this.cur_divisor);
         if (cur_beat != this.prev_beat) {
-            console.log(`beat: ${cur_beat}`);
+            //console.log(`beat: ${cur_beat}`);
             this.handle_sync(0, this.bpm, cur_beat);
             this.prev_beat = cur_beat;
         }

@@ -82,8 +82,8 @@ export class HomeBackgroundScene extends VisScene {
         this.base_scale += (this.min_base_scale - this.base_scale) * SCALE_LERP_RATE * dt;
     }
 
-    handle_beat(t, channel) {
-        const delay = this.get_beat_delay();
+    handle_beat(est_latency, channel) {
+        const delay = this.get_beat_delay(est_latency);
         if (channel == 1) {
             setTimeout(() => { this.base_scale = this.max_base_scale; }, delay * 1000);
         }

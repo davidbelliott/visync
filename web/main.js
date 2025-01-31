@@ -32,6 +32,7 @@ import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
 import { HelixScene } from './src/helix_scene.js';
 import { TriangularPrismScene } from './src/triangular_prism_scene.js';
 import { CelticKnotScene } from './src/celtic_knot_scene.js';
+import { CellularAutomataScene } from './src/cellular_automata_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -431,13 +432,14 @@ class GraphicsContext {
             [17, new TracersScene()],
             [18, new HelixScene()],
             [19, new TriangularPrismScene()],
+            [20, new CellularAutomataScene()],
             //[20, new CelticKnotScene()],
             //[20, new SlideScene(["img/hitem.png"])],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(9);
+        this.change_scene(20);
         this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
             / SCENES_PER_BANK);
 

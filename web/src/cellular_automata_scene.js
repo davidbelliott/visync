@@ -61,6 +61,14 @@ export class CellularAutomataScene extends VisScene {
         this.cube_group = new THREE.Group();
         this.scene.add(this.cube_group);
 
+        this.light = new THREE.PointLight("white", 40, 0, 1.0);
+        this.light.position.set(-10, 10, 0);
+        this.scene.add(this.light);
+
+        this.light2 = new THREE.DirectionalLight("white", 0.1);
+        this.light2.position.set(100, 0, 0);
+        this.scene.add(this.light2);
+
         // Create template for wireframe geometry
         {
             const template_wireframe = new THREE.BufferGeometry();

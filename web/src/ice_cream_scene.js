@@ -71,7 +71,6 @@ export class IceCreamScene extends VisScene {
         const brain_loader = new STLLoader();
         const brain_load_promise = brain_loader.loadAsync('stl/brain.stl');
 
-
         Promise.all([shader_load_promise, cone_load_promise, brain_load_promise]).then(
             ([[dither_pars, dither], cone_geom, brain_geom]) => {
                 const center_offset = -this.cone_spacing * (this.cones_per_side - 1) / 2;

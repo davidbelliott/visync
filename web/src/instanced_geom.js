@@ -3,11 +3,12 @@ import * as THREE from 'three';
 
 
 
-
+// Valid types: Lines, LineStrip, Triangles
 export class InstancedGeometryCollection {
-    constructor(scene, templateGeometry, linesegments=true, maxInstances=1024) {
+    constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024) {
         this.scene = scene;
         this.maxInstances = maxInstances;
+        this.draw_type = draw_type;
 
         // Creating an instanced geometry based on the template
         this.instancedGeometry = new THREE.InstancedBufferGeometry().copy(templateGeometry);
@@ -120,11 +121,18 @@ export class InstancedGeometryCollection {
             transparent: false
         });
 
-        if (linesegments) {
+        if (this.draw_type == 'Lines') {
             this.mesh = new THREE.LineSegments(this.instancedGeometry, mat);
-        } else {
+        } else if (this.draw_type == 'LineStrip') {
             this.mesh = new THREE.Line(this.instancedGeometry, mat);
+        } else if (this.draw_type == 'Triangles') {
+            this.mesh = new THREE.Mesh(this.instancedGeometry, mat);
+        } else {
+            console.error(`Unrecognized draw type: ${this.draw_type}`);
+            debugger;
+            return;
         }
+
         this.mesh.frustumCulled = false;
         this.scene.add(this.mesh);
     }

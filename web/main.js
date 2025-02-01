@@ -440,7 +440,7 @@ class GraphicsContext {
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
         this.change_scene(20);
-        this.num_scene_banks = Math.ceil(Math.max(...this.scenes.keys()) 
+        this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 
         this.debug_overlay = document.getElementById("debug-overlay");

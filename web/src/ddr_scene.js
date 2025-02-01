@@ -102,7 +102,7 @@ class DDRRobot extends THREE.Object3D {
         // side_idx: 0 for left, 1 for right
         // t: normalized time since half-note beat (0 - 1)
         const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
+        const t_mov = t_period * 0.6;
         const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
         const position_options = [
             [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
@@ -132,7 +132,7 @@ class DDRRobot extends THREE.Object3D {
     get_arms_pump_offset(t) {
         // t: normalized time since half-note beat (0 - 1)
         const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
+        const t_mov = t_period * 1.0;
         const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
         const position_options = [
             ease(Math.min(1, dt / t_mov)),
@@ -254,7 +254,7 @@ class DDRArrow extends THREE.LineSegments {
 
 export class DDRScene extends VisScene {
     constructor() {
-        super(1);
+        super(1, 180);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;

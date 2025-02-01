@@ -49,8 +49,6 @@ export class TessellateScene extends VisScene {
   this.scene.add(light);
 
         
-        /*this.inst_geoms = new InstancedGeometryCollection(this.scene, 
-            new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), true);*/
 
         // Create a material for the lines
 
@@ -90,7 +88,7 @@ export class TessellateScene extends VisScene {
 
                         // Create a geometry from the points
                         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                        this.inst_geoms.push(new InstancedGeometryCollection(this.base_group, geometry, false));
+                        this.inst_geoms.push(new InstancedGeometryCollection(this.base_group, geometry, 'LineStrip'));
 
 
                         // Create a line from the geometry and the material
@@ -105,8 +103,6 @@ export class TessellateScene extends VisScene {
                 group.scale.multiplyScalar( 0.05 );
                 group.scale.y *= - 1;
 
-
-                //this.inst_geoms.push(new InstancedGeometryCollection(this.scene, new THREE.EdgesGeometry(new THREE.BoxGeometry(1)), true));
 
 
                 group.position.set(-this.frustum_size / 2, this.frustum_size / 2, 0);

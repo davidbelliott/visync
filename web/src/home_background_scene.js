@@ -3,19 +3,24 @@ import * as THREE from "three";
 import {
     create_instanced_cube,
     make_wireframe_special,
-    make_point_cloud
+    make_point_cloud,
+    BeatClock
 } from "./util.js";
 
 
+const NUM_IMPACTS = 16;
 const SCALE_LERP_RATE = 5;
+const IMPACT_LIFETIME = 10;
+const OSC_AMPL = 0.5;
+const OSC_FREQ = 1.5;
+const OSC_DECAY = 5;
+const OSC_PHASE = 0;
 
 
 export class HomeBackgroundScene extends VisScene {
     constructor() {
         super();
-        this.min_base_scale = 2.0;
-        this.max_base_scale = 3.0;
-        this.base_scale = this.min_base_scale;
+        this.base_scale = 1.5;
 
 
         this.scene = new THREE.Scene();
@@ -57,6 +62,10 @@ export class HomeBackgroundScene extends VisScene {
 
         this.cur_selected = 0;
         this.has_started = false;
+        this.bpm_locked_clock = new BeatClock(this);
+        this.bpm_locked_clock.start();
+        this.impacts = new Array(NUM_IMPACTS).fill(Number.MAX_VALUE);
+        this.impact_idx = 0;
     }
 
     anim_frame(dt) {
@@ -64,8 +73,16 @@ export class HomeBackgroundScene extends VisScene {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
         }
+        const elapsed_beats = this.bpm_locked_clock.getElapsedBeats()
+        this.bpm_locked_clock.start();
 
-        this.cubes_group.scale.setScalar(this.base_scale);
+        let all_scale = this.base_scale;
+        for (let i = 0; i < this.impacts.length; i++) {
+            const t = this.impacts[i];
+            all_scale += (t < 0 || t > IMPACT_LIFETIME ? 0 : OSC_AMPL * Math.exp(-OSC_DECAY * t) * Math.sin(2 * Math.PI * OSC_FREQ * t + OSC_PHASE));
+            this.impacts[i] += elapsed_beats;
+        }
+        this.cubes_group.scale.setScalar(all_scale);
 
 
         this.cubes_group.rotation.x += 0.1 * dt;
@@ -79,13 +96,13 @@ export class HomeBackgroundScene extends VisScene {
         this.time_scaling_key += dt;
         this.elapsed_time += dt;
 
-        this.base_scale += (this.min_base_scale - this.base_scale) * SCALE_LERP_RATE * dt;
     }
 
     handle_beat(est_latency, channel) {
         const delay = this.get_beat_delay(est_latency);
         if (channel == 1) {
-            setTimeout(() => { this.base_scale = this.max_base_scale; }, delay * 1000);
+            this.impacts[this.impact_idx] = -this.get_beat_delay(est_latency) * 60 / this.get_local_bpm();
+            this.impact_idx = (this.impact_idx + 1) % this.impacts.length;
         }
     }
 }

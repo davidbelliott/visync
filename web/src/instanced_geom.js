@@ -51,7 +51,7 @@ function create_wireframe_mat() {
         vertexShader: vertexShader,
         fragmentShader: fragmentShader,
         side: THREE.DoubleSide,
-        transparent: false
+        transparent: true
     });
 
     return mat;
@@ -59,12 +59,17 @@ function create_wireframe_mat() {
 
 
 function create_fill_mat() {
+
     var vertexShaderPars = [
         "attribute vec3 instanceOffset;",
         "attribute vec4 instanceColor;",
         "attribute vec3 instanceScale;",
         "attribute float instanceRotation;",
-        "#define USE_INSTANCING_COLOR 1",
+        "varying vec4 vInstanceColor;",
+    ].join("\n");
+
+    var fragmentShaderPars = [
+        "#define USE_INSTANCING_COLOR",
     ].join("\n");
 
     var vertexShaderProject = [
@@ -77,6 +82,7 @@ function create_fill_mat() {
         ");",
         "mvPosition = modelViewMatrix * worldPosTrans * vec4( position, 1.0 );",
         "	gl_Position = projectionMatrix * mvPosition;",
+        "vInstanceColor = instanceColor;",
     ].join("\n");
 
     const shader_loader = new ShaderLoader('glsl/chunks/dither_pars.frag',
@@ -85,6 +91,7 @@ function create_fill_mat() {
 
     return shader_load_promise.then(([dither_pars, dither]) => {
         const fill_mat = new THREE.MeshLambertMaterial({
+            vertexColors: true,
             color: 'white',
             polygonOffset: true,
             polygonOffsetFactor: 1, // positive value pushes polygon further away
@@ -95,6 +102,12 @@ function create_fill_mat() {
         fill_mat.onBeforeCompile = (shader) => {
             shader.fragmentShader =
                 shader.fragmentShader.replace(
+                    '#include <color_pars_fragment>',
+                    '#include <color_pars_fragment>\nvarying vec4 vInstanceColor;'
+                ).replace(
+                    '#include <color_fragment>',
+                    'diffuseColor *= vInstanceColor;'
+                ).replace(
                     '#include <dithering_pars_fragment>',
                     dither_pars
                 ).replace(
@@ -110,7 +123,6 @@ function create_fill_mat() {
                     '#include <project_vertex>',
                     vertexShaderProject
                 );
-            debugger;
         };
 
         return fill_mat;
@@ -207,7 +219,6 @@ export class InstancedGeometryCollection {
             });
         } else {
             console.error(`Unrecognized draw type: ${this.draw_type}`);
-            debugger;
             return;
         }
     }
@@ -239,8 +250,8 @@ export class InstancedGeometryCollection {
         this.offsets.needsUpdate = true;
     }
 
-    set_color(idx, color) {
-        this.colors.setXYZW(idx, color.r, color.g, color.b, color.a);
+    set_color(idx, color, alpha=1.0) {
+        this.colors.setXYZW(idx, color.r, color.g, color.b, alpha);
         this.colors.needsUpdate = true;
     }
 

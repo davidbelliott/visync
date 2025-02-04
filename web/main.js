@@ -545,9 +545,7 @@ class GraphicsContext {
     }
 
     anim_frame() {
-        //const dt = this.clock.getDelta();
-        const dt = 1.0 / 60.0;
-        const t_now = this.clock.getElapsedTime();
+        const dt = this.clock.getDelta();
         this.scenes.get(this.cur_scene_idx).anim_frame(dt);
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
             this.scenes.get(this.cur_bg_scene_idx).anim_frame(dt);

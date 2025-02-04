@@ -3,7 +3,6 @@ precision mediump float;
 uniform sampler2D uTexture;
 varying vec2 vUv;
 
-
 float luma(vec3 color) {
   return dot(color, vec3(0.299, 0.587, 0.114));
 }
@@ -50,7 +49,6 @@ vec4 dither4x4(vec2 position, vec4 color) {
 }
 
 void main() {
-  gl_FragCoord /= 2.0;
   gl_FragColor = dither4x4(
       gl_FragCoord.xy
     , texture2D(uTexture, vUv)

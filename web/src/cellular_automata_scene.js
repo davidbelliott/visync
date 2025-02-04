@@ -43,7 +43,7 @@ function palette(t) {
 
 export class CellularAutomataScene extends VisScene {
     constructor() {
-        super(2, 180);
+        super(3, 180);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;
@@ -156,12 +156,24 @@ export class CellularAutomataScene extends VisScene {
                     this.inst_geom_fill.set_scale(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, new THREE.Vector3(cell_val, cell_val, cell_val));
 
                     let color = new THREE.Color();
-                    color.setHSL(Math.sin(1 / 8 * this.elapsed_time + 0.1 * j), saturation, lightness);
-                    color = palette(1 / 8 * this.elapsed_time + 0.1 * j);
+                    //color.setHSL(Math.sin(1 / 8 * this.elapsed_time + 0.1 * j), saturation, lightness);
                     this.inst_geom_fill.set_scale(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, new THREE.Vector3(cell_val, cell_val, cell_val));
+                    if (this.cur_state_idx == 1) {
+                        color = palette(1 / 8 * this.elapsed_time + 0.1 * j);
+                    } else if (this.cur_state_idx == 0) {
+                        color = new THREE.Color("white");
+                    }
                     this.inst_geom_fill.set_color(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, color);
                 }
             }
+        }
+
+        if (this.cur_state_idx == 1 || this.cur_state_idx == 2) {
+            this.light.intensity = 60;
+            this.light2.intensity = 0.5;
+        } else if (this.cur_state_idx == 0) {
+            this.light.intensity = 40;
+            this.light2.intensity = 0.1;
         }
     }
 

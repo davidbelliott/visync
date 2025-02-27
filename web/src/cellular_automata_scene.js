@@ -41,6 +41,48 @@ function palette(t) {
     return cosPalette(t, a, b, c, d);
 }
 
+function metaballs(x, y, z, time) {
+    // Create 3 moving metaballs
+    const balls = [
+        {
+            pos: new THREE.Vector3(
+                Math.sin(time * 0.7) * 4,
+                Math.cos(time * 0.8) * 4,
+                Math.sin(time * 0.9) * 4
+            ),
+            strength: 12.0
+        },
+        {
+            pos: new THREE.Vector3(
+                Math.cos(time * 0.6) * 5,
+                Math.sin(time * 1.1) * 5,
+                Math.cos(time * 0.7) * 5
+            ),
+            strength: 8.0
+        },
+        {
+            pos: new THREE.Vector3(
+                Math.sin(time * 0.9) * 3,
+                Math.cos(time * 0.5) * 3,
+                Math.sin(time * 0.8) * 3
+            ),
+            strength: 8.0
+        }
+    ];
+
+    // Calculate field value at point
+    let value = 0;
+    for (const ball of balls) {
+        const dx = x - ball.pos.x;
+        const dy = y - ball.pos.y;
+        const dz = z - ball.pos.z;
+        const dist_sq = dx * dx + dy * dy + dz * dz;
+        value += ball.strength / dist_sq;
+    }
+    
+    return value * 0.5; // Scale the result to get reasonable values
+}
+
 export class CellularAutomataScene extends VisScene {
     constructor() {
         super(3, 180);
@@ -140,7 +182,6 @@ export class CellularAutomataScene extends VisScene {
         this.elapsed_time = 0;
     }
     
-
     anim_frame(dt) {
         this.cube_group.rotation.y += 0.002;
         this.elapsed_time += dt;
@@ -151,7 +192,7 @@ export class CellularAutomataScene extends VisScene {
         for (let i = 0; i < CUBES_PER_SIDE; i++) {
             for (let j = 0; j < CUBES_PER_SIDE; j++) {
                 for (let k = 0; k < CUBES_PER_SIDE; k++) {
-                    const cell_val = Math.cos(this.elapsed_time + i / 4);
+                    const cell_val = this.cell_val_func(this.elapsed_time, i, j, k);
                     this.cell_values[i][j][k] = cell_val;
                     this.inst_geom_fill.set_scale(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, new THREE.Vector3(cell_val, cell_val, cell_val));
 
@@ -176,6 +217,19 @@ export class CellularAutomataScene extends VisScene {
             this.light2.intensity = 0.1;
         }
     }
+
+    cell_val_func(t, i, j, k) {
+        if (this.cur_state_idx == 0) {
+            return Math.cos(this.elapsed_time + i / 4);
+        } else if (this.cur_state_idx == 1) {
+            // Convert grid coordinates to world space coordinates
+            const x = (i - CUBES_PER_SIDE/2);
+            const y = (j - CUBES_PER_SIDE/2);
+            const z = (k - CUBES_PER_SIDE/2);
+            return Math.min(1.0, 2 * Math.tanh(metaballs(x, y, z, this.elapsed_time)) ** 4);
+        }
+    }
+
 
     handle_beat(t, channel) {
         if (channel == 1) {

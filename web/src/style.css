@@ -16,6 +16,11 @@
   box-sizing: border-box;
 }
 
+@font-face {
+    font-family: "baskerville";
+    src: url("/font/LibreBaskerville-Regular.ttf");
+}
+
 html {
     height: 100%;
     margin: 0;
@@ -110,4 +115,31 @@ canvas {
     padding: 0px;
     margin: 0px;
     cursor: none;
+}
+
+#textbox {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    padding: 40pt;
+    text-align: left;
+    font-family: "baskerville";
+    font-size: 24pt;
+    text-shadow: 5px 5px 8px rgba(0, 0, 0, 0.9);
+    color: white;
+      background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0.2) 20%,
+        rgba(0, 0, 0, 0.6) 40%,
+        rgba(0, 0, 0, 0.6) 60%,
+        rgba(0, 0, 0, 0.2) 80%
+      );
+}
+
+
+#textbox-inner {
+    width: 100%;
+    max-width: 40ch;
 }

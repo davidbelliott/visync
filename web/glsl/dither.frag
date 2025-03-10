@@ -52,5 +52,5 @@ void main() {
   gl_FragColor = dither4x4(
       gl_FragCoord.xy
     , texture2D(uTexture, vUv)
-  ) * 2.0;
+  );
 }

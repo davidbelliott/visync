@@ -443,7 +443,7 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(20);
+        this.change_scene(11);
         //this.change_scene(19, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
@@ -585,27 +585,18 @@ class GraphicsContext {
         this.cur_buffer_idx = 0;
     }
 
-    render() {
-        if (ENABLE_GLOBAL_TRACERS) {
-            this.renderer.autoClearColor = false;
-            this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
-        }
-
-        
-        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.renderer.setRenderTarget(this.buffers[0]);
-            this.renderer.clear();
-            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
-        }
-
-        this.renderer.setRenderTarget(this.buffers[1]);
-        this.renderer.clear();
-        this.scenes.get(this.cur_scene_idx).render(this.renderer);
-
-
-        const displayMaterial = new THREE.ShaderMaterial({
+render() {
+    if (ENABLE_GLOBAL_TRACERS) {
+        this.renderer.autoClearColor = false;
+        this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
+    }
+    
+    // Create blend shader if it doesn't exist
+    if (!this.blendMaterial) {
+        this.blendMaterial = new THREE.ShaderMaterial({
             uniforms: {
-                displayTexture: { value: null }
+                bgTexture: { value: null },
+                fgTexture: { value: null }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -616,67 +607,88 @@ class GraphicsContext {
             `,
             fragmentShader: `
                 varying vec2 vUv;
-                uniform sampler2D displayTexture;
+                uniform sampler2D bgTexture;
+                uniform sampler2D fgTexture;
                 void main() {
-                    vec4 color = texture2D(displayTexture, vUv);
-                    gl_FragColor = vec4(color.rgb * 2.0, color.a);
+                    vec4 bgColor = texture2D(bgTexture, vUv);
+                    vec4 fgColor = texture2D(fgTexture, vUv);
+                    
+                    // Alpha blending
+                    gl_FragColor = vec4(
+                        mix(bgColor.rgb, fgColor.rgb, fgColor.a),
+                        max(bgColor.a, fgColor.a)
+                    );
                 }
             `
         });
         
-        const fullScreenQuad = new THREE.PlaneGeometry(2, 2);
-        const displayQuad = new THREE.Mesh(fullScreenQuad, displayMaterial);
-        displayQuad.frustumCulled = false;
-
-        const displayScene = new THREE.Scene();
-        displayScene.add(displayQuad);
-
-        const displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
-    
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear()
-        for (let i = 0; i < 2; i++) {
-            // Update the texture and render to screen
-            displayQuad.material.uniforms.displayTexture.value = this.buffers[i].texture;
-            this.renderer.render(displayScene, displayCamera);
-        }
-
-        if (ENABLE_GLOBAL_TRACERS) {
-            let tex_values = [];
-            let idx = this.cur_buffer_idx;
-            for (let i = 0; i < this.buffers.length; i++) {
-                if (i % this.trace_spacing == 0) {
-                    tex_values.push(this.buffers[idx].texture);
-                }
-                idx--;
-                if (idx < 0) {
-                    idx = this.buffers.length - 1;
-                }
-            }
-            this.blend_material.uniforms.t1.value = tex_values[0];
-            this.blend_material.uniforms.t2.value = tex_values[1];
-            this.blend_material.uniforms.t3.value = tex_values[2];
-            this.blend_material.uniforms.t4.value = tex_values[3];
-            this.blend_material.uniforms.t5.value = tex_values[4];
-            this.blend_material.uniforms.t6.value = tex_values[5];
-            this.blend_material.uniforms.ratio.value = this.trace_persistence;
-
-            this.renderer.setRenderTarget(null);
-            this.renderer.clear();
-            this.renderer.clearDepth();
-            this.renderer.render(this.scene, this.camera);
-            this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
-        }
-
-        return;
+        this.displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMaterial);
+        this.displayQuad.frustumCulled = false;
+        this.displayScene = new THREE.Scene();
+        this.displayScene.add(this.displayQuad);
+        this.displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
     }
+    
+    // Render background scene to buffer 0
+    if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+        this.renderer.setRenderTarget(this.buffers[0]);
+        this.renderer.clear();
+        this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
+    } else {
+        // If no background, clear buffer with transparent black
+        this.renderer.setRenderTarget(this.buffers[0]);
+        this.renderer.setClearColor(0x000000, 0);
+        this.renderer.clear();
+    }
+    
+    // Render foreground scene to buffer 1
+    this.renderer.setRenderTarget(this.buffers[1]);
+    this.renderer.clear();
+    this.scenes.get(this.cur_scene_idx).render(this.renderer);
+    
+    // Blend both buffers and render to screen
+    this.renderer.setRenderTarget(null);
+    this.renderer.clear();
+    
+    this.blendMaterial.uniforms.bgTexture.value = this.buffers[0].texture;
+    this.blendMaterial.uniforms.fgTexture.value = this.buffers[1].texture;
+    this.renderer.render(this.displayScene, this.displayCamera);
+    
+    // Handle tracers if enabled
+    if (ENABLE_GLOBAL_TRACERS) {
+        let tex_values = [];
+        let idx = this.cur_buffer_idx;
+        for (let i = 0; i < this.buffers.length; i++) {
+            if (i % this.trace_spacing == 0) {
+                tex_values.push(this.buffers[idx].texture);
+            }
+            idx--;
+            if (idx < 0) {
+                idx = this.buffers.length - 1;
+            }
+        }
+        this.blend_material.uniforms.t1.value = tex_values[0];
+        this.blend_material.uniforms.t2.value = tex_values[1];
+        this.blend_material.uniforms.t3.value = tex_values[2];
+        this.blend_material.uniforms.t4.value = tex_values[3];
+        this.blend_material.uniforms.t5.value = tex_values[4];
+        this.blend_material.uniforms.t6.value = tex_values[5];
+        this.blend_material.uniforms.ratio.value = this.trace_persistence;
+        
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear();
+        this.renderer.clearDepth();
+        this.renderer.render(this.scene, this.camera);
+        this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
+    }
+}
 
     on_window_resize() {
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        //this.renderer.setPixelRatio(window.devicePixelRatio / 1);
+        this.renderer.setPixelRatio(window.devicePixelRatio / 1);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);

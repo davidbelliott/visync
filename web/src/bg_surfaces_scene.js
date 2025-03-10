@@ -104,20 +104,20 @@ export class BackgroundSurfacesScene extends VisScene {
         const color_amb = new THREE.Color();
         color_amb.setHSL(this.amb_color_hue % 1, 1, 0.5);
 
-        this.amblight = new THREE.AmbientLight(color_amb, 0.5);
+        this.amblight = new THREE.AmbientLight(color_amb, 0.7);
         this.scene.add(this.amblight);
 
-        this.dir_light = new THREE.DirectionalLight("white", 0.2);
+        this.dir_light = new THREE.DirectionalLight("white", 0.4);
         this.dir_light.position.set(1, 1, 0);
         this.scene.add(this.dir_light);
 
         const color_dir = new THREE.Color();
         color_dir.setHSL((this.amb_color_hue) % 1, 1, 0.5);
-        this.dir_light_2 = new THREE.DirectionalLight(color_dir, 0.7);
+        this.dir_light_2 = new THREE.DirectionalLight(color_dir, 1.4);
         this.dir_light_2.position.set(-1, -1, -1);
         this.scene.add(this.dir_light_2);
 
-        this.light = new THREE.PointLight("white", 10, 0, 1);
+        this.light = new THREE.PointLight("white", 20, 0, 2);
         //this.light.castShadow = true;
         this.scene.add(this.light);
 

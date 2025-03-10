@@ -131,6 +131,10 @@ export class CubeLockingScene extends VisScene {
         this.light.position.set(0, 100, 20);
         this.base_group.add(this.light);
 
+        this.light2 = new THREE.PointLight("white", 100, 100, 1.5);
+        this.light2.position.set(0, 20, -20);
+        this.base_group.add(this.light2);
+
         this.object_color = new THREE.Color("cyan");
 
         const stl_loader = new STLLoader();

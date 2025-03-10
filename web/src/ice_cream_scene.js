@@ -51,7 +51,7 @@ export class IceCreamScene extends VisScene {
         this.cone_spacing = 7;
         this.cone_scale = 0.25;
 
-        this.light = new THREE.PointLight("white", 40, 0, 0.8);
+        this.light = new THREE.PointLight("white", 80, 0, 0.8);
         this.light.position.set(0, 40, 20);
         this.scene.add(this.light);
 

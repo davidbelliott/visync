@@ -402,7 +402,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
         float alpha = pow(float(i + 1) / float(num_loops), 1.4);
         fragColor = tex_val.r * alpha * rainbow_color + (1.0 - tex_val.r * alpha) * fragColor;
     }
-    fragColor = dither4x4(fragCoord.xy / 2.0, fragColor);
+    fragColor = dither4x4(fragCoord.xy, fragColor);
 }
 
 void main() {

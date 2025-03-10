@@ -352,7 +352,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     const int num_loops = 10;
     const float evolve_rate = 1.0 / 16.0;
     const float scroll_rate = 1.0 / 64.0;
-    const float scale = 1.5;
+    const float scale = 1.0;
 
     // Define the supersampling offsets for 4x supersampling
     vec2 pixelSize = 1.0 / resolution.xy / pixel_ratio;

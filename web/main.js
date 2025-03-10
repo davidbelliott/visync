@@ -443,8 +443,8 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(11);
-        //this.change_scene(19, true);
+        this.change_scene(9);
+        this.change_scene(5, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 
@@ -644,7 +644,7 @@ render() {
     // Render foreground scene to buffer 1
     this.renderer.setRenderTarget(this.buffers[1]);
     this.renderer.clear();
-    this.scenes.get(this.cur_scene_idx).render(this.renderer);
+    this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
     
     // Blend both buffers and render to screen
     this.renderer.setRenderTarget(null);

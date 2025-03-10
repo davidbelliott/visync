@@ -115,7 +115,7 @@ export class VisScene {
 
     }
 
-    render(renderer) {
+    render(renderer, underlying_buffer) {
         renderer.render(this.scene, this.camera);
     }
 

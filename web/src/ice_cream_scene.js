@@ -55,6 +55,10 @@ export class IceCreamScene extends VisScene {
         this.light.position.set(0, 40, 20);
         this.scene.add(this.light);
 
+        this.light2 = new THREE.PointLight("white", 20, 0, 0.8);
+        this.light2.position.set(0, -40, 20);
+        this.scene.add(this.light2);
+
         this.fg_group = new THREE.Group();
         this.fg_group.rotation.x = Math.PI / 8;
         this.fg_group.position.y = -8;
@@ -83,6 +87,8 @@ export class IceCreamScene extends VisScene {
 
                 this.brain_mat = new THREE.MeshLambertMaterial({
                     color: '#40a0a0',
+                    transparent: true,
+                    opacity: 0.9
                 });
 
                 for (const mat of [this.ice_cream_cone_mat, this.brain_mat]) {

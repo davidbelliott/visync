@@ -34,6 +34,7 @@ import { TriangularPrismScene } from './src/triangular_prism_scene.js';
 import { CelticKnotScene } from './src/celtic_knot_scene.js';
 import { CellularAutomataScene } from './src/cellular_automata_scene.js';
 import { TextScene } from './src/text_scene.js';
+import { ShaderScene } from './src/shader_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -434,15 +435,16 @@ class GraphicsContext {
             [18, new HelixScene()],
             [19, new TriangularPrismScene()],
             [20, new CellularAutomataScene()],
-            [20, new SlideScene(["img/jungle-background.jpg"])],
-            [21, new TextScene()],
+            //[20, new SlideScene(["img/jungle-background.jpg"])],
+            //[21, new TextScene()],
+            [21, new ShaderScene("glsl/basic_effect.frag")],
             //[20, new CelticKnotScene()],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(21);
-        this.change_scene(20, true);
+        this.change_scene(20);
+        //this.change_scene(19, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 
@@ -573,8 +575,12 @@ class GraphicsContext {
 
     recreate_buffers(width, height) {
         this.buffers = [];
-        for (let i = 0; i < this.num_traces * this.trace_spacing; i++) {
-            this.buffers.push(new THREE.WebGLRenderTarget(width, height, {}));
+        for (let i = 0; i < Math.max(2, this.num_traces * this.trace_spacing); i++) {
+            this.buffers.push(new THREE.WebGLRenderTarget(width, height, {
+                minFilter: THREE.NearestFilter,
+                magFilter: THREE.NearestFilter,
+                format: THREE.RGBAFormat
+            }));
         }
         this.cur_buffer_idx = 0;
     }
@@ -585,11 +591,55 @@ class GraphicsContext {
             this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
         }
 
-        this.renderer.clear();
+        
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+            this.renderer.setRenderTarget(this.buffers[0]);
+            this.renderer.clear();
             this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
         }
+
+        this.renderer.setRenderTarget(this.buffers[1]);
+        this.renderer.clear();
         this.scenes.get(this.cur_scene_idx).render(this.renderer);
+
+
+        const displayMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                displayTexture: { value: null }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform sampler2D displayTexture;
+                void main() {
+                    vec4 color = texture2D(displayTexture, vUv);
+                    gl_FragColor = vec4(color.rgb * 2.0, color.a);
+                }
+            `
+        });
+        
+        const fullScreenQuad = new THREE.PlaneGeometry(2, 2);
+        const displayQuad = new THREE.Mesh(fullScreenQuad, displayMaterial);
+        displayQuad.frustumCulled = false;
+
+        const displayScene = new THREE.Scene();
+        displayScene.add(displayQuad);
+
+        const displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+    
+        this.renderer.setRenderTarget(null);
+        this.renderer.clear()
+        for (let i = 0; i < 2; i++) {
+            // Update the texture and render to screen
+            displayQuad.material.uniforms.displayTexture.value = this.buffers[i].texture;
+            this.renderer.render(displayScene, displayCamera);
+        }
 
         if (ENABLE_GLOBAL_TRACERS) {
             let tex_values = [];
@@ -626,7 +676,7 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-	this.renderer.setPixelRatio(window.devicePixelRatio / 1);
+        //this.renderer.setPixelRatio(window.devicePixelRatio / 1);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);

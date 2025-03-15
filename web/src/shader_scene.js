@@ -2,6 +2,21 @@ import * as THREE from 'three';
 import { VisScene } from './vis_scene.js';
 import { ResourceLoader } from './util.js';
 
+const shader_preamble = [
+'uniform vec3 iResolution;       // Viewport resolution (width, height, aspect ratio)',
+'uniform float iTime;            // Shader playback time (in seconds)',
+'uniform float iTimeDelta;       // Time since last frame',
+'uniform int iFrame;             // Shader playback frame',
+'uniform vec4 iMouse;            // Mouse position (xy: current, zw: click)',
+'uniform sampler2D iChannel0;    // Previous frame (for feedback effects)',
+'uniform sampler2D iBackgroundTexture; // The underlying scene\'s render',
+].join('\n');
+
+const shader_epilogue = ['void main() {',
+'   mainImage(gl_FragColor, gl_FragCoord.xy);',
+'}',
+].join('\n');
+
 export class ShaderScene extends VisScene {
     constructor(fragmentShaderUrl) {
         super();
@@ -25,8 +40,8 @@ export class ShaderScene extends VisScene {
         try {
             // Load the vertex and fragment shaders
             const shaderLoader = new ResourceLoader(['glsl/default.vert', fragmentShaderUrl]);
-            const [vertexShader, fragmentShader] = await shaderLoader.load();
-            
+            const [vertexShader, fragmentChunk] = await shaderLoader.load();
+            const fragmentShader = shader_preamble + '\n' + fragmentChunk + '\n' + shader_epilogue;
             // Create the shader material with Shadertoy-like uniforms
             this.material = new THREE.ShaderMaterial({
                 uniforms: {
@@ -107,57 +122,38 @@ export class ShaderScene extends VisScene {
         
         // Create render targets with new size
         const rtOptions = {
-            minFilter: THREE.LinearFilter,
-            magFilter: THREE.LinearFilter,
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter,
             format: THREE.RGBAFormat,
             stencilBuffer: false
         };
         
         this.renderTarget = new THREE.WebGLRenderTarget(width, height, rtOptions);
-        this.backgroundTarget = new THREE.WebGLRenderTarget(width, height, rtOptions);
+        this.prevRender = new THREE.WebGLRenderTarget(width, height, rtOptions);
     }
     
-    render(renderer, underlying_buffer) {
-        if (!this.initialized || !this.material) return;
-        
-        // Create render targets if not already created
-        if (!this.renderTarget || !this.backgroundTarget) {
-            this.handle_resize(window.innerWidth, window.innerHeight);
-        }
-        
-        // Get current render target and clear color
-        const currentRenderTarget = renderer.getRenderTarget();
-        const currentClearColor = renderer.getClearColor(new THREE.Color());
-        const currentClearAlpha = renderer.getClearAlpha();
-        
-        // Set the background texture as a uniform so the shader can access it
-        this.material.uniforms.iBackgroundTexture.value = underlying_buffer.texture;
-        
-        // Use the render target to capture the current frame for the next frame (for feedback effects)
-        renderer.setRenderTarget(this.renderTarget);
-        renderer.render(this.scene, this.camera);
-        
-        // Use the captured frame as input for the next frame
-        this.material.uniforms.iChannel0.value = this.renderTarget.texture;
-        
-        // Render to the screen
-        renderer.setRenderTarget(currentRenderTarget);
-        renderer.setClearColor(currentClearColor, currentClearAlpha);
-        renderer.render(this.scene, this.camera);
+render(renderer, underlying_buffer) {
+    if (!this.initialized || !this.material) return;
+    
+    // Create render targets if not already created
+    if (!this.renderTarget) {
+        this.handle_resize(window.innerWidth, window.innerHeight);
     }
     
-    // Helper method to integrate with a specific underlying scene
-    processUnderlyingScene(underlyingScene, renderer) {
-        // First render the underlying scene
-        renderer.setRenderTarget(this.backgroundTarget);
-        renderer.clear();
-        
-        // Set the background texture
-        this.material.uniforms.iBackgroundTexture.value = this.backgroundTarget.texture;
-        
-        // Now render our effect
-        renderer.setRenderTarget(null);
-        renderer.clear();
-        this.render(renderer);
-    }
+    // Set the background texture as a uniform so the shader can access it
+    this.material.uniforms.iBackgroundTexture.value = underlying_buffer.texture;
+    
+    this.material.uniforms.iChannel0.value = this.prevRender.texture;
+
+    // Render to the screen
+    renderer.render(this.scene, this.camera);
+
+    renderer.setRenderTarget(this.renderTarget);
+    renderer.render(this.scene, this.camera);
+
+    // Swap buffers
+    const temp = this.prevRender;
+    this.prevRender = this.renderTarget;
+    this.renderTarget = temp;
+}
 }

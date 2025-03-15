@@ -437,14 +437,14 @@ class GraphicsContext {
             [20, new CellularAutomataScene()],
             //[20, new SlideScene(["img/jungle-background.jpg"])],
             //[21, new TextScene()],
-            [21, new ShaderScene("glsl/basic_effect.frag")],
+            [21, new ShaderScene("glsl/chunks/octagrams.frag")],
             //[20, new CelticKnotScene()],
         ]);
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(9);
-        this.change_scene(5, true);
+        this.change_scene(21);
+        this.change_scene(9, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 

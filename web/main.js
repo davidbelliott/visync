@@ -52,6 +52,8 @@ import { BoxDef } from './src/geom_def.js';
 import "./src/normalize.css";
 import "./src/style.css";
 
+const START_SCENE = 7;
+const START_BG_SCENE = 0;
 
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
@@ -443,8 +445,8 @@ class GraphicsContext {
         this.cur_scene_idx = 0;
         this.cur_bg_scene_idx = 0;
         this.cur_scene_bank = 0;
-        this.change_scene(21);
-        this.change_scene(9, true);
+        this.change_scene(START_SCENE);
+        this.change_scene(START_BG_SCENE, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 
@@ -458,8 +460,13 @@ class GraphicsContext {
         this.debug_overlay.style.visibility = "hidden";
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
-	this.renderer = new THREE.WebGLRenderer({
+        this.renderer = new THREE.WebGLRenderer({
             antialias: false,
+            powerPreference: 'high-performance',
+            depth: true,
+            stencil: false,
+            format: THREE.RGBAFormat,
+            precision: 'highp',
         });
         this.renderer.autoClearColor = false;
         this.renderer.autoClearDepth = true;
@@ -552,7 +559,7 @@ class GraphicsContext {
     anim_frame() {
         const dt = this.clock.getDelta();
         this.scenes.get(this.cur_scene_idx).anim_frame(dt);
-        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+        if (this.cur_bg_scene_idx != this.cur_scene_idx) {
             this.scenes.get(this.cur_bg_scene_idx).anim_frame(dt);
         }
     }
@@ -579,7 +586,9 @@ class GraphicsContext {
             this.buffers.push(new THREE.WebGLRenderTarget(width, height, {
                 minFilter: THREE.NearestFilter,
                 magFilter: THREE.NearestFilter,
-                format: THREE.RGBAFormat
+                format: THREE.RGBAFormat,
+                depthBuffer: true,
+                stencilBuffer: false
             }));
         }
         this.cur_buffer_idx = 0;
@@ -590,6 +599,10 @@ render() {
         this.renderer.autoClearColor = false;
         this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
     }
+
+    // Store original clear color
+    const originalClearColor = this.renderer.getClearColor(new THREE.Color());
+    const originalClearAlpha = this.renderer.getClearAlpha();
     
     // Create blend shader if it doesn't exist
     if (!this.blendMaterial) {
@@ -619,7 +632,9 @@ render() {
                         max(bgColor.a, fgColor.a)
                     );
                 }
-            `
+            `,
+            transparent: true,
+            depthTest: false
         });
         
         this.displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMaterial);
@@ -632,6 +647,7 @@ render() {
     // Render background scene to buffer 0
     if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
         this.renderer.setRenderTarget(this.buffers[0]);
+        this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
         this.renderer.clear();
         this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
     } else {
@@ -643,16 +659,21 @@ render() {
     
     // Render foreground scene to buffer 1
     this.renderer.setRenderTarget(this.buffers[1]);
+    this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
     this.renderer.clear();
     this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
     
     // Blend both buffers and render to screen
     this.renderer.setRenderTarget(null);
+    this.renderer.setClearColor(BG_COLOR, 1);
     this.renderer.clear();
     
     this.blendMaterial.uniforms.bgTexture.value = this.buffers[0].texture;
     this.blendMaterial.uniforms.fgTexture.value = this.buffers[1].texture;
     this.renderer.render(this.displayScene, this.displayCamera);
+    
+    // Restore original clear color
+    this.renderer.setClearColor(originalClearColor, originalClearAlpha);
     
     // Handle tracers if enabled
     if (ENABLE_GLOBAL_TRACERS) {
@@ -723,6 +744,7 @@ render() {
     keydown(e) {
         const num = parseInt(e.key);
         const shift_chars = ')!@#$%^&*(';
+        console.log(e.key);
         if (!isNaN(num)) {
             const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
                 (num % 10));

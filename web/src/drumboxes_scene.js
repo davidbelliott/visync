@@ -23,6 +23,7 @@ class PaddleGroup extends THREE.Group {
         super();
         this.parent_scene = parent_scene;
         this.cur_drum_idx = drum_indices;
+
         const loaders = {
             'stl/drumbox-paddle-top.stl': new STLLoader(),
             'stl/drumbox-paddle-side-0.stl': new STLLoader(),
@@ -63,38 +64,47 @@ class PaddleGroup extends THREE.Group {
                 };
             }
 
+            // Create instanced geometry collections
 
             // Top paddle
-            let top_paddle_edges = new THREE.EdgesGeometry(geometries[0], 30);
-            this.top_paddle = new THREE.Mesh(geometries[0], paddle_mat);
-            this.top_paddle.add(new THREE.LineSegments(top_paddle_edges, paddle_wireframe_mat));
-            this.top_paddle.scale.multiplyScalar(1 / 8);
+            {
+                let top_paddle = new THREE.Mesh(geometries[0], paddle_mat);
+                this.top_paddle.scale.multiplyScalar(1 / 8);
+                let top_paddle_edges = new THREE.EdgesGeometry(geometries[0], 30);
+                this.top_paddle_edges.scale.multiplyScalar(1 / 8);
+
+                this.inst_geom_top_paddle = new InstancedGeometryCollection(this.drums_group, top_paddle, 'Triangles', this.num_per_side * this.num_per_side);
+
+                this.inst_geom_top_paddle_edges = new InstancedGeometryCollection(this.drums_group, top_paddle_edges, 'Lines', this.num_per_side * this.num_per_side);
+            }
+
+
 
             this.light = new THREE.PointLight("white", 40);
             this.light.position.set(0, 0, 24);
             this.light2 = new THREE.PointLight("white", 1);
             this.light2.position.set(0, 0, 100);
-            //this.light = new THREE.PointLight("white", 400);
-            //this.light.position.set(0, 0, 20);
             this.top_paddle.add(this.light);
             this.top_paddle.add(this.light2);
             this.add(this.top_paddle);
 
             // Side paddles
-            this.side_paddles = [];
-            let side_paddle_edges = new THREE.EdgesGeometry(geometries[1], 30);
-            const side_paddle = new THREE.Mesh(geometries[1], paddle_mat);
-            side_paddle.add(new THREE.LineSegments(side_paddle_edges, side_paddle_wireframe_mat));
-            side_paddle.scale.multiplyScalar(1 / 8);
-            for (let i = 0; i < 4; i++) {
-                const this_side_paddle = side_paddle.clone();
-                const offset = new THREE.Vector3(1/2, 1/2, 1/2);
-                offset.applyAxisAngle(new THREE.Vector3(0, 0, 1), i * Math.PI / 2);
-                offset.multiplyScalar(4);
-                this_side_paddle.rotation.z = i * Math.PI / 2;
-                this_side_paddle.position.add(offset);
-                this.side_paddles.push(this_side_paddle);
-                this.add(this_side_paddle);
+            {
+                this.side_paddles = [];
+                let side_paddle_edges = new THREE.EdgesGeometry(geometries[1], 30);
+                const side_paddle = new THREE.Mesh(geometries[1], paddle_mat);
+                side_paddle.add(new THREE.LineSegments(side_paddle_edges, side_paddle_wireframe_mat));
+                side_paddle.scale.multiplyScalar(1 / 8);
+                for (let i = 0; i < 4; i++) {
+                    const this_side_paddle = side_paddle.clone();
+                    const offset = new THREE.Vector3(1/2, 1/2, 1/2);
+                    offset.applyAxisAngle(new THREE.Vector3(0, 0, 1), i * Math.PI / 2);
+                    offset.multiplyScalar(4);
+                    this_side_paddle.rotation.z = i * Math.PI / 2;
+                    this_side_paddle.position.add(offset);
+                    this.side_paddles.push(this_side_paddle);
+                    this.add(this_side_paddle);
+                }
             }
 
             this.initialized = true;
@@ -136,6 +146,7 @@ class PaddleGroup extends THREE.Group {
             return [target_drum_z, true];
         }
     }
+    
     side_paddle_pos(t_till_impact) {
         const t = t_till_impact;
         return 4 * (1 - (Math.abs(clamp(2 * t, -1, 1)) - 1) ** 2);
@@ -143,7 +154,6 @@ class PaddleGroup extends THREE.Group {
 
     paddle_group_movement_y(t) {
         return 6 * (1 - (2 * t - 1) ** 2);
-        //return 8 * Math.min(0.5, 1 - Math.abs(2 * t - 1));
     }
 
     offset_by(offset) {
@@ -164,7 +174,7 @@ class PaddleGroup extends THREE.Group {
             return;
         }
 
-        const target_drum_z = this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].position.z;
+        const target_drum_z = this.parent_scene.get_drum_z_from_instance_idx(this.cur_drum_idx[0], this.cur_drum_idx[1]);
 
         const frac = clamp(
             this.movement_clock.getElapsedTime() / this.time_for_this_movement, 0, 1);
@@ -172,7 +182,6 @@ class PaddleGroup extends THREE.Group {
         this.position.z = this.paddle_group_movement_y(frac);
 
 
-        //this.base_group.rotation.z += 0.001;
         let top_paddle_pos = this.paddle_pos(1, target_drum_z)[0];
         let side_paddle_pos = this.side_paddle_pos(1, 0);
 
@@ -188,10 +197,11 @@ class PaddleGroup extends THREE.Group {
                 } else if (this.impacts[i][1] == 2) {
                     strike_vel = this.side_paddle_strike_vel;
                 }
-                let new_vel = this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z;
+                const instance_idx = this.parent_scene.instance_idx_from_drum_coords(this.cur_drum_idx[0], this.cur_drum_idx[1]);
+                let new_vel = this.parent_scene.drum_velocities[instance_idx];
                 new_vel -= strike_vel;
                 new_vel = clamp(new_vel, -this.top_paddle_strike_vel, this.top_paddle_strike_vel);
-                this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].velocity.z = new_vel;
+                this.parent_scene.drum_velocities[instance_idx] = new_vel;
                 // It now takes a normal # of beats to move between drums
                 this.time_for_this_movement = this.movement_time_secs;
             }
@@ -212,7 +222,7 @@ class PaddleGroup extends THREE.Group {
 
         // Apply offsets to objects
         this.top_paddle.position.z = top_paddle_pos;
-        this.rotation.z = this.parent_scene.drums[this.cur_drum_idx[0]][this.cur_drum_idx[1]].rotation.z;
+        this.rotation.z = this.parent_scene.get_drum_rotation_from_instance_idx(this.cur_drum_idx[0], this.cur_drum_idx[1]);
 
         for (let i = 0; i < 4; i++) {
             const offset = new THREE.Vector3(1/2, 1/2, 1/2);
@@ -240,8 +250,6 @@ class PaddleGroup extends THREE.Group {
 
     handle_sync(t, bpm, beat) {
         if (this.in_position) {
-            //if (this.cur_drum_idx[0] >= this.parent_scene.num_per_side / 2 ||
-                //this.cur_drum_idx[1] >= this.parent_scene.num_per_side / 2) {
             if (beat % 4 == 3) {
                 // Do a jump
                 this.last_jump_axis = (this.last_jump_axis + 1) % 2;
@@ -277,18 +285,17 @@ export class DrumboxScene extends VisScene {
         this.initialized = false;
 
         this.drums = [];
+        this.drum_velocities = [];
+        this.drum_rotations = [];
         this.paddle_groups = [];
 
         this.base_group = new THREE.Group();
         this.drums_group = new THREE.Group();
         this.base_group.add(this.drums_group);
 
-
         this.drift_vels = [0, 2, 5];
         this.drift_vel = this.drift_vels[0];
 
-        //const cube = create_instanced_cube([1, 1, 1], "white");
-        //this.base_group.add(cube);
         const loaders = {
             'stl/truncated-cuboctahedron.stl': new STLLoader(),
         };
@@ -302,6 +309,7 @@ export class DrumboxScene extends VisScene {
         const shader_load_promise = this.shader_loader.load();
         this.spacing = 16;
         this.num_per_side = 12;
+        
         Promise.all([...stl_load_promises, shader_load_promise]).then((results) => {
             const geometries = results.slice(0, -1);
             const dither_pars = results[results.length - 1][0];
@@ -329,26 +337,27 @@ export class DrumboxScene extends VisScene {
                 };
             }
 
-            // Main polyhedron
-            let edges = new THREE.EdgesGeometry(geometries[0], 30);
-            const cube = new THREE.Mesh(geometries[0], this.drum_mat);
-            cube.add(new THREE.LineSegments(edges, this.wireframe_mat));
-            cube.scale.multiplyScalar(1 / 8);
+            // Setup instanced geometry
+            const edges = new THREE.EdgesGeometry(geometries[0], 30);
+            this.inst_geom_drum = new InstancedGeometryCollection(this.drums_group, geometries[0], 'Triangles', this.num_per_side * this.num_per_side);
+            this.inst_geom_edges = new InstancedGeometryCollection(this.drums_group, edges, 'Lines', this.num_per_side * this.num_per_side);
 
+
+            // Create drums
             for (let i = 0; i < this.num_per_side; i++) {
-                this.drums.push([]);
                 for (let j = 0; j < this.num_per_side; j++) {
-                    const c = cube.clone();
                     const pos = this.drum_pos_in_array(i, j);
-                    c.position.copy(pos);
-                    c.velocity = new THREE.Vector3(0, 0, 0);
-                    this.drums[i].push(c);
-                    this.drums_group.add(c);
+                    this.drum_velocities.push(0);
+                    this.drum_rotations.push(0);
+                    
+                    // Create instanced drums
+                    const scale = new THREE.Vector3(1/8, 1/8, 1/8);
+                    this.inst_geom_drum.create_geom(pos, this.drum_mat.color, scale);
+                    this.inst_geom_edges.create_geom(pos, this.wireframe_mat.color, scale);
 
                     if (i % 2 == 0 && j % 2 == 0) {
-                        const paddle_group = new PaddleGroup(this, [i, j]);
-                        this.paddle_groups.push(paddle_group);
-                        this.drums_group.add(paddle_group);
+                        //const paddle_group = new PaddleGroup(this.inst_geom_paddles, this, [i, j]);
+                        //this.paddle_groups.push(paddle_group);
                     }
                 }
             }
@@ -359,27 +368,22 @@ export class DrumboxScene extends VisScene {
         this.damping_coeff = 2;
         this.spring_constant = 200;
 
-        this.drums_group.rotation.z = Math.PI / 4 ;
+        this.drums_group.rotation.z = Math.PI / 4;
         this.camera.rotation.x = Math.PI / 4;
-
 
         this.scene = new THREE.Scene();
         this.scene.add(this.base_group);
 
-
-        //this.light2 = new THREE.AmbientLight("white", 0.10);
-        //this.base_group.add(this.light2);
         this.directional_light = new THREE.DirectionalLight("white", 0.2);
         this.directional_light.position.set(0, 0, 100);
-        //this.base_group.add(this.directional_light);
 
         this.color_hue = 0.0;
         this.clock = new THREE.Clock(true);
 
         // Camera zooming
         this.zoom_clock = new BeatClock(this);
-        this.start_zoom = this.camera.zoom;
-        this.target_zoom = this.camera.zoom;
+        this.start_zoom = 1;
+        this.target_zoom = 1;
         this.zoom_movement_beats = 1;
     }
 
@@ -407,60 +411,99 @@ export class DrumboxScene extends VisScene {
             0);
     }
 
+    instance_idx_from_drum_coords(i, j) {
+        return i * this.num_per_side + j;
+    }
+
+    get_drum_z_from_instance_idx(i, j) {
+        const instance_idx = this.instance_idx_from_drum_coords(i, j);
+        if (!this.initialized || instance_idx >= this.drum_velocities.length) {
+            return 0;
+        }
+        const pos = this.inst_geom_drum.get_pos(instance_idx);
+        return pos.z;
+    }
+
+    get_drum_rotation_from_instance_idx(i, j) {
+        const instance_idx = this.instance_idx_from_drum_coords(i, j);
+        if (!this.initialized || instance_idx >= this.drum_rotations.length) {
+            return 0;
+        }
+        return this.drum_rotations[instance_idx];
+    }
+
     anim_frame(dt) {
         if (!this.initialized) {
             return;
         }
 
-        this.drums_group.position.y += this.drift_vel * dt;
-        const max_offset = 2 * this.spacing * Math.sqrt(2);
-        while (this.drums_group.position.y > max_offset) {
-            this.drums_group.position.y -= max_offset;
-            /*for (const paddle_group of this.paddle_groups) {
-                paddle_group.offset_by(new THREE.Vector3(this.spacing, this.spacing, 0));
-            }*/
-            for (let idx = 0; idx < 2 * this.num_per_side - 1; idx++) {
-                let i = clamp(idx, 0, this.num_per_side - 1);
-                let j = clamp(2 * this.num_per_side - 1 - idx, 0, this.num_per_side - 1);
-                while (i > 1 && j > 1) {
-                    const prev_i = i - 2;
-                    const prev_j = j - 2;
-                    this.drums[i][j].position.z = this.drums[prev_i][prev_j].position.z;
-                    this.drums[i][j].velocity.copy(this.drums[prev_i][prev_j].velocity);
-                    i = prev_i;
-                    j = prev_j;
-                }
-            }
-        }
+        this.drums_group.position.z += this.drift_vel * dt;
 
+        // Update paddle groups
         for (const paddle_group of this.paddle_groups) {
             paddle_group.anim_frame(dt);
         }
 
+        // Update drum positions
+        const num_instances = this.inst_geom_drum.instancedGeometry.instanceCount;
+        for (let idx = 0; idx < num_instances; idx++) {
+            // Update position
+            const position = this.inst_geom_drum.get_pos(idx);
+            position.z += this.drum_velocities[idx] * dt;
+            this.drum_velocities[idx] += this.drum_spring_accel(position.z, this.drum_velocities[idx]) * dt;
+            this.inst_geom_drum.set_pos(idx, position);
+            this.inst_geom_edges.set_pos(idx, position);
+            
+            // Update rotation
+            this.drum_rotations[idx] += 0.01;
+            this.inst_geom_drum.set_rotation(idx, this.drum_rotations[idx]);
+            this.inst_geom_edges.set_rotation(idx, this.drum_rotations[idx]);
+        }
 
-        for (const row of this.drums) {
-            for (const drum of row) {
-                drum.rotation.z += 0.01;
-                drum.position.z += drum.velocity.z * dt;
-                drum.velocity.z += this.drum_spring_accel(drum.position.z, drum.velocity.z) * dt;
+        // Handle drum drift and wrapping
+        const max_offset = this.spacing + this.spacing;
+        if (this.drums_group.position.z > max_offset) {
+            this.drums_group.position.z -= max_offset;
+            for (const g of this.paddle_groups) {
+                g.move_system(new THREE.Vector3(0, 0, max_offset));
+            }
+            for (let i = this.num_per_side - 1; i > 0; i--) {
+                for (let j = 0; j < this.num_per_side; j++) {
+                    const from_idx = this.instance_idx_from_drum_coords(i - 1, j);
+                    const to_idx = this.instance_idx_from_drum_coords(i, j);
+                    
+                    this.drum_velocities[to_idx] = this.drum_velocities[from_idx];
+                    this.drum_rotations[to_idx] = this.drum_rotations[from_idx];
+                    
+                    // Update position z value
+                    const pos = this.inst_geom_drum.get_pos(to_idx);
+                    const from_pos = this.inst_geom_drum.get_pos(from_idx);
+                    pos.z = from_pos.z;
+                    this.inst_geom_drum.set_pos(to_idx, pos);
+                    this.inst_geom_edges.set_pos(to_idx, pos);
+                }
             }
         }
 
-        // Change color of material
+        // Change color of materials
         this.color_hue += dt * COLOR_CHANGE_RATES[this.cur_state_idx];
         const color = START_COLOR.clone();
         const color_offset = new THREE.Color();
         color_offset.setHSL(this.color_hue % 1, 1, 0.5);
         color.add(color_offset);
-        this.wireframe_mat.color.copy(color);
-        this.drum_mat.color.copy(color);
+        
+        // Update all instance colors
+        for (let idx = 0; idx < num_instances; idx++) {
+            this.inst_geom_drum.set_color(idx, color);
+            this.inst_geom_edges.set_color(idx, color);
+        }
 
         // Update camera zoom
         const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
         const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
-        if (new_zoom != this.camera.zoom) {
-            this.camera.zoom = new_zoom;
-            this.camera.updateProjectionMatrix();
+        if (new_zoom != this.cam_orth.zoom) {
+            this.cam_orth.zoom = new_zoom;
+            this.cam_orth.updateProjectionMatrix();
         }
     }
 
@@ -479,7 +522,7 @@ export class DrumboxScene extends VisScene {
         }
         if (beat % 8 == 0) {
             this.target_zoom = Math.random() * 0.5 + 0.85;
-            this.start_zoom = this.camera.zoom;
+            this.start_zoom = this.cam_orth.zoom;
             this.zoom_clock.start();
         }
     }

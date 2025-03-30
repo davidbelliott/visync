@@ -439,7 +439,7 @@ class GraphicsContext {
             [20, new CellularAutomataScene()],
             //[20, new SlideScene(["img/jungle-background.jpg"])],
             //[21, new TextScene()],
-            [21, new ShaderScene("glsl/chunks/octagrams.frag")],
+            //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
             //[20, new CelticKnotScene()],
         ]);
         this.cur_scene_idx = 0;
@@ -461,7 +461,7 @@ class GraphicsContext {
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
         this.renderer = new THREE.WebGLRenderer({
-            antialias: false,
+            antialias: true,
             powerPreference: 'high-performance',
             depth: true,
             stencil: false,
@@ -584,8 +584,8 @@ class GraphicsContext {
         this.buffers = [];
         for (let i = 0; i < Math.max(2, this.num_traces * this.trace_spacing); i++) {
             this.buffers.push(new THREE.WebGLRenderTarget(width, height, {
-                minFilter: THREE.NearestFilter,
-                magFilter: THREE.NearestFilter,
+                minFilter: THREE.LinearFilter,
+                magFilter: THREE.LinearFilter,
                 format: THREE.RGBAFormat,
                 depthBuffer: true,
                 stencilBuffer: false
@@ -595,112 +595,97 @@ class GraphicsContext {
     }
 
 render() {
-    if (ENABLE_GLOBAL_TRACERS) {
-        this.renderer.autoClearColor = false;
-        this.renderer.setRenderTarget(this.buffers[this.cur_buffer_idx]);
-    }
+    if (true) {
+        // Use direct rendering to screen in scene bg -> fg order
+        this.renderer.clear();
 
-    // Store original clear color
-    const originalClearColor = this.renderer.getClearColor(new THREE.Color());
-    const originalClearAlpha = this.renderer.getClearAlpha();
-    
-    // Create blend shader if it doesn't exist
-    if (!this.blendMaterial) {
-        this.blendMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                bgTexture: { value: null },
-                fgTexture: { value: null }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                varying vec2 vUv;
-                uniform sampler2D bgTexture;
-                uniform sampler2D fgTexture;
-                void main() {
-                    vec4 bgColor = texture2D(bgTexture, vUv);
-                    vec4 fgColor = texture2D(fgTexture, vUv);
-                    
-                    // Alpha blending
-                    gl_FragColor = vec4(
-                        mix(bgColor.rgb, fgColor.rgb, fgColor.a),
-                        max(bgColor.a, fgColor.a)
-                    );
-                }
-            `,
-            transparent: true,
-            depthTest: false
-        });
+        // Render background scene
+        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
+            const vector = new THREE.Vector2(0, 0);
+            this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
+        } else {
+            this.renderer.clear();
+        }
+
+        // Render foreground scene
+        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
+    } else {
+        // Do overlay render by rendering bg and fg to buffers and blending
+
+        const originalClearColor = this.renderer.getClearColor(new THREE.Color());
+        const originalClearAlpha = this.renderer.getClearAlpha();
         
-        this.displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMaterial);
-        this.displayQuad.frustumCulled = false;
-        this.displayScene = new THREE.Scene();
-        this.displayScene.add(this.displayQuad);
-        this.displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
-    }
-    
-    // Render background scene to buffer 0
-    if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-        this.renderer.setRenderTarget(this.buffers[0]);
+        // Create blend shader if it doesn't exist
+        if (!this.blendMaterial) {
+            this.blendMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    bgTexture: { value: null },
+                    fgTexture: { value: null }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying vec2 vUv;
+                    uniform sampler2D bgTexture;
+                    uniform sampler2D fgTexture;
+                    void main() {
+                        vec4 bgColor = texture2D(bgTexture, vUv);
+                        vec4 fgColor = texture2D(fgTexture, vUv);
+                        
+                        // Alpha blending
+                        gl_FragColor = vec4(
+                            mix(bgColor.rgb, fgColor.rgb, fgColor.a),
+                            max(bgColor.a, fgColor.a)
+                        );
+                    }
+                `,
+                transparent: true,
+                depthTest: false
+            });
+            
+            this.displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMaterial);
+            this.displayQuad.frustumCulled = false;
+            this.displayScene = new THREE.Scene();
+            this.displayScene.add(this.displayQuad);
+            this.displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+        }
+        
+        // Render background scene to buffer 0
+        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
+            this.renderer.setRenderTarget(this.buffers[0]);
+            this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
+            this.renderer.clear();
+            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
+        } else {
+            // If no background, clear buffer with transparent black
+            this.renderer.setRenderTarget(this.buffers[0]);
+            this.renderer.setClearColor(0x000000, 0);
+            this.renderer.clear();
+        }
+        
+        // Render foreground scene to buffer 1
+        this.renderer.setRenderTarget(this.buffers[1]);
         this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
         this.renderer.clear();
-        this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
-    } else {
-        // If no background, clear buffer with transparent black
-        this.renderer.setRenderTarget(this.buffers[0]);
-        this.renderer.setClearColor(0x000000, 0);
-        this.renderer.clear();
-    }
-    
-    // Render foreground scene to buffer 1
-    this.renderer.setRenderTarget(this.buffers[1]);
-    this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
-    this.renderer.clear();
-    this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
-    
-    // Blend both buffers and render to screen
-    this.renderer.setRenderTarget(null);
-    this.renderer.setClearColor(BG_COLOR, 1);
-    this.renderer.clear();
-    
-    this.blendMaterial.uniforms.bgTexture.value = this.buffers[0].texture;
-    this.blendMaterial.uniforms.fgTexture.value = this.buffers[1].texture;
-    this.renderer.render(this.displayScene, this.displayCamera);
-    
-    // Restore original clear color
-    this.renderer.setClearColor(originalClearColor, originalClearAlpha);
-    
-    // Handle tracers if enabled
-    if (ENABLE_GLOBAL_TRACERS) {
-        let tex_values = [];
-        let idx = this.cur_buffer_idx;
-        for (let i = 0; i < this.buffers.length; i++) {
-            if (i % this.trace_spacing == 0) {
-                tex_values.push(this.buffers[idx].texture);
-            }
-            idx--;
-            if (idx < 0) {
-                idx = this.buffers.length - 1;
-            }
-        }
-        this.blend_material.uniforms.t1.value = tex_values[0];
-        this.blend_material.uniforms.t2.value = tex_values[1];
-        this.blend_material.uniforms.t3.value = tex_values[2];
-        this.blend_material.uniforms.t4.value = tex_values[3];
-        this.blend_material.uniforms.t5.value = tex_values[4];
-        this.blend_material.uniforms.t6.value = tex_values[5];
-        this.blend_material.uniforms.ratio.value = this.trace_persistence;
+        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
         
+        // Blend both buffers and render to screen
         this.renderer.setRenderTarget(null);
+        this.renderer.setClearColor(BG_COLOR, 1);
         this.renderer.clear();
-        this.renderer.clearDepth();
-        this.renderer.render(this.scene, this.camera);
-        this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
+        
+        this.blendMaterial.uniforms.bgTexture.value = this.buffers[0].texture;
+        this.blendMaterial.uniforms.fgTexture.value = this.buffers[1].texture;
+        this.renderer.render(this.displayScene, this.displayCamera);
+        
+        // Restore original clear color
+        this.renderer.setClearColor(originalClearColor, originalClearAlpha);
     }
 }
 

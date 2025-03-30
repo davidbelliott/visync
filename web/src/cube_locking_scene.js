@@ -127,11 +127,11 @@ export class CubeLockingScene extends VisScene {
 
         this.base_group = new THREE.Group();
 
-        this.light = new THREE.DirectionalLight("white", 1);
+        this.light = new THREE.DirectionalLight("white", 0.5);
         this.light.position.set(0, 100, 20);
         this.base_group.add(this.light);
 
-        this.light2 = new THREE.PointLight("white", 100, 100, 1.5);
+        this.light2 = new THREE.PointLight("white", 50, 100, 1.5);
         this.light2.position.set(0, 20, -20);
         this.base_group.add(this.light2);
 
@@ -269,8 +269,8 @@ export class CubeLockingScene extends VisScene {
                 lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot);
             this.base_group.rotation.y = Math.PI / 2 * (0.5 + this.cur_rot);
 
-            const start_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "cyan" : "magenta"));
-            const end_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "magenta" : "cyan"));
+            const start_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "orange" : "magenta"));
+            const end_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "magenta" : "orange"));
             const cur_color = new THREE.Color();
             cur_color.lerpColors(start_color, end_color, clamp(frac, 0, 1));
             if (this.fill_mat != null) {

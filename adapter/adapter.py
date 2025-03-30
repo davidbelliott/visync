@@ -10,12 +10,11 @@ import websockets
 import random
 from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
-from blink import led_update_loop, led_handle_msgs
 from message import *
 import sys
 
 USE_STROBE = False
-USE_LEDS = True
+USE_LEDS = False
 BEAT_RESET_TIMEOUT_S = 1
 WS_PORT = 8765
 MIN_BPM_SAMPLES = 4 * 24
@@ -23,6 +22,9 @@ NUM_BPM_SAMPLES = 16 * 24
 
 LOG_MSGS = False
 LOG_SYNC = False
+
+if USE_LEDS:
+    from blink import led_update_loop, led_handle_msgs
 
 dmx = None
 strobe = None
@@ -346,15 +348,15 @@ async def main_loop_fake(bpm):
             beat_idx = new_beat_idx
             cur_beats = fake_beat[beat_idx % len(fake_beat)]
 
-            if new_beat_idx % 16 == 0:
+            '''if new_beat_idx % 16 == 0:
                 # Advance or decrease state
                 adv_msg = MsgAdvanceSceneState(0, cur_advance_step)
                 websockets.broadcast(connected, adv_msg.to_json())
                 cur_advance_state += cur_advance_step
                 if (cur_advance_state > 4 or cur_advance_state <= 0):
-                    cur_advance_step *= -1
+                    cur_advance_step *= -1'''
 
-            if new_beat_idx % 128 == 0:
+            '''if new_beat_idx % 128 == 0:
                 # Change scene
                 new_scene = (int(random.random() * 20) + 1)
                 if cur_scenes[0] == 0:
@@ -368,7 +370,7 @@ async def main_loop_fake(bpm):
                 ch_scene_msg = MsgGotoScene(0, new_scene, bg)
                 websockets.broadcast(connected, ch_scene_msg.to_json())
                 last_changed_fg = not bg
-                cur_scenes[1 if bg else 0] = new_scene
+                cur_scenes[1 if bg else 0] = new_scene'''
 
             for beat in cur_beats:
                 beat_msg = MsgBeat(time.time(), beat)

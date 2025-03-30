@@ -189,6 +189,8 @@ export class YellowRobotScene extends VisScene {
 
         this.camera = this.cam_orth;
         //this.camera = this.cam_persp;
+        const isom_angle = Math.asin(1 / Math.sqrt(3));
+        this.all_group.rotation.x = isom_angle;
 
         update_orth_camera_aspect(this.cam_orth, aspect, this.frustum_size);
         update_persp_camera_aspect(this.cam_persp, aspect);
@@ -406,7 +408,7 @@ export class YellowRobotScene extends VisScene {
             circle.material.opacity = 1.0 - beat_time;
         }
 
-        this.all_group.rotation.x = this.rot[0] * Math.PI / div;
+        //this.all_group.rotation.x = this.rot[0] * Math.PI / div;
         this.all_group.rotation.y = this.rot[1] * Math.PI / div;
 
     }

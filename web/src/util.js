@@ -184,7 +184,7 @@ export function make_wireframe_cube(dims, color) {
 export function create_instanced_cube(dims, color, add_fill=true, fill_color="black", fill_opacity=0.0) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);
-    const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 1 } );
+    const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 2 } );
     const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
 
     if (add_fill) {
@@ -201,6 +201,50 @@ export function create_instanced_cube(dims, color, add_fill=true, fill_color="bl
     }
 
     return mesh;
+}
+
+export function create_instanced_cube_templates(width=1, height=1, depth=1) {
+    // Create template for wireframe geometry
+    const template_wireframe = new THREE.BufferGeometry();
+    {
+        // create a simple cube shape, using line segments
+        const square_vertices = [
+            [-0.5 * width, -0.5 * height],
+            [0.5 * width, -0.5 * height],
+            [0.5 * width, 0.5 * height],
+            [-0.5 * width, 0.5 * height],
+        ];
+        const vert_buf = [];
+        // Create the front and back faces of the cube
+        for (let i = 0; i < 2; i++) {
+            for (let j = 0; j < 4; j++) {
+                // Add a line between the current vertex and the next vertex
+                vert_buf.push(...square_vertices[j]);
+                vert_buf.push(depth * (i - 0.5));
+                vert_buf.push(...square_vertices[(j + 1) % 4]);
+                vert_buf.push(depth * (i - 0.5));
+            }
+        }
+        // Create the lines between the front and back faces
+        for (let j = 0; j < 4; j++) {
+            // Add a line between the current vertex and the next vertex
+            for (let i = 0; i < 2; i++) {
+                vert_buf.push(...square_vertices[j]);
+                vert_buf.push(depth * (i - 0.5));
+            }
+        }
+
+        const vertices = new Float32Array(vert_buf);
+
+        // itemSize = 3 because there are 3 values (components) per vertex
+        template_wireframe.setAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+        template_wireframe.instanceCount = 1;
+    }
+
+    // Create template for fill cube
+    const template_fill = new THREE.BoxGeometry(width, height, depth);
+
+    return [template_wireframe, template_fill];
 }
 
 

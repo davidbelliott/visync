@@ -125,8 +125,9 @@ function connect() {
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     //const relay_url = `${window.location.hostname}/ws/`;
+    const relay_url = `${window.location.hostname}:8765`;
     //const relay_url = 'raspberrypi/ws/';
-    const relay_url = '192.168.4.1/ws/';
+    //const relay_url = '192.168.4.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -462,11 +463,11 @@ class GraphicsContext {
         document.body.appendChild(this.container);
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
-            powerPreference: 'high-performance',
+            //powerPreference: 'high-performance',
             depth: true,
             stencil: false,
             format: THREE.RGBAFormat,
-            precision: 'highp',
+            //precision: 'highp',
         });
         this.renderer.autoClearColor = false;
         this.renderer.autoClearDepth = true;

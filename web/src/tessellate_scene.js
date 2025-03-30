@@ -14,9 +14,6 @@ import {
 import { InstancedGeometryCollection } from './instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
-const USE_SHADER = true;
-const SVG_SIZE = 80;
-
 export class TessellateScene extends VisScene {
     constructor(env) {
         super(env);
@@ -40,13 +37,11 @@ export class TessellateScene extends VisScene {
 
         this.materials = [];
 
-        this.num_per_side = 3;
-
         this.scene = new THREE.Scene();
 
-          var light = new THREE.PointLight(0xffffff, 1, Infinity);
+      var light = new THREE.PointLight(0xffffff, 1, Infinity);
 
-  this.scene.add(light);
+      this.scene.add(light);
 
         
 
@@ -116,8 +111,8 @@ export class TessellateScene extends VisScene {
                     quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), i * 2 * Math.PI / 3);
                     vector.applyQuaternion(quaternion);
                     this.indices_of_cells.push([]);
-                    for (let j = -6; j < 7; j++) {
-                        for (let k = -6; k < 7; k++) {
+                    for (let j = -4; j < 5; j++) {
+                        for (let k = -4; k < 5; k++) {
                             const quaternion2 = new THREE.Quaternion();
                             quaternion2.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 2 * Math.PI / 3);
 
@@ -137,12 +132,6 @@ export class TessellateScene extends VisScene {
                             //const vector = new THREE.Vector3(-5.35, 1.65, 0);
                             //vector.add(offset);
 
-                            const cell = group.clone();
-                            for (const child of cell.children) {
-                                if (child.material.type == "LineBasicMaterial") {
-                                    child.material = this.materials[i];
-                                }
-                            }
                             this_pos.applyQuaternion(quaternion);
 
                             for (let l = 0; l < this.inst_geoms.length; l++) {
@@ -151,18 +140,7 @@ export class TessellateScene extends VisScene {
                                     ]
                                 );
                             }
-                            cell.position.copy(this_pos);
-                            cell.applyQuaternion(quaternion);
-                            cell.wave_idx = j;
-                            //this.cells[i].push(cell);
-                            //this.base_group.add(cell);
                         }
-                    }
-                }
-
-
-                for (let i = 0; i < this.num_per_side; i++) {
-                    for (let j = 0; j < this.num_per_side; j++) {
                     }
                 }
 
@@ -209,9 +187,9 @@ export class TessellateScene extends VisScene {
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 8;
-        this.evolve_time += 0.5 * clock_dt * beats_per_sec;
+        this.evolve_time += 1.0 * clock_dt;
         if (this.beat_clock.running) {
-            this.evolve_time += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+            this.evolve_time += clock_dt * (beat_elapsed < 1.0 ? 4.0 : 0.0);
         }
         const cur_rot = this.evolve_time * Math.PI * 2 / 128
         this.base_group.rotation.z = cur_rot;

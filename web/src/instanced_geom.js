@@ -223,14 +223,14 @@ export class InstancedGeometryCollection {
         }
     }
 
-    create_geom(pos, color, scale, rotation=0) {
+    create_geom(pos, color, scale, rotation=0, alpha=1) {
         if (this.instancedGeometry.instanceCount >= this.maxInstances) {
             console.error('Max instances reached');
             return -1;
         }
 
         this.set_pos(this.instancedGeometry.instanceCount, pos);
-        this.set_color(this.instancedGeometry.instanceCount, color);
+        this.set_color(this.instancedGeometry.instanceCount, color, alpha);
         this.set_scale(this.instancedGeometry.instanceCount, scale);
         this.set_rotation(this.instancedGeometry.instanceCount, rotation);
 

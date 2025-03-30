@@ -52,7 +52,7 @@ import { BoxDef } from './src/geom_def.js';
 import "./src/normalize.css";
 import "./src/style.css";
 
-const START_SCENE = 7;
+const START_SCENE = 20;
 const START_BG_SCENE = 0;
 
 const MSG_TYPE_SYNC = 0;
@@ -462,12 +462,10 @@ class GraphicsContext {
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
         this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            //powerPreference: 'high-performance',
+            antialias: false,
             depth: true,
             stencil: false,
             format: THREE.RGBAFormat,
-            //precision: 'highp',
         });
         this.renderer.autoClearColor = false;
         this.renderer.autoClearDepth = true;
@@ -695,7 +693,8 @@ render() {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        this.renderer.setPixelRatio(window.devicePixelRatio / 1);
+        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 720), 1);
+        this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
             scene.handle_resize(width, height);

@@ -115,6 +115,10 @@ canvas {
     padding: 0px;
     margin: 0px;
     cursor: none;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
 
 #textbox {

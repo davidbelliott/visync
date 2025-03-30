@@ -103,7 +103,7 @@ export class CellularAutomataScene extends VisScene {
         this.cube_group = new THREE.Group();
         this.scene.add(this.cube_group);
 
-        this.light = new THREE.PointLight("white", 40, 0, 1.0);
+        this.light = new THREE.PointLight("white", 20, 0, 1.0);
         this.light.position.set(-10, 10, 0);
         this.scene.add(this.light);
 
@@ -172,19 +172,23 @@ export class CellularAutomataScene extends VisScene {
                         (i + 1 / 2) * CUBE_SIZE - total_side_length / 2,
                         (j + 1 / 2) * CUBE_SIZE - total_side_length / 2,
                         (k + 1 / 2) * CUBE_SIZE - total_side_length / 2);
-                    this.inst_geom_wireframe.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
+                    this.inst_geom_wireframe.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE), 0.0, 0.5);
                     this.inst_geom_fill.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                 }
             }
         }
+
+        this.beat_clock = new BeatClock(this);
+
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
         this.camera.rotation.x = isom_angle;
         this.elapsed_time = 0;
     }
     
     anim_frame(dt) {
-        this.cube_group.rotation.y += 0.002;
-        this.elapsed_time += dt;
+        const adjusted_elapsed = (this.beat_clock.running && this.beat_clock.getElapsedBeats() < 0.5 ? 4 : 1) * dt;
+        this.cube_group.rotation.y += 0.05 * dt;
+        this.elapsed_time += adjusted_elapsed;
 
         const saturation = 1.0;
         const lightness = 0.5;
@@ -233,6 +237,7 @@ export class CellularAutomataScene extends VisScene {
 
     handle_beat(t, channel) {
         if (channel == 1) {
+            this.beat_clock.start();
         }
     }
 

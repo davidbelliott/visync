@@ -19,7 +19,7 @@ import {
 
 export class IceCreamScene extends VisScene {
     constructor() {
-        super();
+        super('ice-cream');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

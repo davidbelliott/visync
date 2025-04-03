@@ -106,7 +106,7 @@ const FILL_OPACITY = 0.5;
 
 export class FastCubeScene extends VisScene {
     constructor() {
-        super();
+        super('cubeman');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

@@ -3,7 +3,7 @@
 # Build + deploy the current working version of the site to nginx's html
 # directory
 
-REMOTE="192.168.4.1"
+REMOTE="192.168.5.1"
 REMOTE_DIR="visync-dist"
 
 cd "$(dirname "$0")"

@@ -157,7 +157,7 @@ class CubeAssembly extends THREE.Group {
 
 export class HexagonScene extends VisScene {
     constructor() {
-        super();
+        super('hexagons');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

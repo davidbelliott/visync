@@ -11,7 +11,8 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(num_states=1, max_bpm=140) {
+    constructor(shortname='vis-scene', num_states=1, max_bpm=140) {
+        this.shortname = shortname;
         this.cur_divisor = 24;
         this.target_divisor = this.cur_divisor;
         this.bpm = 120;

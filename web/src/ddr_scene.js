@@ -254,7 +254,7 @@ class DDRArrow extends THREE.LineSegments {
 
 export class DDRScene extends VisScene {
     constructor() {
-        super(1, 180);
+        super('ddrrobot', 1, 180);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;

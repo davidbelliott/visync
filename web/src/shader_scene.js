@@ -19,7 +19,7 @@ const shader_epilogue = ['void main() {',
 
 export class ShaderScene extends VisScene {
     constructor(fragmentShaderUrl) {
-        super();
+        super(`shader:${fragmentShaderUrl}`);
         
         // Setup basic scene with a full-screen quad
         this.scene = new THREE.Scene();

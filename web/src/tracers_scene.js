@@ -27,7 +27,7 @@ function make_wireframe_polyhedron(radius, detail) {
 
 export class TracersScene extends VisScene {
     constructor() {
-        super(3);
+        super('tracers', 3);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);

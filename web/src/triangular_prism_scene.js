@@ -7,7 +7,7 @@ import { InstancedGeometryCollection } from './instanced_geom.js';
 
 export class TriangularPrismScene extends VisScene {
     constructor() {
-        super(2, 180);
+        super('rollingcube', 2, 180);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;

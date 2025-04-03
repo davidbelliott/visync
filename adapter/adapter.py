@@ -48,9 +48,6 @@ class ClockTracker:
         now = time.time()
         elapsed = 0
 
-
-
-
         if self._last_clock_est != None:
             elapsed = now - self._last_clock_est
             if elapsed > BEAT_RESET_TIMEOUT_S:
@@ -70,7 +67,7 @@ class ClockTracker:
             self._samples.popleft()
 
         if len(self._samples) >= MIN_BPM_SAMPLES and sum(self._samples) > 0:
-            self.sync_rate_hz = len(self._samples) / (self._samples[-1] - self._samples[0])
+            self.sync_rate_hz = (len(self._samples) - 1) / (self._samples[-1] - self._samples[0])
             self.sync = True
 
 

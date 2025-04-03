@@ -4,7 +4,7 @@ import { VisScene } from './vis_scene.js'
 
 export class TextScene extends VisScene {
     constructor(text_file_path='/txt/drums.txt') {
-        super(0);
+        super('text', 0);
 
         this.paragraphs = [''];
         this.text_div = document.getElementById('textbox');

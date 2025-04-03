@@ -18,7 +18,7 @@ const SVG_SIZE = 80;
 
 export class ChineseScene extends VisScene {
     constructor() {
-        super();
+        super('rwalkglyphs');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

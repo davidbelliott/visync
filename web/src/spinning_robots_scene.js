@@ -38,7 +38,7 @@ function cube_at(pos, dims, color="white") {
 
 class Robot extends THREE.Object3D {
     constructor(shoe_mesh, spinner_phase_offset) {
-        super();
+        super('spinningrobots');
         this.arm_base_y = 0.0;
         this.body_base_y = 1.0;
         this.foot_base_y = -3.0;

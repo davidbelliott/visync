@@ -16,7 +16,7 @@ import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
 export class TessellateScene extends VisScene {
     constructor(env) {
-        super(env);
+        super('tessellate', env);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

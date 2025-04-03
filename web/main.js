@@ -119,15 +119,30 @@ class Queue {
 }
 
 
+function msg_to_disp_string(msg) {
+    let msg_txt = '';
+    const str_len = 12;
+    if (msg.msg_type == MSG_TYPE_SYNC) {
+        msg_txt = `SYNC ${msg.sync_idx}`;
+    } else if (msg.msg_type == MSG_TYPE_BEAT) {
+        msg_txt = `BEAT ${msg.channel}`;
+    } else if (msg.msg_type == MSG_TYPE_GOTO_SCENE) {
+        msg_txt = `GOTO ${msg.scene} ${msg.bg}`;
+    } else if (msg.msg_type == MSG_TYPE_ADVANCE_SCENE_STATE) {
+        msg_txt = `ADV ${msg.steps}`;
+    }
+    return msg_txt.substring(0, str_len).padEnd(str_len);
+}
+
+
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    //const relay_url = `${window.location.hostname}/ws/`;
-    const relay_url = `${window.location.hostname}:8765`;
+    //const relay_url = `${window.location.hostname}:8765`;
     //const relay_url = 'raspberrypi/ws/';
-    //const relay_url = '192.168.4.1/ws/';
+    const relay_url = '192.168.5.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -179,6 +194,12 @@ function connect() {
         }
         const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
         socket.send(JSON.stringify(resp));
+
+        // Update the overlay with last msg contents
+        if (type != MSG_TYPE_SYNC) {
+            const last_msg_elem = document.getElementById('lastmsg');
+            last_msg_elem.innerHTML = msg_to_disp_string(msg);
+        }
     });
 
     socket.addEventListener('close', function(e) {
@@ -693,7 +714,8 @@ render() {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 720), 1);
+        //const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 1);
+        const div_ratio = window.devicePixelRatio;
         this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
@@ -716,6 +738,14 @@ render() {
             if (new_scene_idx != other_idx) {
                 this.scenes.get(new_scene_idx).activate();
             }
+
+            // Update relevant element in the HTML overlay
+            const str_len = 10;
+            const hud_div = document.getElementById(bg ? 'bg-name' : 'fg-name');
+            const scene_name_pad = this.scenes.get(new_scene_idx).shortname
+                .substring(0, str_len).padEnd(str_len);
+            console.log(scene_name_pad);
+            hud_div.innerHTML = scene_name_pad;
         }
     }
 
@@ -780,6 +810,15 @@ render() {
         /*this.scenes.forEach((scene) => {
             scene.handle_sync_raw(sync_rate_hz, beat);
         });*/
+        // Update overlay with sync rate hz (convert to bpm)
+        const bpm = Math.round(sync_rate_hz * 60 / 24);
+        const bpm_elem = document.getElementById("bpm");
+        bpm_elem.innerHTML = String(bpm).padEnd(3);
+
+        // Update the overlay with latency
+        const latency_elem = document.getElementById('latency');
+        const latency_str = `${(latency * 1000).toFixed(1)} ms`.substring(0, 6).padEnd(6);
+        latency_elem.innerHTML = latency_str;
     }
 
     handle_beat(latency, channel) {

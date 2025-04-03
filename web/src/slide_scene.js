@@ -4,7 +4,7 @@ import { VisScene } from './vis_scene.js';
 
 export class SlideScene extends VisScene {
     constructor(img_paths) {
-        super(img_paths.length);
+        super('slides', img_paths.length);
         this.img_paths = img_paths;
         this.imgbox = document.getElementById("imgbox");
         const img = document.createElement('img');

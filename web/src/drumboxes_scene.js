@@ -269,7 +269,7 @@ class PaddleGroup extends THREE.Group {
 
 export class DrumboxScene extends VisScene {
     constructor() {
-        super(3);
+        super('drumbox', 3);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;

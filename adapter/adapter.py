@@ -152,7 +152,6 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
 class RtMidiInputHandler:
     def __init__(self, websocket):
         self.websocket = websocket
-        self.last_transmit_latency = 0
 
     def __call__(self, event, data=None):
         t_callback = time.time()
@@ -176,8 +175,8 @@ class RtMidiInputHandler:
             control_idx = midi_msg[1]
             control_val = midi_msg[2]
             # This channel is used for graphics scene switching
-            #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
-            ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
+            #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
+            ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val)
 
         if ws_msg != None and LOG_MSGS:
             print(ws_msg)
@@ -192,14 +191,18 @@ connected = set()
 adapter = None
 adapter_secret = None
 
+# Last message's roundtrip latency divided by two, in seconds
+last_msg_latency = 0.0
+
 async def handler(websocket):
+    global last_msg_latency
     connected.add(websocket)
     print("Client connected")
     try:
         async for message in websocket:
-            # TODO: get estimated RTT from message
-            #print(message)
-            pass
+            msg = json.loads(message)
+            last_msg_latency = (time.time() - msg['t']) / 2
+            print(last_msg_latency)
     finally:
         # Unregister client
         connected.remove(websocket)
@@ -209,7 +212,6 @@ async def handler(websocket):
 class SerialMidiHandler:
     def __init__(self):
         self.bytes = []
-        self.last_transmit_latency = 0
         self.playing = True
 
     def handle_midi_byte(self, b):
@@ -221,7 +223,7 @@ class SerialMidiHandler:
                 clock_tracker.ping()
                 if clock_tracker.sync and self.playing:
                     #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
-                    ws_msg = MsgSync(self.last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                    ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                     if LOG_SYNC:
                         print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
                         print(f'beat: {clock_tracker.cur_sync_idx // 24}')
@@ -273,15 +275,15 @@ class SerialMidiHandler:
                     print(f"control change: {self.bytes[1:]}")
                     control_idx, control_val = self.bytes[1:]
                     # This channel is used for graphics scene switching
-                    ws_msg = MsgControlChange(self.last_transmit_latency, control_idx, control_val)
-                    #ws_msg = MsgGotoScene(self.last_transmit_latency, int(control_val / 5), control_idx > 1)
+                    ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val)
+                    #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == midiconstants.PITCH_BEND:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
                     value_lo, value_hi = self.bytes[1:]
                     value = (value_hi << 7) | value_lo
-                    ws_msg = MsgPitchBend(self.last_transmit_latency, value)
+                    ws_msg = MsgPitchBend(last_msg_latency, value)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == midiconstants.PROGRAM_CHANGE:
                 self.bytes.append(b)
@@ -289,7 +291,7 @@ class SerialMidiHandler:
                 value = self.bytes[1]
                 print(f'program change: {channel} {value}')
                 clock_tracker.cur_sync_idx = -1
-                ws_msg = MsgProgramChange(self.last_transmit_latency, channel, value)
+                ws_msg = MsgProgramChange(last_msg_latency, channel, value)
                 self.bytes = []
             else:
                 self.bytes = []
@@ -328,6 +330,7 @@ async def main_loop_serial(serial_device, msg_queue):
 
 
 async def main_loop_fake(bpm):
+    global last_msg_latency
     sync_idx = 0
     beat_idx = 0
     sync_rate_hz = (bpm * 24) / 60
@@ -337,7 +340,7 @@ async def main_loop_fake(bpm):
     last_changed_fg = True
     cur_scenes = [1, 0] # fg, bg
     while True:
-        sync_msg = MsgSync(0, sync_rate_hz, sync_idx)
+        sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
         time_sent = time.time()
         new_beat_idx = sync_idx // 6
@@ -370,7 +373,7 @@ async def main_loop_fake(bpm):
                 cur_scenes[1 if bg else 0] = new_scene'''
 
             for beat in cur_beats:
-                beat_msg = MsgBeat(time.time(), beat)
+                beat_msg = MsgBeat(last_msg_latency, beat)
                 websockets.broadcast(connected, beat_msg.to_json())
         time_elapsed_this_iter = time.time() - time_sent
         await asyncio.sleep(1 / sync_rate_hz - time_elapsed_this_iter)

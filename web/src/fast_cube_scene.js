@@ -223,7 +223,7 @@ export class FastCubeScene extends VisScene {
                 this.camera.top - this.camera.bottom);
             this.plane = new THREE.Mesh(geometry, this.vbo_material);
             this.plane.position.z = -100;
-            this.scene.add(this.plane);
+            //this.scene.add(this.plane);
         });
 
         this.scene.add(this.base_group);

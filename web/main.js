@@ -52,8 +52,6 @@ import { BoxDef } from './src/geom_def.js';
 import "./src/normalize.css";
 import "./src/style.css";
 
-const START_SCENE = 20;
-const START_BG_SCENE = 0;
 
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
@@ -140,9 +138,9 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    //const relay_url = `${window.location.hostname}:8765`;
+    const relay_url = `${window.location.hostname}:8765`;
     //const relay_url = 'raspberrypi/ws/';
-    const relay_url = '192.168.5.1/ws/';
+    //const relay_url = '192.168.5.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -168,10 +166,15 @@ function connect() {
         /*const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
             + context.est_avg_latency   // average latency
             + EXTRA_LATENCY;            // extra latency (manual calibration)*/
-        const est_tot_latency = EXTRA_LATENCY;
+        const est_tot_latency = msg.latency + EXTRA_LATENCY;
 
         //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
         //console.log(`Latency: ${context.est_avg_latency}`);
+
+        // Update the overlay with latency
+        const latency_elem = document.getElementById('latency');
+        const latency_str = `${(est_tot_latency * 1000).toFixed(1)}`.substring(0, 4).padEnd(4);
+        latency_elem.innerHTML = latency_str;
 
         if (type == MSG_TYPE_SYNC) {
             context.handle_sync(est_tot_latency, msg.sync_rate_hz, msg.sync_idx);
@@ -214,6 +217,7 @@ function connect() {
         console.log('Socket encountered error: ', e, 'Closing socket');
         socket.close();
     });
+
 }
 
 
@@ -464,11 +468,9 @@ class GraphicsContext {
             //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
             //[20, new CelticKnotScene()],
         ]);
-        this.cur_scene_idx = 0;
-        this.cur_bg_scene_idx = 0;
+        this.change_scene(17);
+        this.change_scene(20, true);
         this.cur_scene_bank = 0;
-        this.change_scene(START_SCENE);
-        this.change_scene(START_BG_SCENE, true);
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
 
@@ -560,11 +562,8 @@ class GraphicsContext {
             this.scene.add( mesh );
         }
 
-	this.on_window_resize();    // also creates buffers
+        this.on_window_resize();
         window.addEventListener('resize', () => { this.on_window_resize(); });
-
-        this.est_avg_skew = null;
-        this.est_avg_latency = null;
     }
 
     set_tracer_params(num_traces, spacing, persistence) {
@@ -714,8 +713,8 @@ render() {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        //const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 1);
-        const div_ratio = window.devicePixelRatio;
+        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
+        //const div_ratio = window.devicePixelRatio;
         this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
@@ -727,7 +726,7 @@ render() {
         if (this.scenes.has(new_scene_idx)) {
             const cur_idx = bg ? this.cur_bg_scene_idx : this.cur_scene_idx;
             const other_idx = bg ? this.cur_scene_idx : this.cur_bg_scene_idx;
-            if (cur_idx != other_idx) {
+            if (cur_idx !== undefined && cur_idx != other_idx) {
                 this.scenes.get(cur_idx).deactivate();
             }
             if (bg) {
@@ -814,11 +813,6 @@ render() {
         const bpm = Math.round(sync_rate_hz * 60 / 24);
         const bpm_elem = document.getElementById("bpm");
         bpm_elem.innerHTML = String(bpm).padEnd(3);
-
-        // Update the overlay with latency
-        const latency_elem = document.getElementById('latency');
-        const latency_str = `${(latency * 1000).toFixed(1)} ms`.substring(0, 6).padEnd(6);
-        latency_elem.innerHTML = latency_str;
     }
 
     handle_beat(latency, channel) {

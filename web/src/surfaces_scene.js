@@ -107,7 +107,7 @@ export class SurfacesScene extends VisScene {
     handle_beat(t, channel) {
         const delay = this.get_beat_delay(t);
         setTimeout(() => {
-            if (channel == 1 || channel == 3) {
+            if (channel == 2) {
                 this.beat_clock.start();
                 this.rot_vec.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
                 this.rot_vec.normalize();

@@ -138,9 +138,9 @@ function connect() {
     let pathname = window.location.pathname;
     pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const relay_url = `${window.location.hostname}:8765`;
+    //const relay_url = `${window.location.hostname}:8765`;
     //const relay_url = 'raspberrypi/ws/';
-    //const relay_url = '192.168.5.1/ws/';
+    const relay_url = '192.168.5.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
@@ -166,7 +166,7 @@ function connect() {
         /*const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
             + context.est_avg_latency   // average latency
             + EXTRA_LATENCY;            // extra latency (manual calibration)*/
-        const est_tot_latency = msg.latency + EXTRA_LATENCY;
+        const est_tot_latency = /*msg.latency +*/ EXTRA_LATENCY;
 
         //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
         //console.log(`Latency: ${context.est_avg_latency}`);
@@ -468,8 +468,8 @@ class GraphicsContext {
             //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
             //[20, new CelticKnotScene()],
         ]);
-        this.change_scene(17);
-        this.change_scene(20, true);
+        this.change_scene(7);
+        this.change_scene(0, true);
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);

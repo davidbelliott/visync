@@ -109,7 +109,7 @@ def strobe_off():
 NUM_BARS = 4
 fake_beat = [[] for i in range(0, NUM_BARS * 16)]
 for bar in range(0, NUM_BARS):
-    for i in [0, 10, 14]:
+    for i in [0, 3, 7, 11]:
         fake_beat[16 * bar + i].append(1)
     for i in [8]:
         fake_beat[16 * bar + i].append(2)

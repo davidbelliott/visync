@@ -7,6 +7,7 @@ import {
     update_orth_camera_aspect,
     create_instanced_cube_templates,
     create_instanced_cube,
+    make_wireframe_cone,
     rand_int,
     arr_eq,
     Spark,
@@ -15,7 +16,7 @@ import {
 import { InstancedGeometryCollection } from './instanced_geom.js';
 
 const CUBE_WAVE_SPEED = 1.5;
-const NUM_CUBES_PER_SIDE = 26;
+const NUM_CUBES_PER_SIDE = 10;
 
 class Excitation extends THREE.Object3D {
     constructor(init_time) {
@@ -24,10 +25,71 @@ class Excitation extends THREE.Object3D {
     }
 }
 
+const State = {
+    PLACED: "placed",
+    LIFTING: "lifting",
+    FALLING: "falling"
+};
+
+const MAX_NUM_INST = 40000;
+
+class Cube {
+    constructor(wireframe_collection, solid_collection, wireframe_color,
+            solid_color, opacity, position, scale, state=State.PLACED) {
+        this.wireframe_collection = wireframe_collection;
+        this.solid_collection = solid_collection;
+        this.wireframe_color = wireframe_color;
+        this.solid_color = solid_color;
+        this.opacity = opacity;
+        this.position = position;
+        this.scale = scale;
+        this.state = state;
+
+        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, 0, 1);
+        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, 0, 0.5);
+    }
+
+    update(dt) {
+        this.wireframe_collection.set_pos(this.wireframe_geom_idx, this.position);
+        this.wireframe_collection.set_scale(this.wireframe_geom_idx, this.scale);
+        this.wireframe_collection.set_color(this.wireframe_geom_idx, this.wireframe_color);
+
+        this.solid_collection.set_pos(this.solid_geom_idx, this.position);
+        this.solid_collection.set_scale(this.solid_geom_idx, this.scale);
+        this.solid_collection.set_color(this.solid_geom_idx, this.solid_color);
+    }
+}
+
+class Kicker {
+    constructor(wireframe_collection, solid_collection, wireframe_color,
+            solid_color, opacity, position, scale) {
+        this.wireframe_collection = wireframe_collection;
+        this.solid_collection = solid_collection;
+        this.wireframe_color = wireframe_color;
+        this.solid_color = solid_color;
+        this.opacity = opacity;
+        this.position = position;
+        this.scale = scale;
+
+        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, 0, 1);
+        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, 0, 0.5);
+    }
+
+    update(dt) {
+        this.wireframe_collection.set_pos(this.wireframe_geom_idx, this.position);
+        this.wireframe_collection.set_scale(this.wireframe_geom_idx, this.scale);
+        this.wireframe_collection.set_color(this.wireframe_geom_idx, this.wireframe_color);
+
+        this.solid_collection.set_pos(this.solid_geom_idx, this.position);
+        this.solid_collection.set_scale(this.solid_geom_idx, this.scale);
+        this.solid_collection.set_color(this.solid_geom_idx, this.solid_color);
+    }
+}
+
 class Gantry {
     constructor(parent_scene, parent_obj, cubes_inst, width, start_xz) {
         const start_pos = new THREE.Vector3(start_xz.x,
-            5.929,  // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
+            10 + 5.929,  // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
             start_xz.z);
         this.base_y = start_pos.y;
         this.paddle_base_y = -1.0;
@@ -174,10 +236,9 @@ class Gantry {
         } else {
             this.paddle_start_y = this.paddle_base_y;
         }*/
-        this.pound_movement_secs = this.max_pound_s;
-        const pound_start_delay = this.parent_scene.get_beat_delay(latency) - 
-            this.pound_movement_secs;
-        setTimeout(() => { this.pound_clock.start() }, pound_start_delay * 1000);
+        this.pound_movement_secs = Math.min(this.max_pound_s,
+            this.parent_scene.get_beat_delay(latency));
+        this.pound_clock.start();
         setTimeout(() => {
             if (sparks) {
                 const sparks_origin = this.mover.position.clone();
@@ -186,17 +247,17 @@ class Gantry {
             }
             this.parent_scene.add_excitation(new THREE.Vector3(
                 this.mover.position.x, 0, this.mover.position.z));
-        }, this.parent_scene.get_beat_delay(latency) * 1000);
+        }, 1000 * this.pound_movement_secs);
     }
 }
 
 
-export class GantryScene extends VisScene {
+export class BuildingScene extends VisScene {
     constructor() {
-        super('gantry');
+        super('building');
 
         const aspect = window.innerWidth / window.innerHeight;
-        this.frustum_size = 20;
+        this.frustum_size = 40;
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
@@ -210,7 +271,7 @@ export class GantryScene extends VisScene {
 
         this.base_group = new THREE.Group();
         this.cubes_group = new THREE.Group();
-        this.cube_indices = [];
+        this.cubes = [];
         this.sparks = [];
         this.max_num_sparks = 64;
         this.cur_spark_idx = 0;
@@ -221,78 +282,113 @@ export class GantryScene extends VisScene {
             this.sparks.push(s);
         }
 
-        this.starting_scales = [];
-        this.target_scales = [];
         this.cube_base_size = 3;
         this.cube_base_height = 3;
-        this.cube_base_spacing = 1;
-        this.drift_vel = 3.0;
-
-
-        this.excitations = [];
-        this.max_num_excitations = 8;
-        for (let i = 0; i < this.max_num_excitations; i++) {
-            const e = new Excitation(-100);
-            this.cubes_group.add(e);
-            this.excitations.push(e);
-        }
-        this.cur_excitation = 0;
-
-        this.target_rot_y = 0;      // integer multiples of PI / 16
-        this.start_rot_y = 0;       // integer multiples of PI / 16
-        this.rotation_movement_beats = 8;
+        this.cube_base_spacing = 0.5;
+        this.drift_vel = 0.0;
 
         this.start_zoom = 1;
         this.target_zoom = 1;
         this.zoom_movement_beats = 1;
 
+        this.target_rot_y = 0;      // integer multiples of PI / 16
+        this.start_rot_y = 0;       // integer multiples of PI / 16
+        this.rotation_movement_beats = 8;
 
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
             (NUM_CUBES_PER_SIDE - 1) * this.cube_base_spacing;
         const center_offset = -(width - this.cube_base_size) / 2;
 
         const [cube_wire_geom, cube_solid_geom] = create_instanced_cube_templates(this.cube_base_size, this.cube_base_height, this.cube_base_size);
-        this.inst_cubes = new InstancedGeometryCollection(this.cubes_group, cube_wire_geom);
+        this.wireframe_cubes = new InstancedGeometryCollection(this.cubes_group, cube_wire_geom, "Lines", MAX_NUM_INST);
+        this.solid_cubes = new InstancedGeometryCollection(this.cubes_group, cube_solid_geom, "Triangles", MAX_NUM_INST);
+        this.spheres = [];
 
         for (let i = 0; i < NUM_CUBES_PER_SIDE; i++) {
-            const cube_row = [];
-            const target_scale_row = [];
-            const starting_scale_row = [];
             for (let j = 0; j < NUM_CUBES_PER_SIDE; j++) {
-                let position = new THREE.Vector3(
-                    j * (this.cube_base_size + this.cube_base_spacing) + center_offset,
-                    0,
-                    i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
-                //const cube_mesh = create_instanced_cube(, "magenta", true, "black", 0.5);
-                let cube_idx = this.inst_cubes.create_geom(position, new THREE.Color("magenta"), new THREE.Vector3(1, 1, 1), 0);
-                cube_row.push(cube_idx);
-                starting_scale_row.push(1);
-                target_scale_row.push(1);
+                const depth = rand_int(12, 18);
+                for (let k = 0; k < depth; k++) {
+                    let position = new THREE.Vector3(
+                        j * (this.cube_base_size + this.cube_base_spacing) + center_offset,
+                        k * (this.cube_base_size + this.cube_base_spacing),
+                        i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
+                    //const cube_mesh = create_instanced_cube(, "magenta", true, "black", 0.5);
+                    const cube = new Cube(
+                        this.wireframe_cubes,
+                        this.solid_cubes,
+                        new THREE.Color("orange"),
+                        new THREE.Color("purple"),
+                        0.5,
+                        position,
+                        new THREE.Vector3(1, 1, 1));
+                    this.cubes.push(cube);
+                }
+                if (rand_int(0, 20) == 0) {
+                    let position = new THREE.Vector3(
+                        j * (this.cube_base_size + this.cube_base_spacing) + center_offset,
+                        depth * this.cube_base_size + (depth) * this.cube_base_spacing - 0.00 * this.cube_base_size,
+                        i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
+                    /*const cone = new Cube(
+                        this.wireframe_cubes,
+                        this.solid_cubes,
+                        new THREE.Color("white"),
+                        new THREE.Color("purple"),
+                        0.5,
+                        position,
+                        new THREE.Vector3(1, 0.5, 1));
+                    this.cubes.push(cube);*/
+                    /*const cone = make_wireframe_cone(this.cube_base_size / 2,
+                        this.cube_base_size,
+                        4,
+                        new THREE.Color("purple"),
+                        true,
+                    );
+                    cone.rotation.y = Math.PI / 4;
+                    cone.position.copy(position);
+                    this.cubes_group.add(cone);*/
+                    const sphereGeometry = new THREE.SphereGeometry(this.cube_base_size / 2, 32, 32);
+                    const lambertMaterial = new THREE.MeshLambertMaterial({ 
+                        color: "purple",
+                        transparent: true,
+                        opacity: 1.0
+                    });
+                    const sphere = new THREE.Mesh(sphereGeometry, lambertMaterial);
+                    sphere.castShadow = true;
+                    sphere.receiveShadow = true;
+                    sphere.position.copy(position);
+                    this.cubes_group.add(sphere);
+                    this.spheres.push(sphere);
+
+                    const light = new THREE.PointLight("white", 5, 0, 1.0);
+                    sphere.add(light);
+                }
             }
-            this.cube_indices.push(cube_row);
-            this.starting_scales.push(starting_scale_row);
-            this.target_scales.push(target_scale_row);
         }
+
+        //this.light = new THREE.PointLight("white", 20, 0, 1.0);
+        //this.light.position.set(1, 20, 20);
+        //this.base_group.add(this.light);
         
-        this.gantries = [];
+        /*this.gantries = [];
         for (let i = 0; i < 2; i++) {
             this.gantries.push(
-                new Gantry(this, this.cubes_group, this.inst_cubes, width,
+                new Gantry(this, this.cubes_group, this.wireframe_cubes, width,
                     new THREE.Vector3(2, 0, 2)));
         }
         this.moving_gantry_idx = 0;
-        this.pounding_gantry_idx = 1;
+        this.pounding_gantry_idx = 1;*/
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));
 
+
         this.base_group.rotation.x = isom_angle;//Math.PI / 8.0;
         this.base_group.rotation.y = Math.PI / 4.0;
-        //this.base_group.rotation.x = Math.PI / 2.0;
 
         this.base_group.add(this.cubes_group);
         this.scene.add(this.base_group);
 
         this.camera = this.cam_orth;
+        this.camera.position.y = this.cube_base_size * (12 + 18) / 2;
 
 
         this.marker_cube = new THREE.Object3D();//create_instanced_cube(Array(3).fill(1), "yellow");
@@ -304,8 +400,14 @@ export class GantryScene extends VisScene {
     anim_frame(dt) {
         const cube_moves_per_beat = 4;
 
+        for (const cube of this.cubes) {
+            cube.update(dt);
+        }
 
-        this.cubes_group.position.z += this.drift_vel * dt;
+        for (const sphere of this.spheres) {
+            sphere.position.x += 0.5 * dt;
+        }
+
 
         // Y rotation
         const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
@@ -315,6 +417,8 @@ export class GantryScene extends VisScene {
         const cur_color = new THREE.Color();
         cur_color.lerpColors(start_color, end_color, rot_frac);
 
+        this.cubes_group.position.y -= this.drift_vel * dt;
+
         // Zoom
         const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
         const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
@@ -323,90 +427,26 @@ export class GantryScene extends VisScene {
             this.cam_orth.updateProjectionMatrix();
         }
 
-        const max_offset = this.cube_base_size + this.cube_base_spacing;
-        if (this.cubes_group.position.z > max_offset) {
-            this.cubes_group.position.z -= max_offset;
-            for (const g of this.gantries) {
-                g.move_system(new THREE.Vector3(0, 0, max_offset));
-            }
-            this.marker_cube.position.z += max_offset;
-            for (let i = NUM_CUBES_PER_SIDE - 1; i > 0; i--) {
-                for (let j = 0; j < NUM_CUBES_PER_SIDE; j++) {
-                    this.target_scales[i][j] = this.target_scales[i - 1][j];
-                    this.starting_scales[i][j] = this.starting_scales[i - 1][j];
-                }
-            }
-
-            for (const i in this.excitations) {
-                this.excitations[i].position.z += max_offset;
-            }
-
-            for (const s of this.sparks) {
-                s.position.z += max_offset;
-            }
-        }
         const elapsed_time = this.clock.getElapsedTime();
-        for (let i = 0; i < NUM_CUBES_PER_SIDE; i++) {
-            for (let j = 0; j < NUM_CUBES_PER_SIDE; j++) {
-                let y_offset = 0.0;
-                const keep_excitations = [];
-                const cube_pos = this.inst_cubes.get_pos(this.cube_indices[i][j]);
-                cube_pos.y = 0;
-                for (const e of this.excitations) {
-                    const t = (elapsed_time - e.init_time) * CUBE_WAVE_SPEED;
-                    const x = cube_pos.distanceTo(e.position);
-                    y_offset -= 3 * Math.sin(Math.max(0, Math.min(2 * Math.PI,
-                        -0.2 * x + 8 * t))) * Math.exp(-1.5 * t);
-                }
-                cube_pos.y = y_offset;
-                this.inst_cubes.set_pos(this.cube_indices[i][j], cube_pos);
-                this.inst_cubes.set_color(this.cube_indices[i][j], cur_color);
-            }
-        }
-
-        for (const g of this.gantries) {
+        /*for (const g of this.gantries) {
             g.anim_frame(dt);
-        }
+        }*/
 
-        for (const s of this.sparks) {
+        /*for (const s of this.sparks) {
             s.anim_frame(dt, this.cam_orth);
-        }
+        }*/
     }
 
     handle_sync(t, bpm, beat) {
-        this.beat_idx++;
-        //if (this.beat_idx % 2 == 0) {
-        //}
-        const elapsed_time = this.clock.getElapsedTime();
-        const mid_range_cubes = 6;  // target middle 8 rows
-
-        if (beat % 2 == 0) {
-            this.moving_gantry_idx = Math.floor(beat / 2) % 2;
-            this.pounding_gantry_idx = (this.moving_gantry_idx + 1) % this.gantries.length;
-            let min_i = Math.floor(NUM_CUBES_PER_SIDE / 2 + mid_range_cubes / 2 * (this.moving_gantry_idx - 1));
-            let max_i = min_i + Math.floor(mid_range_cubes / 2);
-
-            if (this.moving_gantry_idx == 0) {
-                min_i -= 1; // hack to avoid collisions due to drifting
-                max_i -= 1;
-            }
-
-            const min_j = Math.floor(NUM_CUBES_PER_SIDE / 2 - mid_range_cubes / 2);
-            const max_j = min_j + mid_range_cubes;
-
-            const cube_idx_i = rand_int(min_i, max_i);
-            const cube_idx_j = rand_int(min_j, max_j);
-
-            this.gantries[this.moving_gantry_idx].set_cube_target_idx(cube_idx_i, cube_idx_j);
-            this.gantries[this.moving_gantry_idx].move_clock.start();
-        }
+        console.log('sync');
         if (beat % 4 == 0) {
-            if (rand_int(0, 4) == 0 && (
+            if (rand_int(0, 2) == 0 && (
                     (!this.rot_clock.running) ||
                     (this.rot_clock.getElapsedBeats() > this.rotation_movement_beats))) {
+                console.log('start rot');
 
                 this.start_rot_y = this.target_rot_y;
-                this.target_rot_y += rand_int(0, 2) * 2 - 1;
+                this.target_rot_y++;
                 this.rot_clock.start();
             }
             if (rand_int(0, 8) == 0) {
@@ -422,18 +462,6 @@ export class GantryScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 1 || channel == 3) {
-            this.gantries[this.pounding_gantry_idx].start_pound(t, true);
-        }
-    }
-
-    add_excitation(pos) {
-        const t = this.clock.getElapsedTime();
-        const excitation = this.excitations[this.cur_excitation];
-        this.cur_excitation = (this.cur_excitation + 1) % this.max_num_excitations;
-        excitation.init_time = t;
-        excitation.position.copy(pos);
-        excitation.position.y = 0;
     }
 
     create_sparks(pos, num, avg_vel, color) {

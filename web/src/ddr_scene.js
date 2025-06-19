@@ -386,7 +386,7 @@ export class DDRScene extends VisScene {
     }
 
     handle_sync(t, bpm, beat) {
-        if (beat % 4 == 0) {
+        if (beat % 4 == 1) {
             this.start_robot_rot = this.target_robot_rot;
             this.target_robot_rot++;
             this.robot_rot_clock.start(this.get_local_bpm());
@@ -396,7 +396,7 @@ export class DDRScene extends VisScene {
                 r.toggle_clap_mode();
             }
         }
-        if (beat % 2 == 1) {
+        if (beat % 2 == 0) {
             this.clap_clock.start(this.get_local_bpm());
         }
         if (beat % 2 == 0) {

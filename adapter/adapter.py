@@ -7,9 +7,9 @@ import time
 import serial_asyncio
 import pathlib
 import websockets
-import random
 from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
+import random
 from message import *
 import sys
 

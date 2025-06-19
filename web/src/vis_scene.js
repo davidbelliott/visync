@@ -97,11 +97,11 @@ export class VisScene {
 
     // Returns the time in seconds between a beat event being received and the
     // beat audio being played, assuming midi events for the beat are placed
-    // an eighth note earlier in the grid than the actual beats. Accounts for
-    // network latency as measured by packet round-trip time.
+    // a quarter note earlier in the grid than the actual beats. Accounts for
+    // latency passed in as an argument.
     get_beat_delay(est_latency=0) {
         // 24 MIDI syncs per quarter note
-        return 1.0 / this.sync_rate_hz * 24 / 2 - est_latency;
+        return 1.0 / this.sync_rate_hz * 24 - est_latency;
     }
 
     handle_sync(latency, sync_rate_hz, beat) {

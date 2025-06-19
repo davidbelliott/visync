@@ -35,6 +35,7 @@ import { CelticKnotScene } from './src/celtic_knot_scene.js';
 import { CellularAutomataScene } from './src/cellular_automata_scene.js';
 import { TextScene } from './src/text_scene.js';
 import { ShaderScene } from './src/shader_scene.js';
+import { BuildingScene } from './src/building_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -463,12 +464,13 @@ class GraphicsContext {
             [18, new HelixScene()],
             [19, new TriangularPrismScene()],
             [20, new CellularAutomataScene()],
+            [21, new BuildingScene()],
             //[20, new SlideScene(["img/jungle-background.jpg"])],
             //[21, new TextScene()],
             //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
             //[20, new CelticKnotScene()],
         ]);
-        this.change_scene(7);
+        this.change_scene(21);
         this.change_scene(0, true);
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
@@ -797,7 +799,8 @@ render() {
     }
 
     handle_sync(latency, sync_rate_hz, beat) {
-        const delay = env.immediate_mode ? 0 : 1.0 / sync_rate_hz - latency;
+        const syncs_to_skip = 24;
+        const delay = env.immediate_mode ? 0 : syncs_to_skip / sync_rate_hz - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {

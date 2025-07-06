@@ -253,8 +253,8 @@ class Gantry {
 
 
 export class BuildingScene extends VisScene {
-    constructor() {
-        super('building');
+    constructor(context) {
+        super(context, 'building');
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 40;
@@ -316,7 +316,7 @@ export class BuildingScene extends VisScene {
                     const cube = new Cube(
                         this.wireframe_cubes,
                         this.solid_cubes,
-                        new THREE.Color("orange"),
+                        new THREE.Color("magenta"),
                         new THREE.Color("purple"),
                         0.5,
                         position,

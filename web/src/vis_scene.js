@@ -11,7 +11,8 @@ import {
 } from './util.js';
 
 export class VisScene {
-    constructor(shortname='vis-scene', num_states=1, max_bpm=140) {
+    constructor(context, shortname='vis-scene', num_states=1, max_bpm=140) {
+        this.context = context;
         this.shortname = shortname;
         this.cur_divisor = 24;
         this.target_divisor = this.cur_divisor;
@@ -101,7 +102,7 @@ export class VisScene {
     // latency passed in as an argument.
     get_beat_delay(est_latency=0) {
         // 24 MIDI syncs per quarter note
-        return 1.0 / this.sync_rate_hz * 24 - est_latency;
+        return this.context.immediate_mode ? 0.0 : 1.0 / this.sync_rate_hz * 24 - est_latency;
     }
 
     handle_sync(latency, sync_rate_hz, beat) {

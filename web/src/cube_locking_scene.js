@@ -99,8 +99,8 @@ class CustomSinCurve extends THREE.Curve {
 
 
 export class CubeLockingScene extends VisScene {
-    constructor() {
-        super('cubetubes', 3);
+    constructor(context) {
+        super(context, 'cubetubes', 3);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

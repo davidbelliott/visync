@@ -16,8 +16,8 @@ import { Tesseract } from './highdim.js';
 
 
 export class IntroScene extends VisScene {
-    constructor() {
-        super('tesseract', 8);
+    constructor(context) {
+        super(context, 'tesseract', 8);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

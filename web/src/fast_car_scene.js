@@ -20,7 +20,7 @@ import {
 } from './util.js';
 
 class TunnelMovementBackground {
-    constructor(env) {
+    constructor(context) {
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.squares = [];
@@ -31,7 +31,7 @@ class TunnelMovementBackground {
         this.sync_clock = new THREE.Clock(true);
         this.wave_ampl = 2;
         this.start_square_offset = 0;
-        this.env = env;
+        this.context = context;
         this.start_rot = 0;
         this.end_rot = 0;
         for (let i = 0; i < this.num_squares; i++) {
@@ -99,8 +99,8 @@ class TunnelMovementBackground {
 }
 
 export class FastCarScene extends VisScene {
-    constructor(env) {
-        super(env);
+    constructor(context) {
+        super(context);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -127,7 +127,7 @@ export class FastCarScene extends VisScene {
         this.full_beat_clock = new THREE.Clock(true);
 
         this.base_group = new THREE.Group();
-        this.bg = new TunnelMovementBackground(env);
+        this.bg = new TunnelMovementBackground(context);
 
         this.base_group.rotation.x = 0;
 

@@ -105,8 +105,8 @@ const FILL_COLOR = "black";
 const FILL_OPACITY = 0.5;
 
 export class FastCubeScene extends VisScene {
-    constructor() {
-        super('cubeman');
+    constructor(context) {
+        super(context, 'cubeman');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

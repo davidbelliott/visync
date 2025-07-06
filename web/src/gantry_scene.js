@@ -192,8 +192,8 @@ class Gantry {
 
 
 export class GantryScene extends VisScene {
-    constructor() {
-        super('gantry');
+    constructor(context) {
+        super(context, 'gantry');
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustum_size = 20;

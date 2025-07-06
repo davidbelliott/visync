@@ -157,8 +157,8 @@ class Robot extends THREE.Object3D {
 
 
 export class SpinningRobotsScene extends VisScene {
-    constructor() {
-        super();
+    constructor(context) {
+        super(context);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

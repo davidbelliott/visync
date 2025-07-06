@@ -73,8 +73,8 @@ class HelixCurve extends THREE.Curve {
 }
 
 export class HelixScene extends VisScene {
-    constructor() {
-        super('helix', 1);
+    constructor(context) {
+        super(context, 'helix', 1);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;

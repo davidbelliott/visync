@@ -17,8 +17,8 @@ const USE_SHADER = true;
 const SVG_SIZE = 80;
 
 export class ChineseScene extends VisScene {
-    constructor() {
-        super('rwalkglyphs');
+    constructor(context) {
+        super(context, 'rwalkglyphs');
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -155,7 +155,7 @@ export class ChineseScene extends VisScene {
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 2;
         this.evolve_time += 0.5 * clock_dt * beats_per_sec;
         if (this.beat_clock.running) {
-            this.evolve_time += (beat_elapsed < 1.0 ? 0.1 : 0.0);
+            this.evolve_time += (beat_elapsed < 0.5 ? 0.1 : 0.0);
         }
         
         if (this.uniforms != null) {

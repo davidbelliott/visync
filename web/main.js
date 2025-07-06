@@ -68,7 +68,7 @@ const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
 //const EXTRA_LATENCY = 0.220;
-const EXTRA_LATENCY = 0.000;
+const EXTRA_LATENCY = 0.0;
 
 const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
@@ -79,14 +79,6 @@ const MIN_SWIPE_LENGTH = 50;
 
 var context = null;
 var stats = new Stats();
-
-class Environment {
-    constructor() {
-        this.immediate_mode = false;
-    }
-}
-
-const env = new Environment();
 
 window.addEventListener("load", init);
 
@@ -443,28 +435,28 @@ class GraphicsContext {
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
         this.scenes = new Map([
-            [0, new VisScene()],
-            [1, new GantryScene()],
-            [2, new HexagonScene()],
-            [3, new SpinningRobotsScene()],
-            [4, new CubeLockingScene()],
-            [5, new IceCreamScene()],
-            [6, new DDRScene()],
-            [7, new DrumboxScene()],
-            [8, new YellowRobotScene()],
-            [9, new ChineseScene()],
-            [10, new SurfacesScene()],
-            [11, new BackgroundSurfacesScene()],
-            [12, new SpectrumScene()],
-            [13, new FastCubeScene()],
-            [14, new TessellateScene()],
-            [15, new HomeBackgroundScene()],
-            [16, new IntroScene()],
-            [17, new TracersScene()],
-            [18, new HelixScene()],
-            [19, new TriangularPrismScene()],
-            [20, new CellularAutomataScene()],
-            [21, new BuildingScene()],
+            [0, new VisScene(this)],
+            [1, new GantryScene(this)],
+            [2, new HexagonScene(this)],
+            [3, new SpinningRobotsScene(this)],
+            [4, new CubeLockingScene(this)],
+            [5, new IceCreamScene(this)],
+            [6, new DDRScene(this)],
+            [7, new DrumboxScene(this)],
+            [8, new YellowRobotScene(this)],
+            [9, new ChineseScene(this)],
+            [10, new SurfacesScene(this)],
+            [11, new BackgroundSurfacesScene(this)],
+            [12, new SpectrumScene(this)],
+            [13, new FastCubeScene(this)],
+            [14, new TessellateScene(this)],
+            [15, new HomeBackgroundScene(this)],
+            [16, new IntroScene(this)],
+            [17, new TracersScene(this)],
+            [18, new HelixScene(this)],
+            [19, new TriangularPrismScene(this)],
+            [20, new CellularAutomataScene(this)],
+            [21, new BuildingScene(this)],
             //[20, new SlideScene(["img/jungle-background.jpg"])],
             //[21, new TextScene()],
             //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
@@ -563,6 +555,8 @@ class GraphicsContext {
             const mesh = new THREE.Mesh( geometry, this.blend_material );
             this.scene.add( mesh );
         }
+
+        this.immediate_mode = true;
 
         this.on_window_resize();
         window.addEventListener('resize', () => { this.on_window_resize(); });
@@ -777,7 +771,9 @@ render() {
                 this.set_tracer_params(1, 1, 1);
             }
         } else if (e.code == "Space") {
-            env.immediate_mode = !env.immediate_mode;
+            this.immediate_mode = !this.immediate_mode;
+            this.update_mode_hud();
+        } else if (e.code == "KeyD") {
             if (this.debug_overlay.style.visibility == 'hidden') {
                 this.debug_overlay.style.visibility = 'visible';
                 stats.dom.style.visibility = 'visible';
@@ -800,7 +796,7 @@ render() {
 
     handle_sync(latency, sync_rate_hz, beat) {
         const syncs_to_skip = 24;
-        const delay = env.immediate_mode ? 0 : syncs_to_skip / sync_rate_hz - latency;
+        const delay = this.immediate_mode ? 0 : syncs_to_skip / sync_rate_hz - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
@@ -816,6 +812,12 @@ render() {
         const bpm = Math.round(sync_rate_hz * 60 / 24);
         const bpm_elem = document.getElementById("bpm");
         bpm_elem.innerHTML = String(bpm).padEnd(3);
+    }
+
+    update_mode_hud() {
+        const mode = this.immediate_mode ? 'imm' : 'del';
+        const mode_elem = document.getElementById('mode');
+        mode_elem.innerHTML = mode;
     }
 
     handle_beat(latency, channel) {

@@ -18,8 +18,8 @@ const OSC_PHASE = 0;
 
 
 export class HomeBackgroundScene extends VisScene {
-    constructor() {
-        super('cube-bounce');
+    constructor(context) {
+        super(context, 'cube-bounce');
         this.base_scale = 1.5;
 
 

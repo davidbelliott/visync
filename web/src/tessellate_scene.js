@@ -15,8 +15,8 @@ import { InstancedGeometryCollection } from './instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
 export class TessellateScene extends VisScene {
-    constructor(env) {
-        super('tessellate', env);
+    constructor(context) {
+        super(context, 'tessellate');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

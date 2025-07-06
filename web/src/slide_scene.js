@@ -3,8 +3,8 @@ import { VisScene } from './vis_scene.js';
 
 
 export class SlideScene extends VisScene {
-    constructor(img_paths) {
-        super('slides', img_paths.length);
+    constructor(context, img_paths) {
+        super(context, 'slides', img_paths.length);
         this.img_paths = img_paths;
         this.imgbox = document.getElementById("imgbox");
         const img = document.createElement('img');

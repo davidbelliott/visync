@@ -84,8 +84,8 @@ function metaballs(x, y, z, time) {
 }
 
 export class CellularAutomataScene extends VisScene {
-    constructor() {
-        super('spheregrid', 2, 180);
+    constructor(context) {
+        super(context, 'spheregrid', 2, 180);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;

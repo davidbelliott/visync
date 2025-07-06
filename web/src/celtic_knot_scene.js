@@ -20,8 +20,8 @@ class KnotSegment {
 }
 
 export class CelticKnotScene extends VisScene {
-    constructor() {
-        super();
+    constructor(context) {
+        super(context);
         this.scene = new THREE.Scene();
         
         const width = window.innerWidth;

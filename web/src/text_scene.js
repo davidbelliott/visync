@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { VisScene } from './vis_scene.js'
 
 export class TextScene extends VisScene {
-    constructor(text_file_path='/txt/drums.txt') {
-        super('text', 0);
+    constructor(context, text_file_path='/txt/drums.txt') {
+        super(context, 'text', 0);
 
         this.paragraphs = [''];
         this.text_div = document.getElementById('textbox');

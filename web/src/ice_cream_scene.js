@@ -18,8 +18,8 @@ import {
 } from './util.js';
 
 export class IceCreamScene extends VisScene {
-    constructor() {
-        super('ice-cream');
+    constructor(context) {
+        super(context, 'ice-cream');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

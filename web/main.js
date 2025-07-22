@@ -36,6 +36,7 @@ import { CellularAutomataScene } from './src/cellular_automata_scene.js';
 import { TextScene } from './src/text_scene.js';
 import { ShaderScene } from './src/shader_scene.js';
 import { BuildingScene } from './src/building_scene.js';
+import { VectorFieldScene } from './src/scenes/vector_field.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -434,40 +435,8 @@ class GraphicsContext {
         this.bpm = 120;
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
-        this.scenes = new Map([
-            [0, new VisScene(this)],
-            [1, new GantryScene(this)],
-            [2, new HexagonScene(this)],
-            [3, new SpinningRobotsScene(this)],
-            [4, new CubeLockingScene(this)],
-            [5, new IceCreamScene(this)],
-            [6, new DDRScene(this)],
-            [7, new DrumboxScene(this)],
-            [8, new YellowRobotScene(this)],
-            [9, new ChineseScene(this)],
-            [10, new SurfacesScene(this)],
-            [11, new BackgroundSurfacesScene(this)],
-            [12, new SpectrumScene(this)],
-            [13, new FastCubeScene(this)],
-            [14, new TessellateScene(this)],
-            [15, new HomeBackgroundScene(this)],
-            [16, new IntroScene(this)],
-            [17, new TracersScene(this)],
-            [18, new HelixScene(this)],
-            [19, new TriangularPrismScene(this)],
-            [20, new CellularAutomataScene(this)],
-            [21, new BuildingScene(this)],
-            //[20, new SlideScene(["img/jungle-background.jpg"])],
-            //[21, new TextScene()],
-            //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
-            //[20, new CelticKnotScene()],
-        ]);
-        this.change_scene(21);
-        this.change_scene(0, true);
-        this.cur_scene_bank = 0;
-        this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
-            / SCENES_PER_BANK);
 
+        // Set up DOM and renderer
         this.debug_overlay = document.getElementById("debug-overlay");
         this.overlay_indicators = [];
         for (let i = 1; i <= 16; i++) {
@@ -490,7 +459,40 @@ class GraphicsContext {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
 
-
+        // Create scenes
+        this.scenes = new Map([
+            [0, new VisScene(this)],
+            [1, new GantryScene(this)],
+            [2, new HexagonScene(this)],
+            [3, new SpinningRobotsScene(this)],
+            [4, new CubeLockingScene(this)],
+            [5, new IceCreamScene(this)],
+            [6, new DDRScene(this)],
+            [7, new DrumboxScene(this)],
+            [8, new YellowRobotScene(this)],
+            [9, new ChineseScene(this)],
+            [10, new SurfacesScene(this)],
+            [11, new BackgroundSurfacesScene(this)],
+            [12, new SpectrumScene(this)],
+            [13, new FastCubeScene(this)],
+            [14, new TessellateScene(this)],
+            [15, new HomeBackgroundScene(this)],
+            [16, new IntroScene(this)],
+            [17, new TracersScene(this)],
+            [18, new HelixScene(this)],
+            [19, new TriangularPrismScene(this)],
+            [20, new CellularAutomataScene(this)],
+            [21, new VectorFieldScene(this)],
+            //[20, new SlideScene(["img/jungle-background.jpg"])],
+            //[21, new TextScene()],
+            //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
+            //[20, new CelticKnotScene()],
+        ]);
+        this.change_scene(21);
+        this.change_scene(0, true);
+        this.cur_scene_bank = 0;
+        this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
+            / SCENES_PER_BANK);
 
         // Handle touches
         {

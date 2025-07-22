@@ -7,6 +7,11 @@ const GRID_N  = 12;        // number of sample points per axis → GRID_N³ vect
 const SPACING = 1.5;       // distance between sample points
 const SCALE   = 0.60;      // length multiplier for each vector
 const VECTOR_COUNT = GRID_N*GRID_N*GRID_N;
+const TRACER_INTERVAL  = 0.01;   // s between drops
+const TRACER_LIFETIME  = 0.30;   // s until fully transparent
+const TRACER_MAX_COUNT = Math.ceil(TRACER_LIFETIME / TRACER_INTERVAL) + 2; // safe head‑room
+const TRACER_EDGE_COUNT = 12;   // EdgesGeometry → 12 line segments
+const TRACER_INSTANCES  = TRACER_MAX_COUNT * TRACER_EDGE_COUNT;
 
 function field1(pos) {
    const vx = -pos.x;
@@ -115,14 +120,14 @@ export class VectorFieldComponent extends Component {
                }
             `,
             transparent: true,
-            depthWrite: false,
-            linewidth: 1
+            linewidth: 1,
         });
 
         this.base_group = new THREE.Group();
         this.add(this.base_group);
 
         const lines = new THREE.LineSegments(this.instGeom, material);
+        lines.renderOrder = 0;
         this.base_group.add(lines);
 
 
@@ -132,12 +137,120 @@ export class VectorFieldComponent extends Component {
         // Edge-only cube (each vertex is editable via geometry.attributes.position)
         //const cube_geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)); // 12 straight edges
         const cube_geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)); // 12 straight edges
-        const cube_material = new THREE.LineBasicMaterial({ color: 0xffffff });
+        const cube_material = new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            depthTest: false,
+        });
         this.cube = new THREE.LineSegments(cube_geometry, cube_material);
+        this.cube.renderOrder = 2;
         this.base_group.add(this.cube)
         const p = cube_geometry.getAttribute('position');
         this.default_pos = p.array.slice();
         this.reset_cube();
+
+        this.elapsedTime      = 0;        // global clock (s)
+        this.tracerTimer      = 0;        // time since last drop (s)
+        this.nextTracer       = 0;        // ring‑buffer index [0, TRACER_MAX_COUNT)
+        this.tracerBirth      = new Float32Array(TRACER_MAX_COUNT);
+
+        /* ---------- build instanced geometry for tracers ---------- */
+        this.tracerStarts     = new Float32Array(TRACER_INSTANCES * 3);
+        this.tracerEnds       = new Float32Array(TRACER_INSTANCES * 3);
+        this.tracerOpacities  = new Float32Array(TRACER_INSTANCES);
+
+        this.tracerGeom = new THREE.InstancedBufferGeometry();
+        this.tracerGeom.index      = this.base.index;       // reuse 1‑unit line index
+        this.tracerGeom.attributes = this.base.attributes;  // reuse positions
+        this.tracerGeom.instanceCount = TRACER_INSTANCES;
+        this.tracerGeom.setAttribute('tracerStart',
+              new THREE.InstancedBufferAttribute(this.tracerStarts, 3));
+        this.tracerGeom.setAttribute('tracerEnd',
+              new THREE.InstancedBufferAttribute(this.tracerEnds, 3));
+        this.tracerGeom.setAttribute('tracerOpacity',
+              new THREE.InstancedBufferAttribute(this.tracerOpacities, 1));
+
+        const tracerMat = new THREE.RawShaderMaterial({
+          vertexShader: `
+             precision mediump float;
+             attribute vec3 position;
+             attribute vec3 tracerStart;
+             attribute vec3 tracerEnd;
+             attribute float tracerOpacity;
+             uniform mat4 modelViewMatrix;
+             uniform mat4 projectionMatrix;
+             varying float vOpacity;
+             void main(){
+               vec3 worldPos = mix(tracerStart, tracerEnd, position.x);
+               gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos,1.0);
+               vOpacity = tracerOpacity;
+             }`,
+          fragmentShader: `
+             precision mediump float;
+             varying float vOpacity;
+             void main(){ gl_FragColor = vec4(vec3(1.0), vOpacity); }`,
+          transparent: true,
+          depthTest: false,
+          linewidth: 1,
+          renderOrder: 98
+        });
+
+        this.tracerLines = new THREE.LineSegments(this.tracerGeom, tracerMat);
+        this.tracerLines.renderOrder = 1;
+        this.add(this.tracerLines);          // NOT inside base_group → stays static
+    }
+
+createTracer() {
+    /* ── make sure matrices are current ── */
+    this.base_group.updateMatrixWorld(true);  // includes its latest rotation
+    this.updateMatrixWorld(true);             // in case the component moved
+
+    const posAttr   = this.cube.geometry.getAttribute('position');
+    const toWorld   = this.cube.matrixWorld;                    // cube → world
+    const toLocal   = new THREE.Matrix4().copy(this.matrixWorld).invert(); // world → component‑local
+
+    const tIdx = this.nextTracer;
+    const base = tIdx * TRACER_EDGE_COUNT;
+
+    for (let e = 0; e < TRACER_EDGE_COUNT; ++e){
+        const i0 = e*2, i1 = i0+1;
+
+        /* cube‑local → world → component‑local  (one clone per vertex) */
+        const start = new THREE.Vector3(
+            posAttr.getX(i0), posAttr.getY(i0), posAttr.getZ(i0))
+            .applyMatrix4(toWorld)
+            .applyMatrix4(toLocal);
+
+        const end = new THREE.Vector3(
+            posAttr.getX(i1), posAttr.getY(i1), posAttr.getZ(i1))
+            .applyMatrix4(toWorld)
+            .applyMatrix4(toLocal);
+
+        this.tracerStarts.set([start.x, start.y, start.z], (base+e)*3);
+        this.tracerEnds  .set([end.x,   end.y,   end.z  ], (base+e)*3);
+        this.tracerOpacities[base + e] = 1.0;
+    }
+
+    /* flag for upload */
+    this.tracerGeom.attributes.tracerStart.needsUpdate   = true;
+    this.tracerGeom.attributes.tracerEnd.needsUpdate     = true;
+    this.tracerGeom.attributes.tracerOpacity.needsUpdate = true;
+
+    /* ring‑buffer bookkeeping */
+    this.tracerBirth[tIdx] = this.elapsedTime;
+    this.nextTracer = (this.nextTracer + 1) % TRACER_MAX_COUNT;
+}
+
+    updateTracers(dt){
+        /* fade everything in one tight loop */
+        for (let t = 0; t < TRACER_MAX_COUNT; ++t){
+            const age   = this.elapsedTime - this.tracerBirth[t];
+            const alpha = THREE.MathUtils.clamp(1.0 - age/TRACER_LIFETIME, 0, 1);
+            const base  = t * TRACER_EDGE_COUNT;
+            for (let e = 0; e < TRACER_EDGE_COUNT; ++e){
+                this.tracerOpacities[base + e] = alpha;
+            }
+        }
+        this.tracerGeom.attributes.tracerOpacity.needsUpdate = true;
     }
 
     reset_cube() {
@@ -202,6 +315,16 @@ export class VectorFieldComponent extends Component {
             p.setXYZ(i, pos.x, pos.y, pos.z);
         }
         p.needsUpdate = true;
+
+        /* --- tracer bookkeeping --- */
+        this.elapsedTime += dt;
+        this.tracerTimer += dt;
+
+        if (this.tracerTimer >= TRACER_INTERVAL){
+            this.createTracer();
+            this.tracerTimer -= TRACER_INTERVAL;
+        }
+        this.updateTracers(dt);
     }
 
     handle_beat(latency, channel) {

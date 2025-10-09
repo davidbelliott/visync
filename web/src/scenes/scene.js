@@ -11,6 +11,15 @@ import {
     clamp
 } from '../util.js';
 
+export class Knob {
+    constructor(min_val=0, max_val=1, default_val=0) {
+        this.min_val = min_val;
+        this.max_val = max_val;
+        this.default_val = this.cur_val;
+        this.cur_val = default_val;
+    }
+}
+
 export class Scene extends THREE.Scene {
     constructor(context, shortname='scene') {
         super();
@@ -33,10 +42,22 @@ export class Scene extends THREE.Scene {
         this.controls = new OrbitControls(this.camera, this.context.renderer.domElement);
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
+
+        this.knobs = new Map();
+    }
+
+    add_knob(name, min_val=0.0, max_val=1.0, default_val=0.0) {
+        this.knobs.set(name, new Knob(min_val, max_val, default_val));
+    }
+
+    get_knob_val(name) {
+        return this.knobs.get(name).cur_val;
     }
 
     anim_frame(dt) {
         this.controls.update();
+        this.camera.zoom = 2 + Math.sin(this.get_knob_val('camera_zoom'));
+        this.camera.updateProjectionMatrix();
         this.children.forEach((child) => {
             if (child.anim_frame) {
                 child.anim_frame(dt);

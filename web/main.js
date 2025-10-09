@@ -129,11 +129,11 @@ function msg_to_disp_string(msg) {
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    let pathname = window.location.pathname;
-    pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+    //let pathname = window.location.pathname;
+    //pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    //const relay_url = `${window.location.hostname}:8765`;
-    //const relay_url = 'raspberrypi/ws/';
+    const host = window.location.hostname;
+    //const relay_url = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
     const relay_url = '192.168.5.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {

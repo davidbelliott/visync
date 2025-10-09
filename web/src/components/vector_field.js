@@ -7,11 +7,12 @@ const GRID_N  = 12;        // number of sample points per axis → GRID_N³ vect
 const SPACING = 1.5;       // distance between sample points
 const SCALE   = 0.60;      // length multiplier for each vector
 const VECTOR_COUNT = GRID_N*GRID_N*GRID_N;
-const TRACER_INTERVAL  = 0.01;   // s between drops
-const TRACER_LIFETIME  = 0.30;   // s until fully transparent
+const TRACER_INTERVAL  = 0.0001;   // s between drops
+const TRACER_LIFETIME  = 0.20;   // s until fully transparent
 const TRACER_MAX_COUNT = Math.ceil(TRACER_LIFETIME / TRACER_INTERVAL) + 2; // safe head‑room
 const TRACER_EDGE_COUNT = 12;   // EdgesGeometry → 12 line segments
 const TRACER_INSTANCES  = TRACER_MAX_COUNT * TRACER_EDGE_COUNT;
+const ACCEL_PER_UNIT_FIELD = 0.25;
 
 function field1(pos) {
    const vx = -pos.x;
@@ -301,6 +302,7 @@ createTracer() {
     }
 
     anim_frame(dt) {
+        super.anim_frame();
         this.base_group.rotation.z += 0.05 * dt;
         let g = this.cube.geometry;
         let p = g.getAttribute('position');
@@ -308,7 +310,7 @@ createTracer() {
         for (let i = 0; i<p.count; i++) { 
             let pos = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i));
             let vel = new THREE.Vector3(v.getX(i), v.getY(i), v.getZ(i));
-            let accel = this.field(pos).multiplyScalar(dt);
+            let accel = this.field(pos).multiplyScalar(dt).multiplyScalar(ACCEL_PER_UNIT_FIELD);
             vel.add(accel);
             pos.add(vel);
             v.setXYZ(i, vel.x, vel.y, vel.z);

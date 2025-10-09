@@ -118,6 +118,7 @@ for bar in range(0, NUM_BARS):
 
 
 def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
+    print(f'{channel}:{note_number}:{note_vel}')
     if note_vel == 0:
         return None
 
@@ -134,6 +135,8 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         # This channel is used for lighting control
         if USE_STROBE:
             strobe_on()
+        # Analog Rytm auto channel
+        ws_msg = MsgBeat(last_transmit_latency, note_number + 1, True)
     elif channel == 14:
         # This channel is used for graphics scene switching
         ws_msg = MsgGotoScene(last_transmit_latency, note_number - 60, note_vel < 100)
@@ -167,6 +170,9 @@ class RtMidiInputHandler:
             channel = (midi_msg[0] & 0xF) + 1
             note_number = midi_msg[1]
             note_vel = midi_msg[2]
+            if channel == 15:   # Analog Rytm auto channel
+                channel = note_number
+                note_number = note_vel
         elif midi_msg[0] & 0xF0 == NOTE_OFF:
             if channel == 15:
                 if USE_STROBE:
@@ -251,8 +257,11 @@ class SerialMidiHandler:
                 self.bytes = [b]
             elif b & 0xF0 == midiconstants.PITCH_BEND:
                 self.bytes = [b]
+            elif b & 0xF0 == 0xA0:
+                self.bytes = [b]
             else:
                 print(f'unknown status byte: {b}')
+                pass
         else:
             # This is not the first byte
             if self.bytes[0] & 0xF0 == midiconstants.NOTE_ON:
@@ -293,6 +302,11 @@ class SerialMidiHandler:
                 clock_tracker.cur_sync_idx = -1
                 ws_msg = MsgProgramChange(last_msg_latency, channel, value)
                 self.bytes = []
+            elif self.bytes[0] & 0xF0 == 0xA0:
+                self.bytes.append(b)
+                if len(self.bytes) == 3:
+                    channel = self.bytes[1] + 1
+                    self.bytes = []
             else:
                 self.bytes = []
 

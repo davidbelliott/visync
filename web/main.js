@@ -133,8 +133,8 @@ function connect() {
     //pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     const host = window.location.hostname;
-    //const relay_url = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
-    const relay_url = '192.168.5.1/ws/';
+    const relay_url = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
+    //const relay_url = '192.168.5.1/ws/';
     const socket = new WebSocket(`${protocol}://${relay_url}`);
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);

@@ -7,6 +7,7 @@ const GRID_N  = 12;
 const SPACING = 1.5;
 const SCALE   = 0.60;
 const VECTOR_COUNT = GRID_N*GRID_N*GRID_N;
+const POINTER_SMOOTH_TIME = 2.00; // seconds; feel free to tweak
 
 const MAX_CUBES = 32;
 const CUBE_EDGE_COUNT = 12;
@@ -61,9 +62,18 @@ export class VectorFieldComponent extends Component {
     this.base.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 1,0,0], 3));
 
     /* ───────────────── VECTOR FIELD LINES (unchanged) ───────────────── */
-    this.starts   = new Float32Array(VECTOR_COUNT*3);
-    this.ends     = new Float32Array(VECTOR_COUNT*3);
     this.opacities= new Float32Array(VECTOR_COUNT);
+
+    // Displayed endpoints (attributes use these)
+    this.starts = new Float32Array(VECTOR_COUNT * 3);
+    this.ends   = new Float32Array(VECTOR_COUNT * 3);
+
+    // Tween buffers (we don't expose these to the GPU directly)
+    this._ptrSrc = new Float32Array(VECTOR_COUNT * 3);
+    this._ptrDst = new Float32Array(VECTOR_COUNT * 3);
+    this._ptrLerpT   = 1.0;                 // 1 = not lerping
+    this._ptrLerpDur = POINTER_SMOOTH_TIME; // configurable
+    this._ptrInit    = false;               // first fill snaps in
 
     this.instGeom = new THREE.InstancedBufferGeometry();
     this.instGeom.index         = this.base.index;
@@ -369,36 +379,72 @@ updateTracers(dt){
     p.copyArray(this.default_pos);
   }
 
-  update_field_pointers() {
-    let idx=0;
-    const half = (GRID_N-1)/2;
-    let maxMag = 0;
-    for(let i=0; i < GRID_N;++i) {
-      for(let j=0; j < GRID_N;++j) {
-        for(let k=0;k < GRID_N;++k) {
-          const x = (i-half)*SPACING;
-          const y = (j-half)*SPACING;
-          const z = (k-half)*SPACING;
-          const v = this.field(new THREE.Vector3(x, y, z));
-          const mag = v.length();
-          maxMag = Math.max(maxMag, mag);
-          const midpoint = new THREE.Vector3(x,y,z);
-          const start = midpoint.clone().addScaledVector(v.normalize(), -SCALE / 2);
-          const end   = midpoint.clone().addScaledVector(v.normalize(),  SCALE / 2);
-          this.starts.set([start.x,start.y,start.z], idx*3);
-          this.ends.set([end.x,end.y,end.z],       idx*3);
-          this.opacities[idx] = mag;
-          idx++;
-        }
+update_field_pointers() {
+  let idx = 0;
+  const half = (GRID_N - 1) / 2;
+  let maxMag = 0;
+
+  // We’ll fill _ptrDst and a temp mag array to compute opacities
+  const dstStart = this._ptrDst;                  // alias for clarity
+  const dstEnd   = new Float32Array(VECTOR_COUNT * 3);
+  const mags     = new Float32Array(VECTOR_COUNT);
+
+  for (let i = 0; i < GRID_N; ++i) {
+    for (let j = 0; j < GRID_N; ++j) {
+      for (let k = 0; k < GRID_N; ++k) {
+        const x = (i - half) * SPACING;
+        const y = (j - half) * SPACING;
+        const z = (k - half) * SPACING;
+
+        const v = this.field(new THREE.Vector3(x, y, z));
+        const mag = v.length();
+        mags[idx] = mag;
+        maxMag = Math.max(maxMag, mag);
+
+        const midpoint = new THREE.Vector3(x, y, z);
+        const dir = v.clone().normalize();
+        const start = midpoint.clone().addScaledVector(dir, -SCALE / 2);
+        const end   = midpoint.clone().addScaledVector(dir,  SCALE / 2);
+
+        // write targets
+        dstStart[idx*3 + 0] = start.x;
+        dstStart[idx*3 + 1] = start.y;
+        dstStart[idx*3 + 2] = start.z;
+
+        dstEnd[idx*3 + 0] = end.x;
+        dstEnd[idx*3 + 1] = end.y;
+        dstEnd[idx*3 + 2] = end.z;
+
+        idx++;
       }
     }
-    for(let i=0;i<VECTOR_COUNT;++i){
-      this.opacities[i] = THREE.MathUtils.clamp(this.opacities[i]/maxMag, 0.05, 1);
-    }
-    this.instGeom.getAttribute('instanceStart').needsUpdate = true;
-    this.instGeom.getAttribute('instanceEnd').needsUpdate = true;
-    this.instGeom.getAttribute('instanceOpacity').needsUpdate = true;
   }
+
+  // Normalize opacities (unchanged behavior)
+  for (let i = 0; i < VECTOR_COUNT; ++i) {
+    this.opacities[i] = THREE.MathUtils.clamp(mags[i] / (maxMag || 1), 0.05, 1);
+  }
+  this.instGeom.getAttribute('instanceOpacity').needsUpdate = true;
+
+  // On first run: snap directly with no tween
+  if (!this._ptrInit) {
+    this.starts.set(dstStart);
+    this.ends.set(dstEnd);
+    this._ptrInit  = true;
+    this._ptrLerpT = 1.0;
+    this.instGeom.getAttribute('instanceStart').needsUpdate = true;
+    this.instGeom.getAttribute('instanceEnd').needsUpdate   = true;
+    return;
+  }
+
+  // Subsequent runs: start a tween from current displayed -> new targets
+  this._ptrSrc.set(this.starts);   // current displayed becomes source
+  this._ptrDst.set(dstStart);      // start targets already in _ptrDst
+  this._ptrDstEnd = dstEnd;        // stash end targets separately
+  this._ptrSrcEnd = new Float32Array(this.ends); // source ends
+
+  this._ptrLerpT = 0.0; // begin interpolation
+}
 
   /* ──────────────── ANIMATION ──────────────── */
   anim_frame(dt) {
@@ -431,6 +477,7 @@ updateTracers(dt){
         this.cubeVel[pIdx+0] = v.x; this.cubeVel[pIdx+1] = v.y; this.cubeVel[pIdx+2] = v.z;
         this.cubePos[pIdx+0] = pos.x; this.cubePos[pIdx+1] = pos.y; this.cubePos[pIdx+2] = pos.z;
       }
+
     }
 
     // Push cube edge endpoints into instanced attributes (keeps instanceCount fixed)
@@ -445,6 +492,28 @@ updateTracers(dt){
       this.tracerTimer -= TRACER_INTERVAL;
     }
     this.updateTracers(dt);
+
+// --- pointer tween (smooth angle change for vector indicators) ---
+if (this._ptrLerpT < 1.0) {
+  this._ptrLerpT = Math.min(1.0, this._ptrLerpT + (this._ptrLerpDur > 0 ? dt / this._ptrLerpDur : 1.0));
+  const t = this._ptrLerpT;
+  const it = 1.0 - t;
+
+  // Lerp start and end arrays
+  for (let i = 0; i < VECTOR_COUNT * 3; ++i) {
+    this.starts[i] = this._ptrSrc[i]    * it + this._ptrDst[i]    * t;
+    this.ends[i]   = this._ptrSrcEnd[i] * it + this._ptrDstEnd[i] * t;
+  }
+
+  this.instGeom.getAttribute('instanceStart').needsUpdate = true;
+  this.instGeom.getAttribute('instanceEnd').needsUpdate   = true;
+
+  // After finishing, collapse sources to final to avoid drift
+  if (this._ptrLerpT === 1.0) {
+    this.starts.set(this._ptrDst);
+    this.ends.set(this._ptrDstEnd);
+  }
+}
   }
 
   /* ──────────────── BEAT / SYNC ──────────────── */

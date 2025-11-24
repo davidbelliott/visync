@@ -26,7 +26,7 @@ class Vec2:
         return self.x == other.x and self.y == other.y
 
     def clone(self):
-        return Vec2(x, y)
+        return Vec2(self.x, self.y)
 
 
 def walk_eq(a, b):
@@ -218,6 +218,137 @@ def walks_to_json(allowed_moves, found_walks, grid_scale, margin, grid_dims, jso
        json.dump(walks_data, f)
 
 
+def pad_image_to_multiple(img, mult=16, color='black'):
+    w, h = img.size
+    pw = ((w + mult - 1) // mult) * mult
+    ph = ((h + mult - 1) // mult) * mult
+    if (pw, ph) == (w, h):
+        return img
+    out = Image.new(img.mode, (pw, ph), color=color)
+    out.paste(img, (0, 0))
+    return out
+
+
+def render_walk_frame_png_style(allowed_moves, walk, grid_scale, line_width, margin, grid_dims,
+                                bg_color='black', line_color='white', pad_mult=16):
+    """
+    Render ONE walk using the same coordinate/margin logic as walks_to_png,
+    but without tiling (i=0).
+    """
+    # local coords in pixels
+    coords = convert_walk_to_coords(allowed_moves, walk, grid_scale)
+
+    # PNG style uses margin/2 offset, not full margin
+    coords = [(margin / 2 + x, margin / 2 + y) for x, y in coords]
+
+    img_w = grid_dims.x * grid_scale + margin
+    img_h = grid_dims.y * grid_scale + margin
+
+    img = Image.new('RGB', (img_w, img_h), color=bg_color)
+    draw = ImageDraw.Draw(img)
+    draw.line(coords, fill=line_color, width=line_width)
+
+    return pad_image_to_multiple(img, mult=pad_mult, color=bg_color)
+
+
+def walks_to_video(allowed_moves, found_walks, grid_scale, line_width, margin, grid_dims,
+                   out_filename='out.mov', fps=12, hold_first=6, hold_last=12,
+                   codec='qtrle', pad_mult=16,
+                   persistence=0.3, drift_px=5, dwell_frames=1):
+    """
+    Flipbook: each walk is a frame (PNG-style render) with trailing persistence.
+
+    persistence: 0..1
+        0.0  -> no trails (only current frame)
+        0.85 -> long-ish trails
+        0.95 -> very long trails
+    """
+    import numpy as np
+    import imageio.v2 as imageio
+
+    if not found_walks:
+        raise ValueError("No walks to render.")
+
+    # Writer settings (unchanged)
+    if codec == 'qtrle':
+        writer_kwargs = dict(codec='qtrle', pixelformat='rgb24')
+    elif codec == 'ffv1':
+        writer_kwargs = dict(codec='ffv1', pixelformat='yuv444p')
+    elif codec == 'prores_ks':
+        writer_kwargs = dict(codec='prores_ks', pixelformat='yuv444p10le',
+                             ffmpeg_params=['-profile:v', '4', '-vendor', 'apl0', '-vtag', 'ap4h'])
+    else:
+        writer_kwargs = dict(codec=codec)
+
+    with imageio.get_writer(out_filename, fps=fps, **writer_kwargs) as w:
+
+        accum = None  # float32 accumulator in 0..255
+
+        # helper to emit a frame (with persistence)
+        def emit_frame(frame_uint8):
+            nonlocal accum
+            cur = frame_uint8.astype(np.float32)
+
+            if accum is None:
+                accum = cur
+            else:
+                if drift_px > 0:
+                    shifted = np.zeros_like(accum)
+                    shifted[:-drift_px, :-drift_px] = accum[drift_px:, drift_px:]
+                    accum = shifted
+                # -----------------------------------------------------------
+
+                # fade old content
+                accum *= persistence
+                # merge in new content at full strength
+                accum = np.maximum(accum, cur)
+
+            out = np.clip(accum, 0, 255).astype(np.uint8)
+            w.append_data(out)
+
+        # optional hold on first frame
+        first_img = render_walk_frame_png_style(
+            allowed_moves, found_walks[0],
+            grid_scale=grid_scale,
+            line_width=line_width,
+            margin=margin,
+            grid_dims=grid_dims,
+            pad_mult=pad_mult
+        )
+        first_frame = np.array(first_img)
+        for _ in range(max(0, hold_first)):
+            emit_frame(first_frame)
+
+        # main flipbook
+        for walk in found_walks:
+            frame_img = render_walk_frame_png_style(
+                allowed_moves, walk,
+                grid_scale=grid_scale,
+                line_width=line_width,
+                margin=margin,
+                grid_dims=grid_dims,
+                pad_mult=pad_mult
+            )
+            frame_np = np.array(frame_img)
+            for _ in range(max(1, dwell_frames)):
+                emit_frame(frame_np)
+
+        # optional hold on last (with trails continuing to fade if you want)
+        if hold_last > 0:
+            last_img = render_walk_frame_png_style(
+                allowed_moves, found_walks[-1],
+                grid_scale=grid_scale,
+                line_width=line_width,
+                margin=margin,
+                grid_dims=grid_dims,
+                pad_mult=pad_mult
+            )
+            last_frame = np.array(last_img)
+            for _ in range(hold_last):
+                emit_frame(last_frame)
+
+
+
 if __name__ == "__main__":
     grid_dims = Vec2(4, 3)
     allow_diagonals = True
@@ -225,9 +356,7 @@ if __name__ == "__main__":
 
     moves = []
     if allow_diagonals:
-        for x in [-1, 0, 1]:
-            for y in ([-1, 0, 1] if x != 0 else [-1, 1]):
-                moves.append(Vec2(x, y))
+        moves = [Vec2(*v) for v in [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]]
     else:
         moves = [Vec2(*v) for v in [[1, 0], [-1, 0], [0, 1], [0, -1]]]
 
@@ -242,8 +371,22 @@ if __name__ == "__main__":
     print(len(found_walks))
     
 
-    px_per_grid = 10
+    px_per_grid = 100
     margin_grids = 4
     walks_to_png(moves, found_walks, px_per_grid, 1, margin_grids * px_per_grid, grid_dims, 'out.png')
+
+    walks_to_video(
+        moves, found_walks,
+        grid_scale=px_per_grid,
+        line_width=1,
+        margin=margin_grids * px_per_grid,
+        grid_dims=grid_dims,
+        out_filename='out.mov',
+        fps=30,
+        persistence=0.95,
+        drift_px=2,
+        dwell_frames=10,
+        codec='prores_ks'
+    )
 
     #walks_to_json(moves, found_walks, 1, 2, grid_dims, 'out.json')

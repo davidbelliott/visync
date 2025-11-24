@@ -61,8 +61,8 @@ def random_walk_table(allowed_moves, allowed_moves_table, cursor_positions, move
             else:
                 # Continue searching from here
                 new_allowed_moves_table = copy.deepcopy(allowed_moves_table)
-                # Any move that lands on the start coords is now disallowed
                 for test_move in allowed_moves:
+                    # Any move that lands on the start coords is now disallowed
                     for end in [start_coords, end_coords, start_coords_inv]:
                         start = end - test_move
                         if in_bounds(start, grid_dims):
@@ -70,9 +70,50 @@ def random_walk_table(allowed_moves, allowed_moves_table, cursor_positions, move
                                 new_allowed_moves_table[start.y][start.x].remove(test_move)
                             except ValueError:
                                 pass
-                            except:
-                                breakpoint()
-                # Any move that intersects this (diagonal) move is now disallowed
+
+                # If diagonal, disallow crossing diagonals
+                if abs(move.x) > 0 and abs(move.y) > 0 and not allow_diagonal_crossings:
+                    x0 = min(start_coords.x, end_coords.x)
+                    x1 = max(start_coords.x, end_coords.x)
+                    y0 = min(start_coords.y, end_coords.y)
+                    y1 = max(start_coords.y, end_coords.y)
+
+                    # Determine current diagonal orientation
+                    dx = end_coords.x - start_coords.x
+                    dy = end_coords.y - start_coords.y
+
+                    # Corners of the cell:
+                    # (x0,y0) ---- (x1,y0)
+                    #    |           |
+                    # (x0,y1) ---- (x1,y1)
+
+                    if dx == dy:
+                        # current is slope +1: (x0,y0)->(x1,y1)
+                        cross_start = Vec2(x0, y1)
+                        cross_end   = Vec2(x1, y0)
+                    else:
+                        # current is slope -1: (x0,y1)->(x1,y0)
+                        cross_start = Vec2(x0, y0)
+                        cross_end   = Vec2(x1, y1)
+
+                    cross_move = cross_end - cross_start  # the crossing diagonal vector
+
+                    def try_remove(start, mv):
+                        if in_bounds(start, grid_dims):
+                            try:
+                                new_allowed_moves_table[start.y][start.x].remove(mv)
+                            except ValueError:
+                                pass
+
+                    # Remove crossing diagonal in this cell (both directions)
+                    try_remove(cross_start, cross_move)
+                    try_remove(cross_end, cross_move * -1)
+
+                    # Remove symmetric counterpart
+                    inv_cross_start = grid_dims - cross_start
+                    inv_cross_end   = grid_dims - cross_end
+                    try_remove(inv_cross_start, cross_move * -1)
+                    try_remove(inv_cross_end, cross_move)
 
 
                 found_walks += random_walk_table(allowed_moves,
@@ -179,7 +220,7 @@ def walks_to_json(allowed_moves, found_walks, grid_scale, margin, grid_dims, jso
 
 if __name__ == "__main__":
     grid_dims = Vec2(4, 3)
-    allow_diagonals = False
+    allow_diagonals = True
     allow_diagonal_crossings = False
 
     moves = []
@@ -191,17 +232,17 @@ if __name__ == "__main__":
         moves = [Vec2(*v) for v in [[1, 0], [-1, 0], [0, 1], [0, -1]]]
 
 
-    found_walks = symmetric_random_walk(moves, [], [Vec2(0, 0)], grid_dims, allow_diagonal_crossings)
+    #found_walks = symmetric_random_walk(moves, [], [Vec2(0, 0)], grid_dims, allow_diagonal_crossings)
 
     allowed_table = [[[ m for m in moves if in_bounds(Vec2(x, y) + m, grid_dims) ] \
             for x in range(0, grid_dims.x + 1)] \
             for y in range(0, grid_dims.y + 1)]
-    #found_walks_b = random_walk_table(moves, allowed_table, [Vec2(0, 0)], [])
+    found_walks = random_walk_table(moves, allowed_table, [Vec2(0, 0)], [])
 
     print(len(found_walks))
     
 
-    px_per_grid = 4
+    px_per_grid = 10
     margin_grids = 4
     walks_to_png(moves, found_walks, px_per_grid, 1, margin_grids * px_per_grid, grid_dims, 'out.png')
 

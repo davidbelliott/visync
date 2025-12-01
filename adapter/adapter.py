@@ -109,9 +109,9 @@ def strobe_off():
 NUM_BARS = 4
 fake_beat = [[] for i in range(0, NUM_BARS * 16)]
 for bar in range(0, NUM_BARS):
-    for i in [0, 3, 7, 11]:
+    for i in [0, 4, 8, 12]:
         fake_beat[16 * bar + i].append(1)
-    for i in [8]:
+    for i in [4, 12]:
         fake_beat[16 * bar + i].append(2)
     for i in range(0, 16):
         fake_beat[16 * bar + i].append(4)
@@ -208,7 +208,7 @@ async def handler(websocket):
         async for message in websocket:
             msg = json.loads(message)
             last_msg_latency = (time.time() - msg['t']) / 2
-            print(last_msg_latency)
+            #print(last_msg_latency)
     finally:
         # Unregister client
         connected.remove(websocket)

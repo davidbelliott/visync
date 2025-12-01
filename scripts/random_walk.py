@@ -163,20 +163,20 @@ def count_duplicates(walks):
     return n_dup
 
 
-def convert_walk_to_coords(allowed_moves, walk, pixel_scale):
+def convert_walk_to_coords(walk):
    # Start at (0, 0) and build the list of global coordinates
    coords = [(0, 0)]
    current_pos = Vec2(0, 0)
    for move in walk:
-       current_pos = current_pos + move * pixel_scale
+       current_pos = current_pos + move
        coords.append((current_pos.x, current_pos.y))
    for move in walk[-2::-1]:
-       current_pos = current_pos + move * pixel_scale
+       current_pos = current_pos + move
        coords.append((current_pos.x, current_pos.y))
    return coords
 
 
-def walks_to_png(allowed_moves, found_walks, grid_scale, line_width, margin, grid_dims, png_filename):
+def walks_to_png(found_walks, grid_scale, line_width, margin, grid_dims, png_filename):
    walks_per_row = 16
    num_rows = 1 + (len(found_walks) - 1) // walks_per_row
    img_size = Vec2(walks_per_row * (grid_dims.x * grid_scale + margin),
@@ -189,10 +189,10 @@ def walks_to_png(allowed_moves, found_walks, grid_scale, line_width, margin, gri
    # Iterate through each walk and plot
    for i, walk in enumerate(found_walks):
        # Get local coords
-       coords = convert_walk_to_coords(allowed_moves, walk, grid_scale)
+       coords = convert_walk_to_coords(walk)
        # Convert to world coords
-       coords = [(margin / 2 + x + (i % walks_per_row) * (grid_dims.x * grid_scale + margin),
-                  margin / 2 + y + (i // walks_per_row) * (grid_dims.y * grid_scale + margin)) for x, y in coords]
+       coords = [(margin / 2 + x * grid_scale + (i % walks_per_row) * (grid_dims.x * grid_scale + margin),
+                  margin / 2 + y * grid_scale + (i // walks_per_row) * (grid_dims.y * grid_scale + margin)) for x, y in coords]
 
        x_vals, y_vals = zip(*coords)
        draw.line(coords, fill='white', width=line_width)
@@ -201,21 +201,16 @@ def walks_to_png(allowed_moves, found_walks, grid_scale, line_width, margin, gri
    img.save(png_filename)
 
 
-def walks_to_json(allowed_moves, found_walks, grid_scale, margin, grid_dims, json_filename):
-   walks_per_row = 16
-   num_rows = 1 + (len(found_walks) - 1) // walks_per_row
+def walks_to_json(found_walks, json_filename):
+    json_data = { 'walks': [] }
+    for i, walk in enumerate(found_walks):
+        coords = convert_walk_to_coords(walk)
+        moves = [[m.x, m.y] for m in walk]
+        json_data['walks'].append({ 'coords': coords, 'moves': moves })
 
-   walks_data = []
-   for i, walk in enumerate(found_walks):
-       # Get local coords
-       coords = convert_walk_to_coords(allowed_moves, walk, grid_scale)
-       # Convert to world coords
-       coords = [(x + (i % walks_per_row) * (grid_dims.x * grid_scale + margin),
-                  y + (i // walks_per_row) * (grid_dims.y * grid_scale + margin)) for x, y in coords]
-       walks_data.append(coords)
+    with open(json_filename, 'w') as f:
+        json.dump(json_data, f)
 
-   with open(json_filename, 'w') as f:
-       json.dump(walks_data, f)
 
 
 def pad_image_to_multiple(img, mult=16, color='black'):
@@ -373,9 +368,9 @@ if __name__ == "__main__":
 
     px_per_grid = 100
     margin_grids = 4
-    walks_to_png(moves, found_walks, px_per_grid, 1, margin_grids * px_per_grid, grid_dims, 'out.png')
+    walks_to_png(found_walks, px_per_grid, 1, margin_grids * px_per_grid, grid_dims, 'out.png')
 
-    walks_to_video(
+    '''walks_to_video(
         moves, found_walks,
         grid_scale=px_per_grid,
         line_width=1,
@@ -387,6 +382,6 @@ if __name__ == "__main__":
         drift_px=2,
         dwell_frames=10,
         codec='prores_ks'
-    )
+    )'''
 
-    #walks_to_json(moves, found_walks, 1, 2, grid_dims, 'out.json')
+    walks_to_json(found_walks, 'out.json')

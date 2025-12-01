@@ -7,14 +7,15 @@ const GRID_N  = 12;
 const SPACING = 1.5;
 const SCALE   = 0.60;
 const VECTOR_COUNT = GRID_N*GRID_N*GRID_N;
-const POINTER_SMOOTH_TIME = 2.00; // seconds; feel free to tweak
+const POINTER_SMOOTH_TIME = 0.50;
+const FIELD_CHANGE_BEATS = 4;
 
 const MAX_CUBES = 32;
 const CUBE_EDGE_COUNT = 12;
 const CUBE_VERT_COUNT = 24; // EdgesGeometry emits 2 vertices per edge
 const CUBE_LIFETIME = 4.0;
 
-const TRACER_INTERVAL  = 0.010;
+const TRACER_INTERVAL  = 0.001;
 const TRACER_LIFETIME  = 0.08;
 const TRACER_MAX_COUNT = Math.ceil(TRACER_LIFETIME / TRACER_INTERVAL) + 2;
 const TRACER_EDGE_COUNT = 12;   // cube has 12 edges
@@ -67,6 +68,8 @@ export class VectorFieldComponent extends Component {
     // Displayed endpoints (attributes use these)
     this.starts = new Float32Array(VECTOR_COUNT * 3);
     this.ends   = new Float32Array(VECTOR_COUNT * 3);
+    this.fieldColorSrc = new THREE.Color(0x0000FF);
+    this.fieldColorDst = this.fieldColorSrc.clone();
 
     // Tween buffers (we don't expose these to the GPU directly)
     this._ptrSrc = new Float32Array(VECTOR_COUNT * 3);
@@ -83,42 +86,49 @@ export class VectorFieldComponent extends Component {
     this.instGeom.setAttribute('instanceEnd',     new THREE.InstancedBufferAttribute(this.ends,3));
     this.instGeom.setAttribute('instanceOpacity', new THREE.InstancedBufferAttribute(this.opacities,1));
 
-    const material = new THREE.RawShaderMaterial({
-      vertexShader:`
-         precision mediump float;
-         attribute vec3 position;
-         attribute vec3 instanceStart;
-         attribute vec3 instanceEnd;
-         attribute float instanceOpacity;
-         uniform mat4 modelViewMatrix;
-         uniform mat4 projectionMatrix;
-         varying vec3 vColor;
-         varying float vOpacity;
-         void main(){
-           vec3 worldPos = mix(instanceStart, instanceEnd, position.x);
-           gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos,1.0);
-           // (kept for posterity; overwritten below)
-           vColor = vec3(1.0-position.x, 0.0, position.x); // red→green (ignored)
-           // original end-cap look: white on one end, blue on the other
-           vColor = vec3(position.x > 0.5 ? 1.0 : 0.0, position.x > 0.5 ? 1.0 : 0.0, 1.0);
-           vOpacity = instanceOpacity;
-         }
-      `,
-      fragmentShader:`
-         precision mediump float;
-         varying vec3 vColor;
-         varying float vOpacity;
-         void main(){
-           gl_FragColor = vec4(vColor, vOpacity);
-         }
-      `,
-      transparent: true,
-      linewidth: 1,
+    this.pointerMaterial = new THREE.RawShaderMaterial({
+          vertexShader:`
+             precision mediump float;
+             attribute vec3 position;
+             attribute vec3 instanceStart;
+             attribute vec3 instanceEnd;
+             attribute float instanceOpacity;
+             uniform mat4 modelViewMatrix;
+             uniform mat4 projectionMatrix;
+             uniform vec3 fieldColor;
+             varying vec3 vColor;
+             varying float vOpacity;
+             void main(){
+               vec3 worldPos = mix(instanceStart, instanceEnd, position.x);
+               gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos,1.0);
+               // end-cap look: white on one end, field color on the other
+               if (position.x > 0.5) {
+                   vColor = vec3(1.0, 1.0, 1.0);
+               } else {
+                   vColor = fieldColor;
+               }
+               vOpacity = instanceOpacity;
+             }
+          `,
+          fragmentShader:`
+             precision mediump float;
+             varying vec3 vColor;
+             varying float vOpacity;
+             void main(){
+               gl_FragColor = vec4(vColor, vOpacity);
+             }
+          `,
+          uniforms: {
+                fieldColor: { type: 'v3', value: new THREE.Vector3() }
+          },
+          transparent: true,
+          linewidth: 1,
     });
+
 
     this.base_group = new THREE.Group();
     this.add(this.base_group);
-    const lines = new THREE.LineSegments(this.instGeom, material);
+    const lines = new THREE.LineSegments(this.instGeom, this.pointerMaterial);
     lines.renderOrder = 0;
     this.base_group.add(lines);
 
@@ -126,7 +136,7 @@ export class VectorFieldComponent extends Component {
 
     /* ───────────────── TEMPLATE CUBE GEOMETRY (hidden) ─────────────────
        Used only to get the default vertex positions (EdgesGeometry layout). */
-    const cube_geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)); // 12 edges -> 24 verts
+    const cube_geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)); // 12 edges -> 24 verts
     const cube_material = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false });
     this.cube = new THREE.LineSegments(cube_geometry, cube_material);
     this.cube.visible = false; // hide template
@@ -242,7 +252,6 @@ this.tracerGeom.setAttribute('tracerOpacity',
       transparent: true,
       depthTest: false,
       linewidth: 1,
-      renderOrder: 98
     });
 
     this.tracerLines = new THREE.LineSegments(this.tracerGeom, tracerMat);
@@ -446,75 +455,72 @@ update_field_pointers() {
   this._ptrLerpT = 0.0; // begin interpolation
 }
 
-  /* ──────────────── ANIMATION ──────────────── */
-  anim_frame(dt) {
-    super.anim_frame();
-    this.base_group.rotation.z += 0.05 * dt;
+    anim_frame(dt) {
+        super.anim_frame();
+        this.base_group.rotation.z += 0.05 * dt;
 
-    // Integrate each ACTIVE cube’s per-vertex positions using the field
-    for (let c = 0; c < MAX_CUBES; c++) {
-      if (!this.cubeActive[c]) continue;
+        // Integrate each ACTIVE cube’s per-vertex positions using the field
+        for (let c = 0; c < MAX_CUBES; c++) {
+          if (!this.cubeActive[c]) continue;
 
-      const basePos = this._cubeOffset(c);
-      for (let i = 0; i < CUBE_VERT_COUNT; i++) {
-        const pIdx = basePos + i*3;
+          const basePos = this._cubeOffset(c);
+          for (let i = 0; i < CUBE_VERT_COUNT; i++) {
+            const pIdx = basePos + i*3;
 
-        const pos = new THREE.Vector3(
-          this.cubePos[pIdx+0],
-          this.cubePos[pIdx+1],
-          this.cubePos[pIdx+2]
-        );
-        const v = new THREE.Vector3(
-          this.cubeVel[pIdx+0],
-          this.cubeVel[pIdx+1],
-          this.cubeVel[pIdx+2]
-        );
+            const pos = new THREE.Vector3(
+              this.cubePos[pIdx+0],
+              this.cubePos[pIdx+1],
+              this.cubePos[pIdx+2]
+            );
+            const v = new THREE.Vector3(
+              this.cubeVel[pIdx+0],
+              this.cubeVel[pIdx+1],
+              this.cubeVel[pIdx+2]
+            );
 
-        const accel = this.field(pos).multiplyScalar(dt * ACCEL_PER_UNIT_FIELD);
-        v.add(accel);              // v ← v + a*dt (a already scaled by dt)
-        pos.add(v);                // x ← x + v
+            const accel = this.field(pos).multiplyScalar(dt * ACCEL_PER_UNIT_FIELD);
+            v.add(accel);              // v ← v + a*dt (a already scaled by dt)
+            pos.add(v);                // x ← x + v
 
-        this.cubeVel[pIdx+0] = v.x; this.cubeVel[pIdx+1] = v.y; this.cubeVel[pIdx+2] = v.z;
-        this.cubePos[pIdx+0] = pos.x; this.cubePos[pIdx+1] = pos.y; this.cubePos[pIdx+2] = pos.z;
-      }
+            this.cubeVel[pIdx+0] = v.x; this.cubeVel[pIdx+1] = v.y; this.cubeVel[pIdx+2] = v.z;
+            this.cubePos[pIdx+0] = pos.x; this.cubePos[pIdx+1] = pos.y; this.cubePos[pIdx+2] = pos.z;
+          }
 
+        }
+
+        // Push cube edge endpoints into instanced attributes (keeps instanceCount fixed)
+        this._refreshCubeInstances();
+
+        /* --- tracer bookkeeping --- */
+        this.elapsedTime += dt;
+        this.tracerTimer += dt;
+
+        if (this.tracerTimer >= TRACER_INTERVAL){
+          this.createTracersForActiveCubes();
+          this.tracerTimer -= TRACER_INTERVAL;
+        }
+        this.updateTracers(dt);
+
+        // pointer tween
+        const fieldColor = this.fieldColorDst.clone();
+        if (this._ptrLerpT < 1.0) {
+          this._ptrLerpT = Math.min(1.0, this._ptrLerpT + (this._ptrLerpDur > 0 ? dt / this._ptrLerpDur : 1.0));
+          const t = this._ptrLerpT;
+          const it = 1.0 - t;
+
+          // Lerp start and end arrays
+          for (let i = 0; i < VECTOR_COUNT * 3; ++i) {
+            this.starts[i] = this._ptrSrc[i]    * it + this._ptrDst[i]    * t;
+            this.ends[i]   = this._ptrSrcEnd[i] * it + this._ptrDstEnd[i] * t;
+          }
+            fieldColor.lerpColors(this.fieldColorSrc, this.fieldColorDst, t);
+
+          this.instGeom.getAttribute('instanceStart').needsUpdate = true;
+          this.instGeom.getAttribute('instanceEnd').needsUpdate   = true;
+        }
+
+        this.pointerMaterial.uniforms.fieldColor.value.fromArray(fieldColor.toArray());
     }
-
-    // Push cube edge endpoints into instanced attributes (keeps instanceCount fixed)
-    this._refreshCubeInstances();
-
-    /* --- tracer bookkeeping --- */
-    this.elapsedTime += dt;
-    this.tracerTimer += dt;
-
-    if (this.tracerTimer >= TRACER_INTERVAL){
-      this.createTracersForActiveCubes();
-      this.tracerTimer -= TRACER_INTERVAL;
-    }
-    this.updateTracers(dt);
-
-// --- pointer tween (smooth angle change for vector indicators) ---
-if (this._ptrLerpT < 1.0) {
-  this._ptrLerpT = Math.min(1.0, this._ptrLerpT + (this._ptrLerpDur > 0 ? dt / this._ptrLerpDur : 1.0));
-  const t = this._ptrLerpT;
-  const it = 1.0 - t;
-
-  // Lerp start and end arrays
-  for (let i = 0; i < VECTOR_COUNT * 3; ++i) {
-    this.starts[i] = this._ptrSrc[i]    * it + this._ptrDst[i]    * t;
-    this.ends[i]   = this._ptrSrcEnd[i] * it + this._ptrDstEnd[i] * t;
-  }
-
-  this.instGeom.getAttribute('instanceStart').needsUpdate = true;
-  this.instGeom.getAttribute('instanceEnd').needsUpdate   = true;
-
-  // After finishing, collapse sources to final to avoid drift
-  if (this._ptrLerpT === 1.0) {
-    this.starts.set(this._ptrDst);
-    this.ends.set(this._ptrDstEnd);
-  }
-}
-  }
 
   /* ──────────────── BEAT / SYNC ──────────────── */
   handle_beat(latency, channel) {
@@ -533,9 +539,12 @@ if (this._ptrLerpT < 1.0) {
   }
 
   handle_sync(latency, sync_rate_hz, sync_idx) {
-    if (sync_idx % 16 == 0) {
-      this.field = createField();
-      this.update_field_pointers();
+    if (sync_idx % FIELD_CHANGE_BEATS == 0) {
+        this.field = createField();
+        this.update_field_pointers();
+        this.fieldColorSrc.copy(this.fieldColorDst);
+        const colorVec = new THREE.Vector3(Math.random(), Math.random(), Math.random()).normalize();
+        this.fieldColorDst.set(...colorVec.toArray());
     }
   }
 }

@@ -136,6 +136,12 @@ export class Scene extends THREE.Scene {
 
     }
 
+    advance_state(steps) {
+        const old_state_idx = this.cur_state_idx;
+        this.cur_state_idx = clamp(this.cur_state_idx + steps, 0, this.num_states - 1);
+        this.state_transition(old_state_idx, this.cur_state_idx);
+    }
+
     render(renderer, underlying_buffer) {
         renderer.render(this, this.camera);
     }

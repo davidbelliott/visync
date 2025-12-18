@@ -483,10 +483,10 @@ class GraphicsContext {
             [19, new TriangularPrismScene(this)],
             [20, new CellularAutomataScene(this)],
             [21, new VectorFieldScene(this)],
-            //[20, new SlideScene(["img/jungle-background.jpg"])],
-            //[21, new TextScene()],
-            //[21, new ShaderScene("glsl/chunks/octagrams.frag")],
-            //[20, new CelticKnotScene()],
+            //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
+            //[21, new TextScene(this)],
+            [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
+            //[20, new CelticKnotScene(this)],
         ]);
         this.change_scene(21);
         this.change_scene(0, true);
@@ -599,7 +599,7 @@ class GraphicsContext {
 
     recreate_buffers(width, height) {
         this.buffers = [];
-        for (let i = 0; i < Math.max(2, this.num_traces * this.trace_spacing); i++) {
+        for (let i = 0; i < 2; i++) {
             this.buffers.push(new THREE.WebGLRenderTarget(width, height, {
                 minFilter: THREE.LinearFilter,
                 magFilter: THREE.LinearFilter,
@@ -614,19 +614,27 @@ class GraphicsContext {
 render() {
     if (true) {
         // Use direct rendering to screen in scene bg -> fg order
+
+        // Clear buffer 0 (background)
+        this.renderer.setRenderTarget(this.buffers[0]);
+        this.renderer.clear();
+        this.renderer.setRenderTarget(this.buffers[1]);
+        this.renderer.clear();
+
+        this.renderer.setRenderTarget(null);
         this.renderer.clear();
 
         // Render background scene
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
+            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer, this.buffers[0]);
             const vector = new THREE.Vector2(0, 0);
-            this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
+            this.renderer.copyFramebufferToTexture(vector, this.buffers[1].texture);
         } else {
             this.renderer.clear();
         }
 
         // Render foreground scene
-        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
+        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[1]);
     } else {
         // Do overlay render by rendering bg and fg to buffers and blending
 
@@ -747,6 +755,7 @@ render() {
     }
 
     advance_state(steps) {
+        console.log(`advance ${steps} steps`);
         this.scenes.get(this.cur_scene_idx).advance_state(steps);
         if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
             this.scenes.get(this.cur_bg_scene_idx).advance_state(steps);

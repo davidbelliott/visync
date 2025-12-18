@@ -4,20 +4,20 @@ import { rand_int } from '../util.js';
 
 /* ───────────────── CONFIG ───────────────── */
 const GRID_N  = 12;
-const SPACING = 1.5;
-const SCALE   = 0.60;
+const SPACING = 1.0;
+const SCALE   = 0.40;
 const VECTOR_COUNT = GRID_N*GRID_N*GRID_N;
 const POINTER_SMOOTH_TIME = 0.50;
-const FIELD_CHANGE_BEATS = 4;
+const FIELD_CHANGE_BEATS = 8;
 
-const MAX_CUBES = 32;
+const MAX_CUBES = 256;
 const CUBE_EDGE_COUNT = 12;
-const CUBE_VERT_COUNT = 24; // EdgesGeometry emits 2 vertices per edge
+var CUBE_VERT_COUNT = 24; // EdgesGeometry emits 2 vertices per edge
 const CUBE_LIFETIME = 4.0;
 
-const TRACER_INTERVAL  = 0.001;
-const TRACER_LIFETIME  = 0.08;
-const TRACER_MAX_COUNT = Math.ceil(TRACER_LIFETIME / TRACER_INTERVAL) + 2;
+const TRACER_INTERVAL  = 0.01;
+const TRACER_LIFETIME  = 0.10;
+const TRACER_MAX_COUNT = Math.ceil(TRACER_LIFETIME / TRACER_INTERVAL);
 const TRACER_EDGE_COUNT = 12;   // cube has 12 edges
 // ONE tracer "drop" per active cube per tick.
 // Total tracer DROPS kept in the ring:
@@ -136,14 +136,13 @@ export class VectorFieldComponent extends Component {
 
     /* ───────────────── TEMPLATE CUBE GEOMETRY (hidden) ─────────────────
        Used only to get the default vertex positions (EdgesGeometry layout). */
-    const cube_geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)); // 12 edges -> 24 verts
-    const cube_material = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false });
-    this.cube = new THREE.LineSegments(cube_geometry, cube_material);
-    this.cube.visible = false; // hide template
-    this.base_group.add(this.cube);
+    this.geomsPerChannel = [
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(0.1, 0.1, 0.1)),
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)),
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(0.1, 0.1, 0.1))];
 
-    const p = cube_geometry.getAttribute('position');
-    this.default_pos = p.array.slice(); // 24 * 3 floats snapshot
+    const cube_material = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false });
 
     /* ───── NEW: cube pool state (positions/velocities per cube) ───── */
     this.cubeActive = Array(MAX_CUBES).fill(false);
@@ -263,10 +262,12 @@ this.tracerGeom.setAttribute('tracerOpacity',
   _cubeOffset(cubeIdx) { return cubeIdx * CUBE_VERT_COUNT * 3; }
   _edgeOffset(cubeIdx) { return cubeIdx * CUBE_EDGE_COUNT * 3; }
 
-  _spawnCubeFromTemplate(slot) {
+  _spawnCubeFromTemplate(slot, channel) {
     // copy default positions into cubePos, zero velocities
+    const p = this.geomsPerChannel[channel - 1].getAttribute('position');
+    const default_pos = p.array.slice();
     const dstPosOff = this._cubeOffset(slot);
-    this.cubePos.set(this.default_pos, dstPosOff);
+    this.cubePos.set(default_pos, dstPosOff);
     this.cubeVel.fill(0, dstPosOff, dstPosOff + CUBE_VERT_COUNT * 3);
 
     this.cubeActive[slot] = true;
@@ -379,14 +380,6 @@ updateTracers(dt){
   this.tracerGeom.attributes.tracerOpacity.needsUpdate = true;
 }
 
-  /* ──────────────── ORIGINAL UTILS ──────────────── */
-  reset_cube() {
-    // Keep: used as the template for spawns
-    const p = this.cube.geometry.getAttribute('position');
-    this.cube.geometry.setAttribute('velocity',
-      new THREE.BufferAttribute(new Float32Array(p.count * 3).fill(0), 3));
-    p.copyArray(this.default_pos);
-  }
 
 update_field_pointers() {
   let idx = 0;
@@ -526,15 +519,9 @@ update_field_pointers() {
   handle_beat(latency, channel) {
     const delay = this.parent ? this.parent.get_beat_delay(latency) : 0;
     setTimeout(() => {
-      if (channel == 1) {
-        // Spawn a fresh cube from the pool (round-robin)
-        //this.reset_cube(); // refresh template’s default_pos (no-op for pool)
         const slot = this.nextCube;
-        this._spawnCubeFromTemplate(slot);
+        this._spawnCubeFromTemplate(slot, channel);
         this.nextCube = (this.nextCube + 1) % MAX_CUBES;
-      } else if (channel == 2 || channel == 4) {
-        // Reserve for future behaviors (color pulse, explode, etc.)
-      }
     }, delay * 1000);
   }
 

@@ -1,0 +1,67 @@
+float gTime = 0.;
+const float PI = 3.1415927;
+
+
+float luma(vec3 color) {
+  //return dot(color, vec3(0.299, 0.587, 0.114));
+  return dot(color.rgb, vec3(0.577, 0.577, 0.577));
+}
+
+float luma(vec4 color) {
+  //return dot(color.rgb, vec3(0.299, 0.587, 0.114));
+  return dot(color.rgb, vec3(0.577, 0.577, 0.577));
+}
+
+float dither4x4(vec2 position, float brightness) {
+  int x = int(mod(position.x, 4.0));
+  int y = int(mod(position.y, 4.0));
+  int index = x + y * 4;
+  float limit = 0.0;
+
+  if (x < 8) {
+    if (index == 0) limit = 0.0625;
+    if (index == 1) limit = 0.5625;
+    if (index == 2) limit = 0.1875;
+    if (index == 3) limit = 0.6875;
+    if (index == 4) limit = 0.8125;
+    if (index == 5) limit = 0.3125;
+    if (index == 6) limit = 0.9375;
+    if (index == 7) limit = 0.4375;
+    if (index == 8) limit = 0.25;
+    if (index == 9) limit = 0.75;
+    if (index == 10) limit = 0.125;
+    if (index == 11) limit = 0.625;
+    if (index == 12) limit = 1.0;
+    if (index == 13) limit = 0.5;
+    if (index == 14) limit = 0.875;
+    if (index == 15) limit = 0.375;
+  }
+
+  return brightness < limit ? 0.0 : 1.0;
+}
+
+vec3 dither4x4(vec2 position, vec3 color) {
+  return color * dither4x4(position, luma(color));
+}
+
+vec4 dither4x4(vec2 position, vec4 color) {
+  return vec4(color.rgb * dither4x4(position, luma(color)), 1.0);
+}
+
+vec4 colorAt(vec2 coords) {
+    // ampl, freq, phase, vel in X followed by Y
+    float w[27] = float[](0.2, 0.5, 0.01, 1.0, 0.1, 0.5, 0.1, 1.0, 0.3,
+                          0.0, 0.5, 0.02, 2.0, 0.2, 0.5, 0.1, 1.0, 0.2,
+                          0.5, 0.5, 0.05, 0.0, 0.3, 0.5, 0.0, 1.0, 0.1);
+    vec4 col = vec4(0.0, 0.0, 0.0, 1.0);
+    for (int i = 0; i < 3; i++) {
+        col[i] = w[0] + w[1 + 8*i] * sin(2.0*PI*w[2 + 8*i]*coords.x + w[3 + 8*i] - w[4 + 8*i] * iTime) +
+                 w[5 + 8*i] * sin(2.0*PI*w[6 + 8*i]*coords.y + w[7 + 8*i] - w[8 + 8*i] * iTime);
+    }
+    return col;
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 coordsNorm = vec2(fragCoord.x / iResolution.x - 0.5, -fragCoord.y / iResolution.y + 0.5);
+    fragColor = 1.0 * dither4x4(fragCoord / 32.0 + 10. * (sin(10.0 * coordsNorm.x) + vec2(0.1 * iTime, 0.1 * iTime)), colorAt(coordsNorm));
+}

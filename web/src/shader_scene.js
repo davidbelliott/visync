@@ -136,24 +136,24 @@ render(renderer, underlying_buffer) {
     if (!this.initialized || !this.material) return;
     
     // Create render targets if not already created
-    if (!this.renderTarget) {
+    /*if (!this.renderTarget) {
         this.handle_resize(window.innerWidth, window.innerHeight);
-    }
+    }*/
     
     // Set the background texture as a uniform so the shader can access it
     this.material.uniforms.iBackgroundTexture.value = underlying_buffer.texture;
     
-    this.material.uniforms.iChannel0.value = this.prevRender.texture;
+    //this.material.uniforms.iChannel0.value = this.prevRender.texture;
 
     // Render to the screen
     renderer.render(this.scene, this.camera);
 
-    renderer.setRenderTarget(this.renderTarget);
-    renderer.render(this.scene, this.camera);
+    //renderer.setRenderTarget(this.renderTarget);
+    //renderer.render(this.scene, this.camera);
 
     // Swap buffers
-    const temp = this.prevRender;
+    /*const temp = this.prevRender;
     this.prevRender = this.renderTarget;
-    this.renderTarget = temp;
+    this.renderTarget = temp;*/
 }
 }

@@ -132,11 +132,15 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
                 print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
                 print(f'beat: {clock_tracker.cur_sync_idx // 24}')
     elif channel == 15:
-        # This channel is used for lighting control
-        if USE_STROBE:
-            strobe_on()
         # Analog Rytm auto channel
-        ws_msg = MsgBeat(last_transmit_latency, note_number + 1, True)
+        if note_number >= 12 and note_number < 36:
+            ws_msg = MsgGotoScene(last_transmit_latency, note_number - 12, note_vel < 100)
+        elif note_number >= 36:
+            print(f'advancing {-1 if note_number % 2 == 0 else 1}')
+            ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1 if note_number % 2 == 0 else 1)
+        else:
+            ws_msg = MsgBeat(last_transmit_latency, note_number + 1, True)
+
     elif channel == 14:
         # This channel is used for graphics scene switching
         ws_msg = MsgGotoScene(last_transmit_latency, note_number - 60, note_vel < 100)
@@ -147,6 +151,13 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1)
     else:
         # Remaining channels are used for controlling elements within the scene
+        if channel == 4:
+            channel = 2
+        elif channel == 9:
+            channel = 4
+        elif channel == 2 or channel == 5:
+            channel = 3
+
         ws_msg = MsgBeat(last_transmit_latency, channel, True)
 
     return ws_msg

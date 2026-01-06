@@ -4,21 +4,53 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { ShaderLoader } from '../util.js';
 
 
+// Animation constants
+const BEATER_REST_OFFSET = 0.5;    // Distance from drum when at rest
+const BEATER_RETURN_TIME = 0.5;   // Time in seconds to return to rest position
+
+
 // Base class for all drum pieces
 class DrumPiece extends THREE.Object3D {
     constructor(material) {
         super();
         this.material = material;
         this.hit_time = null;
+        this.beater_axis = 'y';  // Override to 'z' for kick drum
     }
 
     hit() {
         this.hit_time = 0;
     }
 
+    // Call after adding beater to store its rest position
+    initBeaterRestPosition() {
+        if (this.beater) {
+            this.beater_rest_position = this.beater.position.clone();
+            // Set initial offset from drum
+            this.beater.position[this.beater_axis] += BEATER_REST_OFFSET;
+        }
+    }
+
     anim_frame(dt) {
-        if (this.hit_time === null) return;
-        // Animation logic will be implemented later
+        if (this.hit_time === null || !this.beater) return;
+
+        if (this.hit_time === 0) {
+            // First frame after hit: instantly move to contact position
+            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis];
+            this.hit_time += dt;
+        } else {
+            // Return phase: cubic ease-out from contact to rest
+            const t = Math.min(this.hit_time / BEATER_RETURN_TIME, 1);
+            const ease = 1 - Math.pow(1 - t, 3);  // Cubic ease-out: fast start, slow finish
+            const offset = ease * BEATER_REST_OFFSET;
+            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis] + offset;
+
+            if (t >= 1) {
+                this.hit_time = null;
+            } else {
+                this.hit_time += dt;
+            }
+        }
     }
 
     // Helper to create a mesh from geometry and add it as a named part
@@ -39,6 +71,7 @@ class SnareDrum extends DrumPiece {
         this.addPart('drum', geometries['snare-drum']);
         this.addPart('stand', geometries['snare-drum-stand']);
         this.addPart('beater', geometries['snare-drum-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -46,8 +79,10 @@ class SnareDrum extends DrumPiece {
 class BassDrum extends DrumPiece {
     constructor(material, geometries) {
         super(material);
+        this.beater_axis = 'z';  // Kick beater moves in Z axis
         this.addPart('drum', geometries['bass-drum']);
         this.addPart('beater', geometries['bass-drum-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -58,6 +93,7 @@ class FloorTom extends DrumPiece {
         this.addPart('drum', geometries['floor-tom']);
         this.addPart('stand', geometries['floor-tom-stand']);
         this.addPart('beater', geometries['floor-tom-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -67,6 +103,7 @@ class LowTom extends DrumPiece {
         super(material);
         this.addPart('drum', geometries['low-tom']);
         this.addPart('beater', geometries['low-tom-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -76,6 +113,7 @@ class MidTom extends DrumPiece {
         super(material);
         this.addPart('drum', geometries['mid-tom']);
         this.addPart('beater', geometries['mid-tom-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -87,6 +125,7 @@ class HiHat extends DrumPiece {
         this.addPart('bottom', geometries['hat-bottom']);
         this.addPart('stand', geometries['hat-stand']);
         this.addPart('beater', geometries['hat-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -97,6 +136,7 @@ class Crash extends DrumPiece {
         this.addPart('cymbal', geometries['crash-top']);
         this.addPart('stand', geometries['crash-stand']);
         this.addPart('beater', geometries['crash-beater']);
+        this.initBeaterRestPosition();
     }
 }
 
@@ -251,6 +291,27 @@ export class DrumKit extends Component {
 
     handle_beat(latency, channel) {
         super.handle_beat(latency, channel);
+
+        // Channel to drum mapping
+        // 1->kick, 2->nothing, 3->rim (not implemented), 4->snare,
+        // 5->floor tom, 6->floor tom, 7->low tom, 8->mid tom,
+        // 9->hihat (closed), 10->hihat (open), 11->crash, 12->cowbell (not implemented)
+        const channel_map = {
+            1: this.bass,
+            4: this.snare,
+            5: this.floor_tom,
+            6: this.floor_tom,
+            7: this.low_tom,
+            8: this.mid_tom,
+            9: this.hihat,
+            10: this.hihat,
+            11: this.crash,
+        };
+
+        const drum = channel_map[channel];
+        if (drum) {
+            drum.hit();
+        }
     }
 
     handle_sync(latency, sync_rate_hz, sync_idx) {

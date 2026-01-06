@@ -10,6 +10,11 @@ const BEATER_RETURN_TIME = 0.5;    // Time in seconds to return to rest position
 const HAT_OPEN_OFFSET = 0.25;      // Distance hat top rises when open
 const HAT_OPEN_TIME = 0.15;        // Time in seconds to open the hat
 
+// Drum oscillator defaults (overdamped harmonic oscillator)
+const DEFAULT_DRUM_STIFFNESS = 500;   // Spring constant (higher = faster oscillation)
+const DEFAULT_DRUM_DAMPING = 10;      // Damping coefficient (higher = more overdamped)
+const DEFAULT_DRUM_IMPULSE = 4.0;     // Initial velocity on hit
+
 
 // Base class for all drum pieces
 class DrumPiece extends THREE.Object3D {
@@ -18,10 +23,21 @@ class DrumPiece extends THREE.Object3D {
         this.material = material;
         this.hit_time = null;
         this.beater_axis = 'y';  // Override to 'z' for kick drum
+
+        // Drum oscillator parameters (can be overridden per instance)
+        this.drum_stiffness = DEFAULT_DRUM_STIFFNESS;
+        this.drum_damping = DEFAULT_DRUM_DAMPING;
+        this.drum_impulse = DEFAULT_DRUM_IMPULSE;
+
+        // Drum oscillator state
+        this.drum_displacement = 0;
+        this.drum_velocity = 0;
     }
 
     hit() {
         this.hit_time = 0;
+        // Apply impulse to drum (negative = toward beater direction)
+        this.drum_velocity -= this.drum_impulse;
     }
 
     // Call after adding beater to store its rest position
@@ -33,7 +49,18 @@ class DrumPiece extends THREE.Object3D {
         }
     }
 
+    // Call after adding drum to store its rest position
+    initDrumRestPosition() {
+        if (this.drum) {
+            this.drum_rest_position = this.drum.position.clone();
+        }
+    }
+
     anim_frame(dt) {
+        // Update drum oscillator
+        this.updateDrumOscillator(dt);
+
+        // Update beater animation
         if (this.hit_time === null || !this.beater) return;
 
         if (this.hit_time === 0) {
@@ -55,6 +82,20 @@ class DrumPiece extends THREE.Object3D {
         }
     }
 
+    updateDrumOscillator(dt) {
+        if (!this.drum || !this.drum_rest_position) return;
+
+        // Damped harmonic oscillator: a = -stiffness * x - damping * v
+        const acceleration = -this.drum_stiffness * this.drum_displacement
+                           - this.drum_damping * this.drum_velocity;
+        this.drum_velocity += acceleration * dt;
+        this.drum_displacement += this.drum_velocity * dt;
+
+        // Apply displacement to drum position
+        this.drum.position[this.beater_axis] =
+            this.drum_rest_position[this.beater_axis] + this.drum_displacement;
+    }
+
     // Helper to create a mesh from geometry and add it as a named part
     addPart(name, geometry) {
         const mesh = new THREE.Mesh(geometry, this.material);
@@ -73,6 +114,7 @@ class SnareDrum extends DrumPiece {
         this.addPart('drum', geometries['snare-drum']);
         this.addPart('stand', geometries['snare-drum-stand']);
         this.addPart('beater', geometries['snare-drum-beater']);
+        this.initDrumRestPosition();
         this.initBeaterRestPosition();
     }
 }
@@ -84,6 +126,7 @@ class BassDrum extends DrumPiece {
         this.beater_axis = 'z';  // Kick beater moves in Z axis
         this.addPart('drum', geometries['bass-drum']);
         this.addPart('beater', geometries['bass-drum-beater']);
+        this.initDrumRestPosition();
         this.initBeaterRestPosition();
     }
 }
@@ -95,6 +138,7 @@ class FloorTom extends DrumPiece {
         this.addPart('drum', geometries['floor-tom']);
         this.addPart('stand', geometries['floor-tom-stand']);
         this.addPart('beater', geometries['floor-tom-beater']);
+        this.initDrumRestPosition();
         this.initBeaterRestPosition();
     }
 }
@@ -105,6 +149,7 @@ class LowTom extends DrumPiece {
         super(material);
         this.addPart('drum', geometries['low-tom']);
         this.addPart('beater', geometries['low-tom-beater']);
+        this.initDrumRestPosition();
         this.initBeaterRestPosition();
     }
 }
@@ -115,6 +160,7 @@ class MidTom extends DrumPiece {
         super(material);
         this.addPart('drum', geometries['mid-tom']);
         this.addPart('beater', geometries['mid-tom-beater']);
+        this.initDrumRestPosition();
         this.initBeaterRestPosition();
     }
 }
@@ -131,9 +177,22 @@ class HiHat extends DrumPiece {
 
         // Hi-hat specific state
         this.top_rest_position = this.top.position.clone();
+        this.bottom_rest_position = this.bottom.position.clone();
         this.hat_open_amount = 0;      // Current open offset (0 = closed, HAT_OPEN_OFFSET = fully open)
         this.opening = false;          // Whether hat is currently opening
         this.open_time = null;         // Time tracking for opening animation
+
+        // Separate oscillator state for top and bottom
+        this.top_displacement = 0;
+        this.top_velocity = 0;
+        this.bottom_displacement = 0;
+        this.bottom_velocity = 0;
+    }
+
+    hit() {
+        this.hit_time = 0;
+        // Apply impulse to top cymbal only
+        this.top_velocity -= this.drum_impulse;
     }
 
     hit_open() {
@@ -148,7 +207,6 @@ class HiHat extends DrumPiece {
         this.opening = false;
         this.open_time = null;
         this.hat_open_amount = 0;
-        this.top.position.y = this.top_rest_position.y;
         this.hit();
     }
 
@@ -158,35 +216,85 @@ class HiHat extends DrumPiece {
             this.open_time += dt;
             const t = Math.min(this.open_time / HAT_OPEN_TIME, 1);
             this.hat_open_amount = t * HAT_OPEN_OFFSET;
-            this.top.position.y = this.top_rest_position.y + this.hat_open_amount;
 
             if (t >= 1) {
                 this.open_time = null;  // Done opening
             }
         }
 
+        // Update oscillators for top and bottom
+        this.updateHiHatOscillators(dt);
+
         // Handle beater animation with adjusted contact position
-        if (this.hit_time === null || !this.beater) return;
+        if (this.hit_time !== null && this.beater) {
+            // Calculate current top position for beater contact
+            const top_current_offset = this.hat_open_amount + this.top_displacement;
 
-        if (this.hit_time === 0) {
-            // First frame after hit: move to contact position (adjusted for hat open amount)
-            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis] + this.hat_open_amount;
-            this.hit_time += dt;
-        } else {
-            // Return phase: cubic ease-out from contact to rest
-            const t = Math.min(this.hit_time / BEATER_RETURN_TIME, 1);
-            const ease = 1 - Math.pow(1 - t, 3);
-            // Interpolate from contact position (with hat offset) to rest position
-            const contact_pos = this.beater_rest_position[this.beater_axis] + this.hat_open_amount;
-            const rest_pos = this.beater_rest_position[this.beater_axis] + BEATER_REST_OFFSET;
-            this.beater.position[this.beater_axis] = contact_pos + ease * (rest_pos - contact_pos);
-
-            if (t >= 1) {
-                this.hit_time = null;
-            } else {
+            if (this.hit_time === 0) {
+                // First frame after hit: move to contact position (adjusted for hat position)
+                this.beater.position.y = this.beater_rest_position.y + top_current_offset;
                 this.hit_time += dt;
+            } else {
+                // Return phase: cubic ease-out from contact to rest
+                const t = Math.min(this.hit_time / BEATER_RETURN_TIME, 1);
+                const ease = 1 - Math.pow(1 - t, 3);
+                // Interpolate from contact position to rest position
+                const contact_pos = this.beater_rest_position.y + top_current_offset;
+                const rest_pos = this.beater_rest_position.y + BEATER_REST_OFFSET;
+                this.beater.position.y = contact_pos + ease * (rest_pos - contact_pos);
+
+                if (t >= 1) {
+                    this.hit_time = null;
+                } else {
+                    this.hit_time += dt;
+                }
             }
         }
+    }
+
+    updateHiHatOscillators(dt) {
+        // Calculate where top would be relative to bottom
+        // top_displacement is relative to (top_rest_position + hat_open_amount)
+        // Contact occurs when top reaches bottom level
+        const top_absolute = this.hat_open_amount + this.top_displacement;
+
+        // Check if top is in contact with bottom (top at or below bottom level)
+        if (top_absolute + this.bottom_displacement <= 0) {
+            // Coupled: top and bottom move together
+            // Combine momentums (simple average for equal mass)
+            const combined_velocity = (this.top_velocity + this.bottom_velocity) / 2;
+            this.top_velocity = combined_velocity;
+            this.bottom_velocity = combined_velocity;
+
+            // Update bottom oscillator
+            const bottom_accel = -this.drum_stiffness * this.bottom_displacement
+                               - this.drum_damping * this.bottom_velocity;
+            this.bottom_velocity += bottom_accel * dt;
+            this.bottom_displacement += this.bottom_velocity * dt;
+
+            // Top follows bottom while in contact
+            this.top_velocity = this.bottom_velocity;
+            // Top displacement such that it stays at bottom level
+            this.top_displacement = this.bottom_displacement - this.hat_open_amount;
+        } else {
+            // Decoupled: top and bottom move independently
+
+            // Update top oscillator (relative to its open position)
+            const top_accel = -this.drum_stiffness * this.top_displacement
+                            - this.drum_damping * this.top_velocity;
+            this.top_velocity += top_accel * dt;
+            this.top_displacement += this.top_velocity * dt;
+
+            // Update bottom oscillator
+            const bottom_accel = -this.drum_stiffness * this.bottom_displacement
+                               - this.drum_damping * this.bottom_velocity;
+            this.bottom_velocity += bottom_accel * dt;
+            this.bottom_displacement += this.bottom_velocity * dt;
+        }
+
+        // Apply positions
+        this.top.position.y = this.top_rest_position.y + this.hat_open_amount + this.top_displacement;
+        this.bottom.position.y = this.bottom_rest_position.y + this.bottom_displacement;
     }
 }
 
@@ -198,6 +306,51 @@ class Crash extends DrumPiece {
         this.addPart('stand', geometries['crash-stand']);
         this.addPart('beater', geometries['crash-beater']);
         this.initBeaterRestPosition();
+
+        // Store cymbal rest position for oscillator
+        this.cymbal_rest_position = this.cymbal.position.clone();
+    }
+
+    hit() {
+        this.hit_time = 0;
+        // Apply impulse to cymbal
+        this.drum_velocity -= this.drum_impulse;
+    }
+
+    anim_frame(dt) {
+        // Update cymbal oscillator
+        this.updateCymbalOscillator(dt);
+
+        // Update beater animation
+        if (this.hit_time === null || !this.beater) return;
+
+        if (this.hit_time === 0) {
+            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis];
+            this.hit_time += dt;
+        } else {
+            const t = Math.min(this.hit_time / BEATER_RETURN_TIME, 1);
+            const ease = 1 - Math.pow(1 - t, 3);
+            const offset = ease * BEATER_REST_OFFSET;
+            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis] + offset;
+
+            if (t >= 1) {
+                this.hit_time = null;
+            } else {
+                this.hit_time += dt;
+            }
+        }
+    }
+
+    updateCymbalOscillator(dt) {
+        // Damped harmonic oscillator for cymbal
+        const acceleration = -this.drum_stiffness * this.drum_displacement
+                           - this.drum_damping * this.drum_velocity;
+        this.drum_velocity += acceleration * dt;
+        this.drum_displacement += this.drum_velocity * dt;
+
+        // Apply displacement to cymbal position
+        this.cymbal.position[this.beater_axis] =
+            this.cymbal_rest_position[this.beater_axis] + this.drum_displacement;
     }
 }
 

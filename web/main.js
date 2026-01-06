@@ -37,6 +37,7 @@ import { TextScene } from './src/text_scene.js';
 import { ShaderScene } from './src/shader_scene.js';
 import { BuildingScene } from './src/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field.js';
+import { DrumKitScene } from './src/scenes/drum_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -453,6 +454,7 @@ class GraphicsContext {
             stencil: false,
             format: THREE.RGBAFormat,
         });
+        this.renderer.shadowMap.enabled = true;
         this.renderer.autoClearColor = false;
         this.renderer.autoClearDepth = true;
 	this.renderer.setPixelRatio(window.devicePixelRatio);
@@ -486,10 +488,11 @@ class GraphicsContext {
             //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
             //[21, new TextScene(this)],
             [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
+            [23, new DrumKitScene(this)],
             //[20, new CelticKnotScene(this)],
         ]);
-        this.change_scene(21);
-        this.change_scene(0, true);
+        this.change_scene(23);
+        this.change_scene(21, true);
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);

@@ -114,7 +114,10 @@ for bar in range(0, NUM_BARS):
     for i in [4, 12]:
         fake_beat[16 * bar + i].append(4)
     for i in range(0, 16):
-        fake_beat[16 * bar + i].append(9)
+        if i in [2, 6, 10, 14]:
+            fake_beat[16 * bar + i].append(10)
+        else:
+            fake_beat[16 * bar + i].append(9)
 
 
 def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):

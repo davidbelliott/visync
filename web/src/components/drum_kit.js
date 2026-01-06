@@ -6,7 +6,9 @@ import { ShaderLoader } from '../util.js';
 
 // Animation constants
 const BEATER_REST_OFFSET = 0.5;    // Distance from drum when at rest
-const BEATER_RETURN_TIME = 0.5;   // Time in seconds to return to rest position
+const BEATER_RETURN_TIME = 0.5;    // Time in seconds to return to rest position
+const HAT_OPEN_OFFSET = 0.25;      // Distance hat top rises when open
+const HAT_OPEN_TIME = 0.15;        // Time in seconds to open the hat
 
 
 // Base class for all drum pieces
@@ -126,6 +128,65 @@ class HiHat extends DrumPiece {
         this.addPart('stand', geometries['hat-stand']);
         this.addPart('beater', geometries['hat-beater']);
         this.initBeaterRestPosition();
+
+        // Hi-hat specific state
+        this.top_rest_position = this.top.position.clone();
+        this.hat_open_amount = 0;      // Current open offset (0 = closed, HAT_OPEN_OFFSET = fully open)
+        this.opening = false;          // Whether hat is currently opening
+        this.open_time = null;         // Time tracking for opening animation
+    }
+
+    hit_open() {
+        // Start opening the hat, then hit
+        this.opening = true;
+        this.open_time = 0;
+        this.hit();
+    }
+
+    hit_closed() {
+        // Instantly close the hat, then hit
+        this.opening = false;
+        this.open_time = null;
+        this.hat_open_amount = 0;
+        this.top.position.y = this.top_rest_position.y;
+        this.hit();
+    }
+
+    anim_frame(dt) {
+        // Handle hat top opening animation
+        if (this.opening && this.open_time !== null) {
+            this.open_time += dt;
+            const t = Math.min(this.open_time / HAT_OPEN_TIME, 1);
+            this.hat_open_amount = t * HAT_OPEN_OFFSET;
+            this.top.position.y = this.top_rest_position.y + this.hat_open_amount;
+
+            if (t >= 1) {
+                this.open_time = null;  // Done opening
+            }
+        }
+
+        // Handle beater animation with adjusted contact position
+        if (this.hit_time === null || !this.beater) return;
+
+        if (this.hit_time === 0) {
+            // First frame after hit: move to contact position (adjusted for hat open amount)
+            this.beater.position[this.beater_axis] = this.beater_rest_position[this.beater_axis] + this.hat_open_amount;
+            this.hit_time += dt;
+        } else {
+            // Return phase: cubic ease-out from contact to rest
+            const t = Math.min(this.hit_time / BEATER_RETURN_TIME, 1);
+            const ease = 1 - Math.pow(1 - t, 3);
+            // Interpolate from contact position (with hat offset) to rest position
+            const contact_pos = this.beater_rest_position[this.beater_axis] + this.hat_open_amount;
+            const rest_pos = this.beater_rest_position[this.beater_axis] + BEATER_REST_OFFSET;
+            this.beater.position[this.beater_axis] = contact_pos + ease * (rest_pos - contact_pos);
+
+            if (t >= 1) {
+                this.hit_time = null;
+            } else {
+                this.hit_time += dt;
+            }
+        }
     }
 }
 
@@ -296,6 +357,17 @@ export class DrumKit extends Component {
         // 1->kick, 2->nothing, 3->rim (not implemented), 4->snare,
         // 5->floor tom, 6->floor tom, 7->low tom, 8->mid tom,
         // 9->hihat (closed), 10->hihat (open), 11->crash, 12->cowbell (not implemented)
+
+        // Handle hi-hat specially for open/closed
+        if (channel === 9 && this.hihat) {
+            this.hihat.hit_closed();
+            return;
+        }
+        if (channel === 10 && this.hihat) {
+            this.hihat.hit_open();
+            return;
+        }
+
         const channel_map = {
             1: this.bass,
             4: this.snare,
@@ -303,8 +375,6 @@ export class DrumKit extends Component {
             6: this.floor_tom,
             7: this.low_tom,
             8: this.mid_tom,
-            9: this.hihat,
-            10: this.hihat,
             11: this.crash,
         };
 

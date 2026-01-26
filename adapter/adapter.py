@@ -113,7 +113,7 @@ for bar in range(0, NUM_BARS):
         fake_beat[16 * bar + i].append(1)
     for i in [4, 12]:
         fake_beat[16 * bar + i].append(4)
-    for i in range(0, 16):
+    for i in range(0, 16, 2):
         if i in [2, 6, 10, 14]:
             fake_beat[16 * bar + i].append(10)
         else:
@@ -367,10 +367,10 @@ async def main_loop_fake(bpm):
     cur_advance_state = 0
     last_changed_fg = True
     cur_scenes = [1, 0] # fg, bg
+    start_time = time.time()
     while True:
         sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
-        time_sent = time.time()
         new_beat_idx = sync_idx // 6
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx
@@ -403,9 +403,9 @@ async def main_loop_fake(bpm):
             for beat in cur_beats:
                 beat_msg = MsgBeat(last_msg_latency, beat)
                 websockets.broadcast(connected, beat_msg.to_json())
-        time_elapsed_this_iter = time.time() - time_sent
-        await asyncio.sleep(1 / sync_rate_hz - time_elapsed_this_iter)
         sync_idx += 1
+        next_tick_time = start_time + sync_idx / sync_rate_hz
+        await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
 async def main():

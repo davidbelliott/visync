@@ -172,7 +172,7 @@ export class CellularAutomataScene extends VisScene {
                         (i + 1 / 2) * CUBE_SIZE - total_side_length / 2,
                         (j + 1 / 2) * CUBE_SIZE - total_side_length / 2,
                         (k + 1 / 2) * CUBE_SIZE - total_side_length / 2);
-                    this.inst_geom_wireframe.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE), 0.0, 0.5);
+                    this.inst_geom_wireframe.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE), 0.0, 0.25);
                     this.inst_geom_fill.create_geom(pos, new THREE.Color("white"), new THREE.Vector3(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE));
                 }
             }

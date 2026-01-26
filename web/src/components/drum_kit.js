@@ -6,7 +6,7 @@ import { ShaderLoader } from '../util.js';
 
 // Animation constants
 const BEATER_REST_OFFSET = 0.5;    // Distance from drum when at rest
-const BEATER_RETURN_TIME = 0.5;    // Time in seconds to return to rest position
+const BEATER_RETURN_TIME = 0.25;    // Time in seconds to return to rest position
 const HAT_OPEN_OFFSET = 0.25;      // Distance hat top rises when open
 const HAT_OPEN_TIME = 0.15;        // Time in seconds to open the hat
 
@@ -381,7 +381,7 @@ export class DrumKit extends Component {
             'glsl/chunks/dither.frag');
         const shader_load_promise = shader_loader.load();
 
-        this.light = new THREE.DirectionalLight("blue", 3.0);
+        this.light = new THREE.DirectionalLight("blue", 4.0);
         this.light.position.set(0, 100, -100);
         this.light.castShadow = true;
         this.light.shadowCameraVisible = true;
@@ -392,6 +392,12 @@ export class DrumKit extends Component {
         this.light2.castShadow = true;
         this.light2.shadowCameraVisible = true;
         this.add(this.light2);
+
+        this.light3 = new THREE.PointLight("red", 30, 10, 2.0);
+        this.light3.position.set(-2, 6, -4);
+        this.light3.castShadow = true;
+        this.light3.shadowCameraVisible = true;
+        this.add(this.light3);
 
         this.drum_color = new THREE.Color("purple");
 

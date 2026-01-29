@@ -83,6 +83,37 @@ class ClockTracker:
 clock_tracker = ClockTracker()
 
 
+class SceneCycler:
+    def __init__(self, cycle_interval):
+        self.cycle_interval = cycle_interval * 4 * 24   # 24 syncs per beat
+        self.last_changed_fg = True
+        self.cur_scenes = [1, 0]  # [fg, bg]
+
+    def check_cycle(self, sync_idx):
+        """Returns a MsgGotoScene if it's time to cycle, otherwise None."""
+        if (self.cycle_interval != 0 and sync_idx % self.cycle_interval == 0):
+            fg_blank, bg_blank = (s == 0 for s in self.cur_scenes)
+
+            if fg_blank != bg_blank:
+                # One blank, one not: target the blank layer
+                layer_idx = 0 if fg_blank else 1
+            elif not fg_blank:
+                # Both non-blank: target the older one (not changed last)
+                layer_idx = 1 if self.last_changed_fg else 0
+            else:
+                # Both blank: target fg
+                layer_idx = 0
+
+            # Blank becomes random non-blank, non-blank becomes blank
+            new_scene = random.randint(1, 23) if self.cur_scenes[layer_idx] == 0 else 0
+
+            self.cur_scenes[layer_idx] = new_scene
+            self.last_changed_fg = (layer_idx == 0)
+            return MsgGotoScene(0, new_scene, layer_idx == 1)
+        else:
+            return None
+
+
 def to_hex(st):
     return ':'.join(hex(ord(x))[2:] for x in st)
 
@@ -342,9 +373,10 @@ async def main_loop_rtmidi(rtmidi_device):
         del midiin
 
 
-async def main_loop_serial(serial_device, msg_queue):
+async def main_loop_serial(serial_device, msg_queue, cycle=0):
     reader, _ = await serial_asyncio.open_serial_connection(url=serial_device, baudrate=31250)
     handler = SerialMidiHandler()
+    scene_cycler = SceneCycler(cycle) if cycle != 0 else None
     while True:
         byte = int.from_bytes(await reader.read(1))
         ws_msg = handler.handle_midi_byte(byte)
@@ -356,8 +388,13 @@ async def main_loop_serial(serial_device, msg_queue):
             websockets.broadcast(connected, ws_msg.to_json())
             msg_queue.put_nowait(ws_msg)
 
+        if scene_cycler:
+            cycle_msg = scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
+            if cycle_msg:
+                websockets.broadcast(connected, cycle_msg.to_json())
 
-async def main_loop_fake(bpm):
+
+async def main_loop_fake(bpm, cycle=0):
     global last_msg_latency
     sync_idx = 0
     beat_idx = 0
@@ -365,12 +402,16 @@ async def main_loop_fake(bpm):
     state_advancing = True
     cur_advance_step = 1
     cur_advance_state = 0
-    last_changed_fg = True
-    cur_scenes = [1, 0] # fg, bg
+    scene_cycler = SceneCycler(cycle) if cycle != 0 else None
     start_time = time.time()
     while True:
         sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
+
+        if scene_cycler:
+            cycle_msg = scene_cycler.check_cycle(sync_idx)
+            if cycle_msg:
+                websockets.broadcast(connected, cycle_msg.to_json())
         new_beat_idx = sync_idx // 6
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx
@@ -413,6 +454,7 @@ async def main():
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
     parser.add_argument('-d', '--device', type=str, help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
     parser.add_argument('-r', '--rtmidi', type=str, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
+    parser.add_argument('-c', '--cycle', type=int, default=0, help='Periodically cycle scenes every N bars. Default is 0 (do not cycle).')
     args = parser.parse_args()
 
     args_count = len([1 for x in [args.fake, args.device, args.rtmidi] if x])
@@ -429,9 +471,9 @@ async def main():
             if args.rtmidi:
                 t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
             elif args.device:
-                t1 = tg.create_task(main_loop_serial(args.device, queue))
+                t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
             else:
-                t1 = tg.create_task(main_loop_fake(args.fake))
+                t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())

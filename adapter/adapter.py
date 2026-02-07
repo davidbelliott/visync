@@ -83,35 +83,38 @@ class ClockTracker:
 clock_tracker = ClockTracker()
 
 
+NUM_SCENES = 23
+
 class SceneCycler:
     def __init__(self, cycle_interval):
         self.cycle_interval = cycle_interval * 4 * 24   # 24 syncs per beat
-        self.last_changed_fg = True
         self.cur_scenes = [1, 0]  # [fg, bg]
 
     def check_cycle(self, sync_idx):
-        """Returns a MsgGotoScene if it's time to cycle, otherwise None."""
-        if (self.cycle_interval != 0 and sync_idx % self.cycle_interval == 0):
-            fg_blank, bg_blank = (s == 0 for s in self.cur_scenes)
-
-            if fg_blank != bg_blank:
-                # One blank, one not: target the blank layer
-                layer_idx = 0 if fg_blank else 1
-            elif not fg_blank:
-                # Both non-blank: target the older one (not changed last)
-                layer_idx = 1 if self.last_changed_fg else 0
-            else:
-                # Both blank: target fg
-                layer_idx = 0
-
-            # Blank becomes random non-blank, non-blank becomes blank
-            new_scene = random.randint(1, 23) if self.cur_scenes[layer_idx] == 0 else 0
-
-            self.cur_scenes[layer_idx] = new_scene
-            self.last_changed_fg = (layer_idx == 0)
-            return MsgGotoScene(0, new_scene, layer_idx == 1)
-        else:
+        """Returns a list of MsgGotoScene if it's time to cycle, otherwise None."""
+        if self.cycle_interval == 0 or sync_idx % self.cycle_interval != 0:
             return None
+
+        fg, bg = self.cur_scenes
+        messages = []
+
+        if fg and bg:
+            # Both have scenes: blank fg
+            self.cur_scenes[0] = 0
+            messages.append(MsgGotoScene(0, 0, False))
+        else:
+            # At least one blank: add new scene
+            if fg == 0 and bg:
+                # Promote bg to fg first
+                messages.append(MsgGotoScene(0, bg, False))
+                self.cur_scenes[0] = bg
+            # Add new scene to bg (or fg if both were blank)
+            new_scene = random.randint(1, NUM_SCENES)
+            target_bg = (self.cur_scenes[0] != 0)
+            self.cur_scenes[1 if target_bg else 0] = new_scene
+            messages.append(MsgGotoScene(0, new_scene, target_bg))
+
+        return messages
 
     def check_advance(self, sync_idx):
         """Returns a MsgAdvanceSceneState if we're at the halfway point between scene changes."""
@@ -396,9 +399,10 @@ async def main_loop_serial(serial_device, msg_queue, cycle=0):
             msg_queue.put_nowait(ws_msg)
 
         if scene_cycler:
-            cycle_msg = scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
-            if cycle_msg:
-                websockets.broadcast(connected, cycle_msg.to_json())
+            cycle_msgs = scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
+            if cycle_msgs:
+                for msg in cycle_msgs:
+                    websockets.broadcast(connected, msg.to_json())
             advance_msg = scene_cycler.check_advance(clock_tracker.cur_sync_idx)
             if advance_msg:
                 websockets.broadcast(connected, advance_msg.to_json())
@@ -419,9 +423,10 @@ async def main_loop_fake(bpm, cycle=0):
         websockets.broadcast(connected, sync_msg.to_json())
 
         if scene_cycler:
-            cycle_msg = scene_cycler.check_cycle(sync_idx)
-            if cycle_msg:
-                websockets.broadcast(connected, cycle_msg.to_json())
+            cycle_msgs = scene_cycler.check_cycle(sync_idx)
+            if cycle_msgs:
+                for msg in cycle_msgs:
+                    websockets.broadcast(connected, msg.to_json())
             advance_msg = scene_cycler.check_advance(sync_idx)
             if advance_msg:
                 websockets.broadcast(connected, advance_msg.to_json())

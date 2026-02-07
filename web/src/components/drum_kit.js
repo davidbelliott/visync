@@ -7,6 +7,7 @@ import { ShaderLoader } from '../util.js';
 // Animation constants
 const BEATER_REST_OFFSET = 0.5;    // Distance from drum when at rest
 const BEATER_RETURN_TIME = 0.25;    // Time in seconds to return to rest position
+const HAT_BEATER_REST_OFFSET = 0.125;  // Distance for hi-hat beater (1/4 of normal)
 const HAT_OPEN_OFFSET = 0.25;      // Distance hat top rises when open
 const HAT_OPEN_TIME = 0.15;        // Time in seconds to open the hat
 
@@ -173,10 +174,18 @@ class HiHat extends DrumPiece {
         this.addPart('bottom', geometries['hat-bottom']);
         this.addPart('stand', geometries['hat-stand']);
         this.addPart('beater', geometries['hat-beater']);
-        this.initBeaterRestPosition();
+        this.initHatBeaterRestPosition();
 
         // Hi-hat specific state
         this.top_rest_position = this.top.position.clone();
+    }
+
+    // Override to use smaller offset for hi-hat beater
+    initHatBeaterRestPosition() {
+        if (this.beater) {
+            this.beater_rest_position = this.beater.position.clone();
+            this.beater.position.y += HAT_BEATER_REST_OFFSET;
+        }
         this.bottom_rest_position = this.bottom.position.clone();
         this.hat_open_amount = 0;      // Current open offset (0 = closed, HAT_OPEN_OFFSET = fully open)
         this.opening = false;          // Whether hat is currently opening
@@ -240,7 +249,7 @@ class HiHat extends DrumPiece {
                 const ease = 1 - Math.pow(1 - t, 3);
                 // Interpolate from contact position to rest position
                 const contact_pos = this.beater_rest_position.y + top_current_offset;
-                const rest_pos = this.beater_rest_position.y + BEATER_REST_OFFSET;
+                const rest_pos = this.beater_rest_position.y + HAT_BEATER_REST_OFFSET;
                 this.beater.position.y = contact_pos + ease * (rest_pos - contact_pos);
 
                 if (t >= 1) {

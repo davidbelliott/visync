@@ -95,9 +95,9 @@ class CubeAssembly extends THREE.Group {
     }
 
     handle_beat(t, channel, recurse=false, start_depth=0, cur_depth=0) {
-        this.explode_movement_seconds = Math.min(
+        this.explode_movement_seconds = Math.max(0.15, Math.min(
             this.parent_scene.get_beat_delay(t),
-            (this.max_spacing - this.min_spacing > 3 ? 0.25 : 0.1));
+            (this.max_spacing - this.min_spacing > 3 ? 0.25 : 0.1)));
         if (cur_depth >= start_depth || !recurse) {
             this.spacing_direction *= -1;
             this.explode_clock.start();
@@ -250,7 +250,7 @@ export class HexagonScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 2) {
+        if (channel == 4) {
             for (const asm of this.assemblies) {
                 asm.handle_beat(t, channel);
             }

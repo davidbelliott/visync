@@ -457,7 +457,7 @@ class GraphicsContext {
         this.renderer.shadowMap.enabled = true;
         this.renderer.autoClearColor = false;
         this.renderer.autoClearDepth = true;
-	this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
 

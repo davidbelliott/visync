@@ -187,7 +187,7 @@ export class BackgroundSurfacesScene extends VisScene {
         setTimeout(() => {
             if (channel == 1 || channel == 3) {
                 this.beat_clock.start();
-            } else if (channel == 4) {
+            } else if (channel == 9 || channel == 10) {
                 for (let i = 0; i < 2; i++) {
                     this.create_spark();
                 }

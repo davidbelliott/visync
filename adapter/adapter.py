@@ -113,6 +113,13 @@ class SceneCycler:
         else:
             return None
 
+    def check_advance(self, sync_idx):
+        """Returns a MsgAdvanceSceneState if we're at the halfway point between scene changes."""
+        if (self.cycle_interval != 0 and sync_idx % self.cycle_interval == self.cycle_interval // 2):
+            return MsgAdvanceSceneState(0, 1)
+        else:
+            return None
+
 
 def to_hex(st):
     return ':'.join(hex(ord(x))[2:] for x in st)
@@ -185,12 +192,12 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1)
     else:
         # Remaining channels are used for controlling elements within the scene
-        if channel == 4:
+        '''if channel == 4:
             channel = 2
         elif channel == 9:
             channel = 4
         elif channel == 2 or channel == 5:
-            channel = 3
+            channel = 3'''
 
         ws_msg = MsgBeat(last_transmit_latency, channel, True)
 
@@ -392,6 +399,9 @@ async def main_loop_serial(serial_device, msg_queue, cycle=0):
             cycle_msg = scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
             if cycle_msg:
                 websockets.broadcast(connected, cycle_msg.to_json())
+            advance_msg = scene_cycler.check_advance(clock_tracker.cur_sync_idx)
+            if advance_msg:
+                websockets.broadcast(connected, advance_msg.to_json())
 
 
 async def main_loop_fake(bpm, cycle=0):
@@ -412,6 +422,9 @@ async def main_loop_fake(bpm, cycle=0):
             cycle_msg = scene_cycler.check_cycle(sync_idx)
             if cycle_msg:
                 websockets.broadcast(connected, cycle_msg.to_json())
+            advance_msg = scene_cycler.check_advance(sync_idx)
+            if advance_msg:
+                websockets.broadcast(connected, advance_msg.to_json())
         new_beat_idx = sync_idx // 6
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx

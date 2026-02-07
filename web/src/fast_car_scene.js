@@ -256,7 +256,7 @@ export class FastCarScene extends VisScene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 2) {
+        if (channel == 4) {
             this.bg.add_square("white");
         } else if (channel == 1 || channel == 3) {
             this.bg.add_square("red");

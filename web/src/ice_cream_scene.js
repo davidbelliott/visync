@@ -211,7 +211,7 @@ export class IceCreamScene extends VisScene {
             if (channel == 1) {
                 this.beat_clock.start();
                 this.target_rot_multiplier *= -1;
-            } else if (channel == 4) {
+            } else if (channel == 9 || channel == 10) {
                 for (let i = 0; i < 4; i++) {
                     this.create_spark();
                 }

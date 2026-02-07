@@ -311,7 +311,7 @@ export class CubeLockingScene extends VisScene {
         setTimeout(() => {
             if (channel == 1) {
                 this.beat_clock.start();
-            } else if (channel == 2) {
+            } else if (channel == 4) {
                 this.create_spark();
             }
         }, delay * 1000);

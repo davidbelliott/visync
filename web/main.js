@@ -84,49 +84,6 @@ var stats = new Stats();
 
 window.addEventListener("load", init);
 
-class Queue {
-    constructor() {
-        this.elements = {};
-        this.head = 0;
-        this.tail = 0;
-    }
-    enqueue(element) {
-        this.elements[this.tail] = element;
-        this.tail++;
-    }
-    dequeue() {
-        const item = this.elements[this.head];
-        delete this.elements[this.head];
-        this.head++;
-        return item;
-    }
-    peek() {
-        return this.elements[this.head];
-    }
-    get length() {
-        return this.tail - this.head;
-    }
-    get is_empty() {
-        return this.length === 0;
-    }
-}
-
-
-function msg_to_disp_string(msg) {
-    let msg_txt = '';
-    const str_len = 12;
-    if (msg.msg_type == MSG_TYPE_SYNC) {
-        msg_txt = `SYNC ${msg.sync_idx}`;
-    } else if (msg.msg_type == MSG_TYPE_BEAT) {
-        msg_txt = `BEAT ${msg.channel}`;
-    } else if (msg.msg_type == MSG_TYPE_GOTO_SCENE) {
-        msg_txt = `GOTO ${msg.scene} ${msg.bg}`;
-    } else if (msg.msg_type == MSG_TYPE_ADVANCE_SCENE_STATE) {
-        msg_txt = `ADV ${msg.steps}`;
-    }
-    return msg_txt.substring(0, str_len).padEnd(str_len);
-}
-
 
 function connect() {
     //const socket = new WebSocket(`ws://192.168.1.235:8080`);
@@ -214,6 +171,24 @@ function connect() {
     });
 
 }
+
+
+function msg_to_disp_string(msg) {
+    let msg_txt = '';
+    const str_len = 12;
+    if (msg.msg_type == MSG_TYPE_SYNC) {
+        msg_txt = `SYNC ${msg.sync_idx}`;
+    } else if (msg.msg_type == MSG_TYPE_BEAT) {
+        msg_txt = `BEAT ${msg.channel}`;
+    } else if (msg.msg_type == MSG_TYPE_GOTO_SCENE) {
+        msg_txt = `GOTO ${msg.scene} ${msg.bg}`;
+    } else if (msg.msg_type == MSG_TYPE_ADVANCE_SCENE_STATE) {
+        msg_txt = `ADV ${msg.steps}`;
+    }
+    return msg_txt.substring(0, str_len).padEnd(str_len);
+}
+
+
 
 
 function make_wireframe_circle(radius, segments, color) {
@@ -491,8 +466,11 @@ class GraphicsContext {
             [23, new DrumKitScene(this)],
             //[20, new CelticKnotScene(this)],
         ]);
-        this.change_scene(23);
-        this.change_scene(21, true);
+
+        // Array of scenes on-screen, which are rendered sequentially first-to-last.
+        this.shown_scenes = [];
+
+        //this.push_scene(23);
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
@@ -578,10 +556,9 @@ class GraphicsContext {
 
     anim_frame() {
         const dt = this.clock.getDelta();
-        this.scenes.get(this.cur_scene_idx).anim_frame(dt);
-        if (this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes.get(this.cur_bg_scene_idx).anim_frame(dt);
-        }
+        this.shown_scenes.forEach((idx) => {
+            this.scenes.get(idx).anim_frame(dt);
+        });
     }
 
     indicator_on(i, color) {
@@ -614,108 +591,22 @@ class GraphicsContext {
         this.cur_buffer_idx = 0;
     }
 
-render() {
-    if (true) {
-        // Use direct rendering to screen in scene bg -> fg order
+    render() {
+            // Use direct rendering to screen in scene bg -> fg order
 
-        // Clear buffer 0 (background)
-        this.renderer.setRenderTarget(this.buffers[0]);
-        this.renderer.clear();
-        this.renderer.setRenderTarget(this.buffers[1]);
-        this.renderer.clear();
-
-        this.renderer.setRenderTarget(null);
-        this.renderer.clear();
-
-        // Render background scene
-        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer, this.buffers[0]);
-            const vector = new THREE.Vector2(0, 0);
-            this.renderer.copyFramebufferToTexture(vector, this.buffers[1].texture);
-        } else {
+            // Clear buffer 0 (background)
+            this.renderer.setRenderTarget(this.buffers[0]);
             this.renderer.clear();
-        }
 
-        // Render foreground scene
-        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[1]);
-    } else {
-        // Do overlay render by rendering bg and fg to buffers and blending
+            this.renderer.setRenderTarget(null);
+            this.renderer.clear();
 
-        const originalClearColor = this.renderer.getClearColor(new THREE.Color());
-        const originalClearAlpha = this.renderer.getClearAlpha();
-        
-        // Create blend shader if it doesn't exist
-        if (!this.blendMaterial) {
-            this.blendMaterial = new THREE.ShaderMaterial({
-                uniforms: {
-                    bgTexture: { value: null },
-                    fgTexture: { value: null }
-                },
-                vertexShader: `
-                    varying vec2 vUv;
-                    void main() {
-                        vUv = uv;
-                        gl_Position = vec4(position, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                    varying vec2 vUv;
-                    uniform sampler2D bgTexture;
-                    uniform sampler2D fgTexture;
-                    void main() {
-                        vec4 bgColor = texture2D(bgTexture, vUv);
-                        vec4 fgColor = texture2D(fgTexture, vUv);
-                        
-                        // Alpha blending
-                        gl_FragColor = vec4(
-                            mix(bgColor.rgb, fgColor.rgb, fgColor.a),
-                            max(bgColor.a, fgColor.a)
-                        );
-                    }
-                `,
-                transparent: true,
-                depthTest: false
+            this.shown_scenes.forEach((idx) => {
+                this.scenes.get(idx).render(this.renderer, this.buffers[0]);
+                const vector = new THREE.Vector2(0, 0);
+                this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
             });
-            
-            this.displayQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blendMaterial);
-            this.displayQuad.frustumCulled = false;
-            this.displayScene = new THREE.Scene();
-            this.displayScene.add(this.displayQuad);
-            this.displayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
-        }
-        
-        // Render background scene to buffer 0
-        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.renderer.setRenderTarget(this.buffers[0]);
-            this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
-            this.renderer.clear();
-            this.scenes.get(this.cur_bg_scene_idx).render(this.renderer);
-        } else {
-            // If no background, clear buffer with transparent black
-            this.renderer.setRenderTarget(this.buffers[0]);
-            this.renderer.setClearColor(0x000000, 0);
-            this.renderer.clear();
-        }
-        
-        // Render foreground scene to buffer 1
-        this.renderer.setRenderTarget(this.buffers[1]);
-        this.renderer.setClearColor(0x000000, 0); // Clear with transparent black
-        this.renderer.clear();
-        this.scenes.get(this.cur_scene_idx).render(this.renderer, this.buffers[0]);
-        
-        // Blend both buffers and render to screen
-        this.renderer.setRenderTarget(null);
-        this.renderer.setClearColor(BG_COLOR, 1);
-        this.renderer.clear();
-        
-        this.blendMaterial.uniforms.bgTexture.value = this.buffers[0].texture;
-        this.blendMaterial.uniforms.fgTexture.value = this.buffers[1].texture;
-        this.renderer.render(this.displayScene, this.displayCamera);
-        
-        // Restore original clear color
-        this.renderer.setClearColor(originalClearColor, originalClearAlpha);
     }
-}
 
     on_window_resize() {
         const width = window.innerWidth;
@@ -731,25 +622,14 @@ render() {
         });
     }
 
-    change_scene(new_scene_idx, bg=false) {
-        if (this.scenes.has(new_scene_idx)) {
-            const cur_idx = bg ? this.cur_bg_scene_idx : this.cur_scene_idx;
-            const other_idx = bg ? this.cur_scene_idx : this.cur_bg_scene_idx;
-            if (cur_idx !== undefined && cur_idx != other_idx) {
-                this.scenes.get(cur_idx).deactivate();
-            }
-            if (bg) {
-                this.cur_bg_scene_idx = new_scene_idx;
-            } else {
-                this.cur_scene_idx = new_scene_idx;
-            }
-            if (new_scene_idx != other_idx) {
-                this.scenes.get(new_scene_idx).activate();
-            }
+    push_scene(new_scene_idx) {
+        if (this.scenes.has(new_scene_idx) && !this.shown_scenes.includes(new_scene_idx)) {
+            this.shown_scenes.unshift(new_scene_idx);
+            this.scenes.get(new_scene_idx).activate();
 
             // Update relevant element in the HTML overlay
             const str_len = 10;
-            const hud_div = document.getElementById(bg ? 'bg-name' : 'fg-name');
+            const hud_div = document.getElementById('bg-name');
             const scene_name_pad = this.scenes.get(new_scene_idx).shortname
                 .substring(0, str_len).padEnd(str_len);
             console.log(scene_name_pad);
@@ -757,12 +637,31 @@ render() {
         }
     }
 
+    pop_scene() {
+        const popped_idx = this.shown_scenes.pop();
+        if (this.scenes.has(popped_idx)) {
+            this.scenes.get(popped_idx).deactivate()
+
+            // Update relevant element in the HTML overlay
+            const str_len = 10;
+            const hud_div = document.getElementById('fg-name');
+            let scene_name = "";
+            if (this.shown_scenes.length > 0) {
+                const scene_name = this.scenes.get(this.shown_scenes[
+                    this.shown_scenes.length - 1]).shortname;
+            }
+            const scene_name_pad = scene_name.substring(0, str_len).padEnd(str_len);
+            console.log(scene_name_pad);
+            hud_div.innerHTML = scene_name_pad;
+        }
+        return popped_idx;
+    }
+
     advance_state(steps) {
         console.log(`advance ${steps} steps`);
-        this.scenes.get(this.cur_scene_idx).advance_state(steps);
-        if (this.cur_bg_scene_idx !== null && this.cur_bg_scene_idx != this.cur_scene_idx) {
-            this.scenes.get(this.cur_bg_scene_idx).advance_state(steps);
-        }
+        this.shown_scenes.forEach((idx) => {
+            this.scenes.get(idx).advance_state(steps);
+        });
     }
 
     keydown(e) {
@@ -772,18 +671,12 @@ render() {
         if (!isNaN(num)) {
             const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
                 (num % 10));
-            this.change_scene(scene_idx);
+            while (this.pop_scene() !== undefined) { };
+            this.push_scene(scene_idx);
         } else if (shift_chars.includes(e.key)) {
             const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
                 shift_chars.indexOf(e.key));
-            this.change_scene(scene_idx, true);
-        } else if (e.key == 't') {
-            if (this.num_traces == 1) {
-                this.set_tracer_params(10, 4, 0.8);
-                //this.set_tracer_params(8, 1, 0.7);
-            } else {
-                this.set_tracer_params(1, 1, 1);
-            }
+            this.push_scene(scene_idx);
         } else if (e.code == "Space") {
             this.immediate_mode = !this.immediate_mode;
             this.update_mode_hud();
@@ -804,7 +697,9 @@ render() {
         } else if (e.key == "ArrowDown") {
             this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
         } else {
-            this.scenes.get(this.cur_scene_idx).handle_key(e.key);
+            this.shown_scenes.forEach((idx) => {
+                this.scenes[idx].handle_key(e.key);
+            });
         }
     }
 

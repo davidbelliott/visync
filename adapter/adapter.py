@@ -11,6 +11,7 @@ from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
 import random
 from message import *
+from beatdetect import MinimalDetector
 import sys
 
 USE_STROBE = False
@@ -467,17 +468,38 @@ async def main_loop_fake(bpm, cycle=0):
         await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
+async def main_loop_audio(device):
+    loop = asyncio.get_running_loop()
+    def on_beat(channel, latency_s):
+        loop.call_soon_threadsafe(websockets.broadcast, connected, MsgBeat(latency_s, channel).to_json())
+    detector = MinimalDetector(on_beat=on_beat)
+    await asyncio.to_thread(detector.run_mic, device)
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
     parser.add_argument('-d', '--device', type=str, help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
     parser.add_argument('-r', '--rtmidi', type=str, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     parser.add_argument('-c', '--cycle', type=int, default=0, help='Periodically cycle scenes every N bars. Default is 0 (do not cycle).')
+    parser.add_argument('-a', '--audio', type=int, metavar='DEVICE',
+                        help='Use audio beat detection with given device index')
+    parser.add_argument('--list-devices', action='store_true',
+                        help='List audio input devices and exit')
     args = parser.parse_args()
 
-    args_count = len([1 for x in [args.fake, args.device, args.rtmidi] if x])
+    if args.list_devices:
+        import sounddevice as sd
+        for i, dev in enumerate(sd.query_devices()):
+            dirs = []
+            if dev['max_input_channels'] > 0: dirs.append(f"{dev['max_input_channels']}in")
+            if dev['max_output_channels'] > 0: dirs.append(f"{dev['max_output_channels']}out")
+            print(f"  [{i}] {dev['name']}  ({', '.join(dirs)})")
+        return
+
+    args_count = sum(x is not None for x in [args.fake, args.device, args.rtmidi, args.audio])
     if args_count != 1:
-        print('Error: must specify exactly one of --fake, --device, or --rtmidi')
+        print('Error: must specify exactly one of --fake, --device, --rtmidi, or --audio')
         exit(1)
 
     # Restart-on-error loop (only exits on KeyboardInterrupt)
@@ -490,6 +512,8 @@ async def main():
                 t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
             elif args.device:
                 t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
+            elif args.audio is not None:
+                t1 = tg.create_task(main_loop_audio(args.audio))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
 

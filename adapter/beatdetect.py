@@ -50,7 +50,8 @@ NOISE_GATE_HEADROOM = 5.0
 
 
 class MinimalDetector:
-    def __init__(self):
+    def __init__(self, on_beat=None):
+        self.on_beat = on_beat
         self.audio_buffer = np.zeros(FFT_SIZE, dtype=np.float32)
         self.window = np.hanning(FFT_SIZE).astype(np.float32)
 
@@ -120,13 +121,19 @@ class MinimalDetector:
             self.snare_energy_avg = np.mean(self.snare_energy_history)
         snare_spike = snare_energy / max(self.snare_energy_avg, 1e-6)
 
+        # Estimated latency: beat onset is somewhere in the most recent block,
+        # so latency is at most one block period.
+        latency_s = BLOCK_SIZE / SAMPLE_RATE
+
         if kick_spike > KICK_SPIKE_THRESHOLD and kick_energy > KICK_ENERGY_MIN and (now - self.last_kick_time) > self.cooldown_s:
             self.last_kick_time = now
             print(f"  KICK   k_spike={kick_spike:.2f}  k_e={kick_energy:.1f}  s_e={snare_energy:.1f}")
+            if self.on_beat: self.on_beat(1, latency_s)
 
         if snare_spike > SNARE_SPIKE_THRESHOLD and snare_energy > SNARE_ENERGY_MIN and (now - self.last_snare_time) > self.cooldown_s:
             self.last_snare_time = now
             print(f"  SNARE  s_e={snare_energy:.1f}  s_spike={snare_spike:.2f}  k_e={kick_energy:.1f}")
+            if self.on_beat: self.on_beat(4, latency_s)
 
     def _audio_callback(self, indata, frames, time_info, status):
         mono = indata[:, 0] if indata.ndim > 1 else indata.flatten()

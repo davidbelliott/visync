@@ -39,8 +39,10 @@ SNARE_BIN_LOW = int(SNARE_LOW_HZ / FREQ_PER_BIN)
 SNARE_BIN_HIGH = int(SNARE_HIGH_HZ / FREQ_PER_BIN)
 
 # Fixed onset thresholds
-KICK_FLUX_THRESHOLD = 35.0
-SNARE_SPIKE_THRESHOLD = 1.8  # snare energy must be this many times the running average
+KICK_SPIKE_THRESHOLD = 2.0   # kick energy must be this many times the running average
+SNARE_SPIKE_THRESHOLD = 2.0  # snare energy must be this many times the running average
+KICK_ENERGY_MIN = 500.0      # absolute kick band energy floor
+SNARE_ENERGY_MIN = 500.0     # absolute snare band energy floor
 
 # Noise gate calibration
 NOISE_GATE_CALIBRATION_FRAMES = 80
@@ -52,9 +54,9 @@ class MinimalDetector:
         self.audio_buffer = np.zeros(FFT_SIZE, dtype=np.float32)
         self.window = np.hanning(FFT_SIZE).astype(np.float32)
 
-        self.prev_kick_band = None
-
-        # Snare: running average of energy for spike detection
+        # Running averages for spike detection
+        self.kick_energy_history = []
+        self.kick_energy_avg = 0.0
         self.snare_energy_history = []
         self.snare_energy_avg = 0.0
 
@@ -100,14 +102,15 @@ class MinimalDetector:
                 self.snare_gate = np.mean(self.cal_snare) * NOISE_GATE_HEADROOM
                 self.calibrated = True
                 print(f"  Noise gate: kick>{self.kick_gate:.2f}  snare>{self.snare_gate:.2f}\n")
-            self.prev_kick_band = kick_band.copy()
             return
 
-        # ── Kick: spectral flux ──
-        kick_flux = 0.0
-        if self.prev_kick_band is not None:
-            kick_flux = np.sum(np.maximum(kick_band - self.prev_kick_band, 0.0))
-        self.prev_kick_band = kick_band.copy()
+        # ── Kick: energy spike over running average ──
+        self.kick_energy_history.append(kick_energy)
+        if len(self.kick_energy_history) > 128:
+            self.kick_energy_history = self.kick_energy_history[-128:]
+        if len(self.kick_energy_history) >= 8:
+            self.kick_energy_avg = np.mean(self.kick_energy_history)
+        kick_spike = kick_energy / max(self.kick_energy_avg, 1e-6)
 
         # ── Snare: energy spike over running average ──
         self.snare_energy_history.append(snare_energy)
@@ -117,11 +120,11 @@ class MinimalDetector:
             self.snare_energy_avg = np.mean(self.snare_energy_history)
         snare_spike = snare_energy / max(self.snare_energy_avg, 1e-6)
 
-        if kick_flux > KICK_FLUX_THRESHOLD and kick_energy > self.kick_gate and kick_energy > snare_energy * 0.5 and (now - self.last_kick_time) > self.cooldown_s:
+        if kick_spike > KICK_SPIKE_THRESHOLD and kick_energy > KICK_ENERGY_MIN and (now - self.last_kick_time) > self.cooldown_s:
             self.last_kick_time = now
-            print(f"  KICK   k_flux={kick_flux:.1f}  k_e={kick_energy:.1f}  s_e={snare_energy:.1f}")
+            print(f"  KICK   k_spike={kick_spike:.2f}  k_e={kick_energy:.1f}  s_e={snare_energy:.1f}")
 
-        if snare_spike > SNARE_SPIKE_THRESHOLD and snare_energy > self.snare_gate and (now - self.last_snare_time) > self.cooldown_s:
+        if snare_spike > SNARE_SPIKE_THRESHOLD and snare_energy > SNARE_ENERGY_MIN and (now - self.last_snare_time) > self.cooldown_s:
             self.last_snare_time = now
             print(f"  SNARE  s_e={snare_energy:.1f}  s_spike={snare_spike:.2f}  k_e={kick_energy:.1f}")
 

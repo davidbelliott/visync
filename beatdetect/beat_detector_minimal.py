@@ -41,8 +41,8 @@ SNARE_BIN_HIGH = int(SNARE_HIGH_HZ / FREQ_PER_BIN)
 # Fixed onset thresholds
 KICK_SPIKE_THRESHOLD = 2.0   # kick energy must be this many times the running average
 SNARE_SPIKE_THRESHOLD = 2.0  # snare energy must be this many times the running average
-KICK_ENERGY_MIN = 500.0      # absolute kick band energy floor
-SNARE_ENERGY_MIN = 500.0     # absolute snare band energy floor
+KICK_ENERGY_MIN = 300.0      # absolute kick band energy floor
+SNARE_ENERGY_MIN = 600.0     # absolute snare band energy floor
 
 # Noise gate calibration
 NOISE_GATE_CALIBRATION_FRAMES = 80

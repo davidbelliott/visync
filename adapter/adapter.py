@@ -11,7 +11,7 @@ from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
 import random
 from message import *
-from beatdetect import MinimalDetector
+from beatdetect import PredictiveBeatDetector
 import sys
 
 USE_STROBE = False
@@ -472,7 +472,9 @@ async def main_loop_audio(device):
     loop = asyncio.get_running_loop()
     def on_beat(channel, latency_s):
         loop.call_soon_threadsafe(websockets.broadcast, connected, MsgBeat(latency_s, channel).to_json())
-    detector = MinimalDetector(on_beat=on_beat)
+    def on_sync(sync_rate_hz, sync_idx):
+        loop.call_soon_threadsafe(websockets.broadcast, connected, MsgSync(0, sync_rate_hz, sync_idx).to_json())
+    detector = PredictiveBeatDetector(on_beat=on_beat, on_sync=on_sync)
     await asyncio.to_thread(detector.run_mic, device)
 
 

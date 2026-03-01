@@ -6,8 +6,10 @@ No prediction, no pattern matching, no debouncing.
 """
 
 import argparse
+import math
 import numpy as np
 import sounddevice as sd
+import threading
 import time
 import sys
 
@@ -22,12 +24,12 @@ except ImportError:
 # ─────────────────────────────────────────────
 
 SAMPLE_RATE = 44100
-BLOCK_SIZE = 512
+BLOCK_SIZE = 256
 FFT_SIZE = 2048
 
 # Frequency bands
 KICK_LOW_HZ = 30
-KICK_HIGH_HZ = 150
+KICK_HIGH_HZ = 100
 SNARE_LOW_HZ = 600
 SNARE_HIGH_HZ = 4000
 
@@ -39,9 +41,9 @@ SNARE_BIN_LOW = int(SNARE_LOW_HZ / FREQ_PER_BIN)
 SNARE_BIN_HIGH = int(SNARE_HIGH_HZ / FREQ_PER_BIN)
 
 # Fixed onset thresholds
-KICK_SPIKE_THRESHOLD = 2.0   # kick energy must be this many times the running average
+KICK_SPIKE_THRESHOLD = 1.5   # kick energy must be this many times the running average
 SNARE_SPIKE_THRESHOLD = 2.0  # snare energy must be this many times the running average
-KICK_ENERGY_MIN = 300.0      # absolute kick band energy floor
+KICK_ENERGY_MIN = 400.0      # absolute kick band energy floor
 SNARE_ENERGY_MIN = 600.0     # absolute snare band energy floor
 
 # Noise gate calibration
@@ -77,8 +79,8 @@ class MinimalDetector:
 
         self.running = False
 
-    def _process_block(self, mono_block):
-        now = time.monotonic()
+    def _process_block(self, mono_block, timeinfo):
+        now = timeinfo.inputBufferAdcTime
 
         # Accumulate into FFT buffer
         n = len(mono_block)
@@ -137,12 +139,11 @@ class MinimalDetector:
 
     def _audio_callback(self, indata, frames, time_info, status):
         mono = indata[:, 0] if indata.ndim > 1 else indata.flatten()
-        self._process_block(mono)
+        self._process_block(mono, time_info)
 
     def run_mic(self, device=None):
         self.running = True
         print("Listening via mic... (Ctrl+C to stop)")
-        print(f"  Calibrating noise gate (~1s of silence)...\n")
         try:
             with sd.InputStream(
                 device=device,
@@ -153,7 +154,7 @@ class MinimalDetector:
                 callback=self._audio_callback
             ):
                 while self.running:
-                    time.sleep(0.1)
+                    time.sleep(1.0)
         except KeyboardInterrupt:
             print("\nStopped.")
 
@@ -241,6 +242,239 @@ class MinimalDetector:
                 stream.close()
             except:
                 pass
+
+
+class PredictiveBeatDetector:
+    """
+    Wraps MinimalDetector with GCD-based tempo estimation and sync generation.
+
+    Beat messages (on_beat) are always sent reactively with positive latency,
+    same as MinimalDetector.
+
+    Once a stable tempo is detected from kick timing ('locked'):
+      - on_sync(sync_rate_hz, sync_idx) fires at PPQN=24 rate (MIDI clock)
+      - Sync continues at the last known BPM after unlock until a new lock
+
+    Lock: achieved when GCD of recent kick IOIs produces a beat interval where
+    ≥ LOCK_SCORE of IOIs land within GRID_TOL of a grid multiple.
+    Unlock: when a sliding window of recent kicks shows < UNLOCK_SCORE on-grid.
+
+    Callbacks are invoked from the sounddevice audio thread or a daemon
+    scheduler thread; use call_soon_threadsafe when bridging to asyncio.
+    """
+
+    MIN_KICKS        = 8      # kicks needed before first lock attempt
+    GRID_TOL_S       = 0.060  # ±60ms on-grid tolerance (covers FFT windowing jitter)
+    LOCK_SCORE       = 0.70   # fraction of kicks on-grid required to lock
+    UNLOCK_SCORE     = 0.50   # fraction of recent kicks on-grid to stay locked
+    UNLOCK_WINDOW    = 8      # sliding window size for unlock check
+    PPQN             = 24     # sync pulses per quarter note
+
+    def __init__(self, on_beat=None, on_sync=None):
+        self.on_beat = on_beat
+        self.on_sync = on_sync
+
+        self._detector = MinimalDetector(on_beat=self._on_raw_beat)
+        self._mu = threading.Lock()
+
+        self._kick_times = []    # rolling buffer of kick timestamps (monotonic)
+
+        self.locked = False
+        self._beat_s = None      # beat interval in seconds
+        self._origin_s = None    # phase reference: a known beat boundary
+
+        self._grid_window = []   # [bool] sliding on-grid results for recent kicks
+
+        # Sync clock — persists across lock/unlock so the stream stays continuous
+        self._sync_idx = 0
+        self._next_sync_s = None
+        self._sched_started = False
+
+    # ── Public ────────────────────────────────────────────────────────────────
+
+    def run_mic(self, device=None):
+        self._detector.run_mic(device)
+
+    # ── Audio thread callback ─────────────────────────────────────────────────
+
+    def _on_raw_beat(self, channel, latency_s):
+        # Always send every beat reactively, unchanged from MinimalDetector
+        if self.on_beat:
+            self.on_beat(channel, latency_s)
+
+        if channel != 1:   # only kicks drive tempo estimation
+            return
+
+        now = time.monotonic()
+        beat_time = now - latency_s
+        do_unlock = False
+
+        with self._mu:
+            self._kick_times.append(beat_time)
+            if len(self._kick_times) > 64:
+                self._kick_times = self._kick_times[-64:]
+
+            if self.locked:
+                on_grid = self._on_grid(beat_time)
+                self._grid_window.append(on_grid)
+                if len(self._grid_window) > self.UNLOCK_WINDOW:
+                    self._grid_window = self._grid_window[-self.UNLOCK_WINDOW:]
+                if (len(self._grid_window) >= 4 and
+                        sum(self._grid_window) / len(self._grid_window) < self.UNLOCK_SCORE):
+                    do_unlock = True
+
+            if len(self._kick_times) >= self.MIN_KICKS:
+                result = self._estimate()
+                if result is not None:
+                    beat_s, origin_s, score = result
+                    self._apply_lock(beat_s, origin_s, score)
+                    do_unlock = False   # fresh lock cancels any pending unlock
+
+        if do_unlock:
+            with self._mu:
+                if self.locked:
+                    self.locked = False
+                    self._grid_window = []
+                    print(f"  [predict] Unlocked. "
+                          f"Sync-only at {60/self._beat_s:.1f} BPM until new lock.")
+
+    # ── Grid check ────────────────────────────────────────────────────────────
+
+    def _on_grid(self, t):
+        """True if t falls within GRID_TOL of a beat boundary."""
+        phase = (t - self._origin_s) % self._beat_s
+        return min(phase, self._beat_s - phase) < self.GRID_TOL_S
+
+    # ── Tempo estimation ──────────────────────────────────────────────────────
+
+    def _estimate(self):
+        """
+        Estimate beat interval using linear regression on kick timestamps.
+
+        Why regression instead of GCD/median of IOIs:
+
+        The Hanning FFT window peaks at the buffer's center (FFT_SIZE/2 samples
+        in the past), so every kick is detected with a systematic delay of
+        ~FFT_SIZE/2/SAMPLE_RATE ≈ 23ms.  Because the kick period is not an
+        integer number of blocks, this delay drifts slightly each beat, producing
+        alternating long/short IOIs (e.g. 474ms and 373ms at true 133 BPM =
+        451ms).  GCD and median both see the wrong value.
+
+        Regression treats kick timestamps as T(k) ≈ origin + k * beat_s.  The
+        systematic detection delay is a constant offset that cancels in the slope,
+        so the slope converges to the true beat period regardless of per-beat
+        timing drift.
+
+        Returns (beat_s, origin_s, score) or None.
+        Called with _mu held.
+        """
+        times = np.array(self._kick_times, dtype=float)
+
+        iois_ms = np.diff(times) * 1000.0
+
+        # Use a rough median to assign beat indices (handles multi-beat gaps)
+        valid = iois_ms[(iois_ms > 200.0) & (iois_ms < 3000.0)]
+        if len(valid) < 2:
+            return None
+        rough_ms = float(np.median(valid))
+        if not (250.0 <= rough_ms <= 2000.0):
+            return None
+
+        # Assign beat indices: round each IOI to nearest integer multiple of rough_ms
+        # so sparse patterns (kick on 1 & 3 only) get indices 0, 2, 4, … not 0,1,2,…
+        k = np.zeros(len(times))
+        for i in range(1, len(times)):
+            ioi = iois_ms[i - 1]
+            if 200.0 < ioi < 3000.0:
+                k[i] = k[i - 1] + max(1, round(ioi / rough_ms))
+            else:
+                k[i] = k[i - 1] + 1
+
+        # Linear regression: T(k) = origin_s + k * beat_s
+        # np.polyfit degree-1 returns [slope, intercept]
+        beat_s, origin_s = np.polyfit(k, times, 1)
+        beat_ms = beat_s * 1000.0
+
+        if not (250.0 <= beat_ms <= 2000.0):
+            return None
+
+        # Subdivide if the detected period is slow — e.g. kicks on beats 1 & 3
+        # give beat_ms ≈ 900ms; halving to 450ms is the actual quarter-note tempo.
+        tol_s = self.GRID_TOL_S
+        while beat_ms > 600.0:
+            half_s = beat_ms / 2000.0
+            if half_s < 0.250:
+                break
+            phases = (times - origin_s) % half_s
+            phases = np.minimum(phases, half_s - phases)
+            if np.mean(phases < tol_s) >= self.LOCK_SCORE:
+                beat_ms = half_s * 1000.0
+            else:
+                break
+
+        beat_s = beat_ms / 1000.0
+
+        # Score: fraction of kicks within GRID_TOL of a beat boundary
+        phases = (times - origin_s) % beat_s
+        phases = np.minimum(phases, beat_s - phases)
+        score = float(np.mean(phases < tol_s))
+        if score < self.LOCK_SCORE:
+            return None
+
+        return beat_s, float(origin_s), score
+
+
+    # ── Lock ──────────────────────────────────────────────────────────────────
+
+    def _apply_lock(self, beat_s, origin_s, score):
+        """Update lock state and re-align sync clock. Called with _mu held."""
+        prev_locked = self.locked
+        bpm_changed = (self._beat_s is None or
+                       abs(beat_s - self._beat_s) / self._beat_s > 0.02)
+
+        self._beat_s = beat_s
+        self._origin_s = origin_s
+        self.locked = True
+        self._grid_window = []
+
+        bpm = 60.0 / beat_s
+        if not prev_locked:
+            print(f"  [predict] Locked! {bpm:.1f} BPM  score={score:.0%}")
+        elif bpm_changed:
+            print(f"  [predict] BPM updated: {bpm:.1f}  score={score:.0%}")
+
+        # Align sync clock to new grid: next PPQN tick at or after now
+        now = time.monotonic()
+        ppqn_s = beat_s / self.PPQN
+        elapsed_ppqn = (now - origin_s) / ppqn_s
+        next_idx = math.ceil(elapsed_ppqn)
+        self._next_sync_s = origin_s + next_idx * ppqn_s
+        self._sync_idx = next_idx
+
+        if not self._sched_started:
+            self._sched_started = True
+            threading.Thread(target=self._sync_loop, daemon=True).start()
+
+    # ── Sync scheduler ────────────────────────────────────────────────────────
+
+    def _sync_loop(self):
+        """Single daemon thread: send PPQN sync pulses whenever beat_s is set."""
+        while True:
+            now = time.monotonic()
+            with self._mu:
+                if self._beat_s and self._next_sync_s:
+                    ppqn_s = self._beat_s / self.PPQN
+                    while now >= self._next_sync_s:
+                        if self.on_sync:
+                            self.on_sync(1.0 / ppqn_s, self._sync_idx)
+                        self._sync_idx += 1
+                        self._next_sync_s += ppqn_s
+                    next_wake = self._next_sync_s
+                else:
+                    next_wake = now + 0.005
+
+            sleep_s = next_wake - time.monotonic()
+            time.sleep(max(0.001, min(sleep_s, 0.005)))
 
 
 def main():

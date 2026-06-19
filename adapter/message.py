@@ -52,6 +52,7 @@ class MsgGotoScene(Msg):
 
 
 class MsgControlChange(Msg):
+    # `value` is normalized to the range [0, 1]; consumers scale it as needed.
     def __init__(self, last_transmit_latency, wheel_idx, value):
         super().__init__(Msg.Type.CONTROL_CHANGE, last_transmit_latency)
         self.wheel_idx = wheel_idx

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
-import { Knob } from '../controller.js';
 import {
     lerp_scalar,
     ease,
@@ -24,7 +23,7 @@ export class Binding {
     }
 
     update() {
-        this.apply(this.transform(this.knob.norm));
+        this.apply(this.transform(this.knob.cur_val));
     }
 }
 
@@ -54,18 +53,8 @@ export class Scene extends THREE.Scene {
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
 
-        this.knobs = new Map();
-
         // Controller-knob -> property bindings, evaluated every frame.
         this.bindings = [];
-    }
-
-    add_knob(name, min_val=0.0, max_val=1.0, default_val=0.0) {
-        this.knobs.set(name, new Knob(min_val, max_val, default_val));
-    }
-
-    get_knob_val(name) {
-        return this.knobs.get(name).cur_val;
     }
 
     // Bind a knob from one of the context's controllers to a scene property.
@@ -83,11 +72,6 @@ export class Scene extends THREE.Scene {
     anim_frame(dt) {
         this.update_bindings();
         this.controls.update();
-        const zoom_knob = this.knobs.get('camera_zoom');
-        if (zoom_knob) {
-            this.camera.zoom = 2 + Math.sin(zoom_knob.cur_val);
-            this.camera.updateProjectionMatrix();
-        }
         this.children.forEach((child) => {
             if (child.anim_frame) {
                 child.anim_frame(dt);

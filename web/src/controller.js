@@ -5,17 +5,10 @@ const MSG_TYPE_CONTROL_CHANGE = 8;
 const NUM_KNOBS = 16;
 
 export class Knob {
-    constructor(min_val=0, max_val=1, default_val=0) {
-        this.min_val = min_val;
-        this.max_val = max_val;
-        this.default_val = default_val;
+    // A knob holds a single normalized value in the range [0, 1]. Scenes decide
+    // how to map this to whatever range a given property needs.
+    constructor(default_val=0) {
         this.cur_val = default_val;
-    }
-
-    // Current value mapped to the range [0, 1]. This is the controller-agnostic
-    // value that bindings consume.
-    get norm() {
-        return (this.cur_val - this.min_val) / (this.max_val - this.min_val);
     }
 }
 
@@ -27,8 +20,8 @@ export class Controller {
         this.knobs = new Map();
     }
 
-    add_knob(name, min_val=0.0, max_val=1.0, default_val=0.0) {
-        this.knobs.set(name, new Knob(min_val, max_val, default_val));
+    add_knob(name, default_val=0.0) {
+        this.knobs.set(name, new Knob(default_val));
     }
 
     get_knob_val(name) {
@@ -45,8 +38,8 @@ export class WebsocketController extends Controller {
         super(context);
         this.url = url;
         for (let i = 0; i < NUM_KNOBS; i++) {
-            // MIDI control change values are 7-bit (0..127).
-            this.add_knob(i, 0, 127, 0);
+            // Knob values arrive already normalized to [0, 1] from the adapter.
+            this.add_knob(i);
         }
         this.connect();
     }
@@ -73,7 +66,8 @@ export class WebsocketController extends Controller {
         if (msg.msg_type == MSG_TYPE_CONTROL_CHANGE) {
             const knob = this.knobs.get(msg.wheel_idx);
             if (knob) {
-                knob.cur_val = msg.value;
+                // Value is normalized [0, 1]; clamp defensively.
+                knob.cur_val = Math.max(0, Math.min(1, msg.value));
             }
         }
     }

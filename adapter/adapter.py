@@ -25,6 +25,10 @@ NUM_BPM_SAMPLES = 16 * 24
 LOG_MSGS = False
 LOG_SYNC = False
 
+# MIDI control-change values are 7-bit (0..127); we normalize them to [0, 1]
+# before sending so the client deals only in normalized knob values.
+MIDI_CC_MAX = 127.0
+
 # Fake control-change knobs: 16 sinusoids with a period of 4 bars (16 beats),
 # each phase-shifted by one beat. Sent at a fixed high rate (independent of the
 # sync clock) to give the impression of continuous movement.
@@ -246,7 +250,7 @@ class RtMidiInputHandler:
             control_val = midi_msg[2]
             # This channel is used for graphics scene switching
             #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
-            ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val)
+            ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
 
         if ws_msg != None and LOG_MSGS:
             print(ws_msg)
@@ -348,7 +352,7 @@ class SerialMidiHandler:
                     print(f"control change: {self.bytes[1:]}")
                     control_idx, control_val = self.bytes[1:]
                     # This channel is used for graphics scene switching
-                    ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val)
+                    ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
                     #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == midiconstants.PITCH_BEND:
@@ -486,7 +490,8 @@ async def main_loop_fake_knobs(bpm):
         elapsed = time.time() - start_time
         for knob in range(FAKE_KNOB_COUNT):
             phase = 2 * math.pi * (elapsed - knob * beat_s) / period_s
-            value = round((math.sin(phase) + 1) / 2 * 127)
+            # Normalized [0, 1] value, left unquantized for smooth motion.
+            value = (math.sin(phase) + 1) / 2
             cc_msg = MsgControlChange(last_msg_latency, knob, value)
             websockets.broadcast(connected, cc_msg.to_json())
         await asyncio.sleep(1.0 / FAKE_KNOB_UPDATE_HZ)

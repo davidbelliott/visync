@@ -142,12 +142,15 @@ function connect() {
         } else if (type == MSG_TYPE_CONTROL_CHANGE) {
             console.log("control change");
             console.log(msg);
+            // msg.value is normalized [0, 1]; map across the available scenes.
+            const scene_idx = Math.min(context.scenes.size - 1,
+                Math.floor(msg.value * context.scenes.size));
             if (msg.wheel_idx == 1) {
                 // Foreground scene
-                context.change_scene(Math.floor(msg.value / 5), false);
+                context.change_scene(scene_idx, false);
             } else if (msg.wheel_idx == 2) {
                 // Background scene
-                context.change_scene(Math.floor(msg.value / 5), true);
+                context.change_scene(scene_idx, true);
             }
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);

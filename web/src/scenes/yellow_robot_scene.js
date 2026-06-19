@@ -40,7 +40,7 @@ export class YellowRobotScene extends Scene {
         this.robot = new YellowRobot({
             spread_x: 0,
             spread_y: 0,
-            n_per_side: 3,
+            n_per_side: 9,
         });
         this.robot.position.y = 0.5;
         const isom_angle = Math.asin(1 / Math.sqrt(3));

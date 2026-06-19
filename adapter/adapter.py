@@ -485,7 +485,7 @@ async def main_loop_fake_knobs(bpm):
     sinusoids, independent of the sync clock, for smooth knob motion."""
     beat_s = 60.0 / bpm
     start_time = time.time()
-    period_s = [(1 + random.random()) * FAKE_KNOB_PERIOD_BEATS * beat_s for i in range(FAKE_KNOB_COUNT)]
+    period_s = [(0.5 + random.random()) * FAKE_KNOB_PERIOD_BEATS * beat_s for i in range(FAKE_KNOB_COUNT)]
     while True:
         elapsed = time.time() - start_time
         for knob in range(FAKE_KNOB_COUNT):

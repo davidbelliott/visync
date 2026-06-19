@@ -1,87 +1,28 @@
 import * as THREE from 'three';
 import { Component } from './component.js';
-import { BoxDef } from '../geom_def.js';
 import {
     lerp_scalar,
     ease,
     make_wireframe_circle,
+    create_instanced_cube_templates,
     BeatClock
 } from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 
-const RobotParts = {
-    TORSO: 0,
-    LEGS: [1, 2],
-    HEAD: 3,
-    HANDS: [4, 5],
-    FEET: [6, 7],
-    ARMS: [8, 9],
-    EYES: 10,
-    MAX: 11
-}
-
-
-class Robot {
-    constructor(parent_obj, position) {
-        this.obj = new THREE.Group();
-        this.meshes = Array(RobotParts.MAX);
-
-        this.cube_defs = new Map();
-        for (const side of [0, 1]) {
-            const sign = (2 * side - 1);
-            this.cube_defs[RobotParts.HANDS[side]] = new BoxDef([sign * -0.5, 0, 1], [0.5, 1, 1]);
-            const arm_children = new Map([
-                [RobotParts.HANDS[side], this.cube_defs[RobotParts.HANDS[side]]]
-            ]);
-            this.cube_defs[RobotParts.ARMS[side]] = new BoxDef([sign * 1.75, 0.5, 1.75], [0.5, 0.5, 2.0],
-                "yellow", arm_children);
-        }
-
-        this.cube_defs[RobotParts.LEGS[0]] = new BoxDef([-0.75, -2, 0],
-            [0.5, 1.5, 1.0]);
-        this.cube_defs[RobotParts.LEGS[1]] = new BoxDef([0.75, -2, 0],
-            [0.5, 1.5, 1.0]);
-        this.cube_defs[RobotParts.EYES] = new BoxDef([0, 0, 1.125], [1.5, 0.25, 0.25]);
-
-        const head_children = new Map([
-            [RobotParts.EYES, this.cube_defs[RobotParts.EYES]]]);
-
-        this.cube_defs[RobotParts.HEAD] = new BoxDef([0, 1.75, 0], [2.0, 1.0, 2.0],
-            "yellow", head_children);
-
-        const torso_children = new Map([
-            [RobotParts.HEAD, this.cube_defs[RobotParts.HEAD]],
-            [RobotParts.ARMS[0], this.cube_defs[RobotParts.ARMS[0]]],
-            [RobotParts.ARMS[1], this.cube_defs[RobotParts.ARMS[1]]],
-            [RobotParts.LEGS[0], this.cube_defs[RobotParts.LEGS[0]]],
-            [RobotParts.LEGS[1], this.cube_defs[RobotParts.LEGS[1]]]]);
-
-        this.cube_defs[RobotParts.TORSO] = new BoxDef([0, 1, 0], [3, 2, 1], "yellow", torso_children);
-
-        this.cube_defs[RobotParts.FEET[0]] = new BoxDef([-0.75, -2, 0], [1.5, 0.5, 2.0]);
-        this.cube_defs[RobotParts.FEET[1]] = new BoxDef([0.75, -2, 0], [1.5, 0.5, 2.0]);
-
-        const offset = [0, -1, 0];
-        for (const i of [RobotParts.TORSO, RobotParts.FEET[0], RobotParts.FEET[1]]) {
-            for (const j in offset) {
-                this.cube_defs[i].coords[j] += offset[j];
-            }
-        }
-
-        for (const i of [RobotParts.TORSO, RobotParts.FEET[0], RobotParts.FEET[1]]) {
-            let mesh = this.cube_defs[i].create();
-            this.obj.add(mesh);
-            this.meshes[i] = mesh;
-        }
-        this.obj.position.copy(position);
-        parent_obj.add(this.obj);
-    }
-}
+// Each robot is built from this many cubes. They used to live in a THREE
+// scene-graph hierarchy (torso -> head/arms/legs, arm -> hand, head -> eyes);
+// here that hierarchy is flattened into world-local instance transforms so the
+// whole grid of robots renders from a single InstancedGeometryCollection.
+const CUBES_PER_ROBOT = 11;
 
 
 // A square grid of dancing yellow robots. `spread_x` / `spread_y` control the
 // spacing between robots along each grid axis (0 = all robots overlap exactly),
 // and `n_per_side` is the number of robots along each side of the square.
+//
+// All robots dance in lockstep, so each frame we compute one robot's pose (11
+// cube offsets/scales) and replicate it across the grid as instances.
 export class YellowRobot extends Component {
     constructor({ spread_x = 0, spread_y = 0, n_per_side = 3 } = {}) {
         super();
@@ -93,16 +34,22 @@ export class YellowRobot extends Component {
         this.half_beat_clock = new BeatClock(this);
         this.beat_clock = new BeatClock(this);
 
-        this.robot_group = new THREE.Group();
+        this.cube_group = new THREE.Group();
         this.circle_group = new THREE.Group();
         // position circle group right below feet
         this.circle_group.position.y = -3.26;
         this.add(this.circle_group);
-        this.add(this.robot_group);
+        this.add(this.cube_group);
+
+        this.cube_color = new THREE.Color("yellow");
 
         this.circle_scale_base = 0.1;
         this.circle_scale_max = 1.0;
         this.circle_scale = this.circle_scale_base;
+
+        // Furthest-forward foot z that is touching the ground; the circles track
+        // it. Set as a side effect of compute_robot_pose().
+        this._furthest_forward = 0;
 
         this.build();
     }
@@ -127,25 +74,64 @@ export class YellowRobot extends Component {
         }
     }
 
-    // (Re)create the grid of robots and their ground circles.
+    // (Re)create the instanced cubes and per-robot ground circles.
     build() {
-        this.robot_group.clear();
+        this.cube_group.clear();
         this.circle_group.clear();
-        this.robots = [];
         this.circles = [];
+        // Per-robot opacity (fades toward the edges of the grid). Baked into the
+        // cube instances; reused each frame for the circles.
+        this.robot_alphas = [];
 
-        for (let i = 0; i < this._n_per_side; i++) {
-            for (let j = 0; j < this._n_per_side; j++) {
-                const position = this.grid_position(i, j);
-                this.robots.push(new Robot(this.robot_group, position));
+        const n = this._n_per_side;
+        const num_cubes = n * n * CUBES_PER_ROBOT;
 
-                const circle = make_wireframe_circle(6, 32, new THREE.Color("cyan"));
-                circle.position.copy(position);
+        // A single unit-cube wireframe template, instanced once per cube.
+        const [wire_template] = create_instanced_cube_templates(1, 1, 1);
+        this.inst_cubes = new InstancedGeometryCollection(
+            this.cube_group, wire_template, 'Lines', num_cubes);
+
+        const rest_pose = this.compute_robot_pose(0);
+        const tmp = new THREE.Vector3();
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const g = this.grid_position(i, j);
+                const alpha = this.robot_alpha(i, j);
+                this.robot_alphas.push(alpha);
+                for (let k = 0; k < CUBES_PER_ROBOT; k++) {
+                    tmp.copy(rest_pose[k].pos).add(g);
+                    this.inst_cubes.create_geom(tmp, this.cube_color, rest_pose[k].scale, 0, alpha);
+                }
+
+                const circle = make_wireframe_circle(6, 32, new THREE.Color("yellow"));
+                // These ground circles are transparent and overlap nearly
+                // coplanar, so depth-writing makes whichever draws first cull
+                // the others (a dim outer circle can occlude a brighter inner
+                // one). Disable it so they blend by opacity instead.
+                circle.material.depthWrite = false;
+                circle.position.copy(g);
                 circle.rotation.x = Math.PI / 2.0;
                 this.circles.push(circle);
                 this.circle_group.add(circle);
             }
         }
+    }
+
+    // Opacity for the robot at grid cell (i, j): fully opaque at the center,
+    // fading radially to nearly transparent at the outermost corners.
+    robot_alpha(i, j) {
+        const n = this._n_per_side;
+        const center = (n - 1) / 2;
+        if (center === 0) {
+            return 1;
+        }
+        const dx = i - center;
+        const dy = j - center;
+        const dist_sq = dx * dx + dy * dy;
+        const max_dist_sq = 2 * center * center;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const max_dist = center * Math.SQRT2;   // center -> corner
+        return Math.max(0.05, (1 - dist/max_dist) ** 2);
     }
 
     // Centered grid position for the robot at column i, row j.
@@ -154,12 +140,6 @@ export class YellowRobot extends Component {
         return new THREE.Vector3(
             (i - center) * this._spread_x, 0,
             (j - center) * this._spread_y);
-    }
-
-    is_foot_forward(side_idx, t) {
-        const t_period = 1.0 / 4.0;
-        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % 4;
-        return (pos_idx == 1 || pos_idx == 2);
     }
 
     get_foot_shuffle_offset(side_idx, t) {
@@ -202,6 +182,53 @@ export class YellowRobot extends Component {
         return position_options[pos_idx] * 0.6;
     }
 
+    // Compute one robot's pose at dance-time t: an array of CUBES_PER_ROBOT
+    // { pos, scale } in robot-local space. The body bob shifts every
+    // torso-descendant (head, eyes, arms, hands, legs) in y; the feet stay on
+    // the ground. Replicated across the grid by build()/anim_frame().
+    compute_robot_pose(t) {
+        const body = this.get_body_shuffle_offset(t);
+        const arms = this.get_arms_pump_offset(t);
+
+        const pose = [
+            // torso, head, eyes (centered; descendants of torso get +body in y)
+            { pos: new THREE.Vector3(0, body, 0), scale: new THREE.Vector3(3, 2, 1) },
+            { pos: new THREE.Vector3(0, 1.75 + body, 0), scale: new THREE.Vector3(2, 1, 2) },
+            { pos: new THREE.Vector3(0, 1.75 + body, 1.125), scale: new THREE.Vector3(1.5, 0.25, 0.25) },
+        ];
+
+        let furthest = null;
+        for (let side = 0; side < 2; side++) {
+            const sign = 2 * side - 1;   // -1 for left, +1 for right
+            const shuffle = this.get_foot_shuffle_offset(side, t);   // [0, y, z]
+
+            const leg_base_height = 1.5;
+            const leg_scale_y = 1 + (body - shuffle[1]) / leg_base_height;
+            const leg_offset_y = (1 - leg_scale_y) * leg_base_height / 2;
+
+            // arm (torso child: + body + arm pump)
+            pose.push({ pos: new THREE.Vector3(sign * 1.75, 0.5 + arms + body, 1.75),
+                        scale: new THREE.Vector3(0.5, 0.5, 2.0) });
+            // hand (arm child: moves with arm)
+            pose.push({ pos: new THREE.Vector3(sign * 1.25, 0.5 + arms + body, 2.75),
+                        scale: new THREE.Vector3(0.5, 1, 1) });
+            // leg (torso child: + body, stretches/shuffles)
+            pose.push({ pos: new THREE.Vector3(sign * 0.75, body + (-2 + leg_offset_y), shuffle[2]),
+                        scale: new THREE.Vector3(0.5, leg_base_height * leg_scale_y, 1.0) });
+            // foot (top-level: shuffles on the ground, no body bob)
+            pose.push({ pos: new THREE.Vector3(sign * 0.75, -3 + shuffle[1], shuffle[2]),
+                        scale: new THREE.Vector3(1.5, 0.5, 2.0) });
+
+            if (shuffle[1] == 0 &&
+                (furthest === null || shuffle[2] > furthest)) {
+                // furthest-forward side touching the ground; circles track it
+                furthest = shuffle[2];
+            }
+        }
+        this._furthest_forward = furthest;
+        return pose;
+    }
+
     handle_sync(t, bpm, beat) {
         this.beat_clock.start();
         if (beat % 2 == 0) {
@@ -214,65 +241,37 @@ export class YellowRobot extends Component {
     }
 
     anim_frame(dt) {
-        // Lay out the grid from the current spread so spacing can be animated
-        // by setting spread_x / spread_y from the scene.
-        let idx = 0;
-        for (let i = 0; i < this._n_per_side; i++) {
-            for (let j = 0; j < this._n_per_side; j++) {
-                const position = this.grid_position(i, j);
-                this.robots[idx].obj.position.copy(position);
-                this.circles[idx].position.copy(position);
-                idx++;
+        const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
+        const pose = this.compute_robot_pose(half_beat_time);
+
+        // Replicate the pose across the grid, updating cube instances and the
+        // ground circles. Spread can change live (MIDI), so positions are laid
+        // out every frame.
+        const n = this._n_per_side;
+        const tmp = new THREE.Vector3();
+        let inst = 0;
+        let ci = 0;
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const g = this.grid_position(i, j);
+                for (let k = 0; k < CUBES_PER_ROBOT; k++) {
+                    tmp.copy(pose[k].pos).add(g);
+                    this.inst_cubes.set_pos(inst, tmp);
+                    this.inst_cubes.set_scale(inst, pose[k].scale);
+                    inst++;
+                }
+                this.circles[ci].position.copy(g);
+                ci++;
             }
         }
 
-        let half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
-        let furthest_forward_z_touching_ground = null;
-        for (let side = 0; side < 2; side++) {
-            const shuffle_offset = this.get_foot_shuffle_offset(side, half_beat_time);
-            const body_offset = this.get_body_shuffle_offset(half_beat_time);
-            const arms_offset = this.get_arms_pump_offset(half_beat_time);
-            this.robots.forEach((robot, i) => {
-                const leg = robot.cube_defs[RobotParts.TORSO].children.get(
-                    RobotParts.LEGS[side]).mesh;
+        this.circle_group.position.z = this._furthest_forward;
 
-                const foot_base_y = robot.cube_defs[RobotParts.FEET[side]].coords[1];
-                const foot_base_z = robot.cube_defs[RobotParts.FEET[side]].coords[2];
-                const leg_base_y = robot.cube_defs[RobotParts.LEGS[side]].coords[1];
-                const leg_base_z = robot.cube_defs[RobotParts.LEGS[side]].coords[2];
-                const leg_base_height = robot.cube_defs[RobotParts.LEGS[side]].dims[1];
-
-                const leg_scale_y = 1 + (body_offset - shuffle_offset[1]) / leg_base_height;
-                const leg_offset_y = (1 - leg_scale_y) * leg_base_height / 2;
-                robot.meshes[RobotParts.FEET[side]].position.y = foot_base_y + shuffle_offset[1];
-                robot.meshes[RobotParts.FEET[side]].position.z = foot_base_z + shuffle_offset[2];
-                leg.position.y = leg_base_y + leg_offset_y;
-                leg.position.z = leg_base_z + shuffle_offset[2];
-                leg.scale.y = leg_scale_y;
-
-                const torso_base_y = robot.cube_defs[RobotParts.TORSO].coords[1];
-                robot.meshes[RobotParts.TORSO].position.y = torso_base_y + body_offset;
-
-                const arm_base_y = robot.cube_defs[RobotParts.ARMS[side]].coords[1];
-                const arm = robot.cube_defs[RobotParts.TORSO].children.get(
-                    RobotParts.ARMS[side]).mesh;
-                arm.position.y = arm_base_y + arms_offset;
-            });
-            if (shuffle_offset[1] == 0 &&
-                (shuffle_offset[2] > furthest_forward_z_touching_ground ||
-                furthest_forward_z_touching_ground === null)) {
-                // if this is the furthest-forward side touching the ground,
-                // track it with the circles
-                furthest_forward_z_touching_ground = shuffle_offset[2];
-            }
-        }
-        this.circle_group.position.z = furthest_forward_z_touching_ground;
-
-        let beat_time = this.beat_clock.getElapsedBeats();
+        const beat_time = this.beat_clock.getElapsedBeats();
         this.circle_scale = lerp_scalar(this.circle_scale_base, this.circle_scale_max, beat_time);
-        for (const circle of this.circles) {
+        this.circles.forEach((circle, idx) => {
             circle.scale.setScalar(this.circle_scale);
-            circle.material.opacity = 1.0 - beat_time;
-        }
+            circle.material.opacity = (1.0 - beat_time) * this.robot_alphas[idx];
+        });
     }
 }

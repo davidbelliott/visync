@@ -51,7 +51,9 @@ function create_wireframe_mat() {
         vertexShader: vertexShader,
         fragmentShader: fragmentShader,
         side: THREE.DoubleSide,
-        transparent: true
+        transparent: true,
+        depthWrite: false,
+        depthTest: true
     });
 
     return mat;

@@ -1,74 +1,93 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
 
-const NUM_DISPLAYS = 16;
+const NUM_DIALS = 16;
 const COLS = 4;
-const ROWS = NUM_DISPLAYS / COLS;
+const ROWS = NUM_DIALS / COLS;
 
 // Grid layout in world units (orthographic, frustum_size 20 => y in [-10, 10]).
 const COL_SPACING = 8;
 const ROW_SPACING = 4.5;
-const SPRITE_W = 6;
-const SPRITE_H = 3;
 
-const CANVAS_W = 256;
-const CANVAS_H = 128;
+const INNER_R = 1.2;
+const OUTER_R = 1.7;
+const SEGMENTS = 128;          // circle smoothness
+const DIAL_COLOR = 0xffffff;
+const HALF_PI = Math.PI / 2;
 
-// A single numeric readout backed by a canvas texture.
-class Display {
-    constructor(label) {
-        this.label = label;
-        this.canvas = document.createElement('canvas');
-        this.canvas.width = CANVAS_W;
-        this.canvas.height = CANVAS_H;
-        this.ctx = this.canvas.getContext('2d');
-        this.texture = new THREE.CanvasTexture(this.canvas);
-        const material = new THREE.SpriteMaterial({
-            map: this.texture,
-            transparent: true,
+// Outline circle as a 1px-wide line loop (WebGL lines are always single-pixel).
+function circle_geometry(radius) {
+    const pts = [];
+    for (let i = 0; i < SEGMENTS; i++) {
+        const a = (i / SEGMENTS) * Math.PI * 2;
+        pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+    }
+    return new THREE.BufferGeometry().setFromPoints(pts);
+}
+
+// A round "filled dial": two concentric 1px circles with a RingGeometry sector
+// fill that sweeps clockwise from the bottom (-90 deg).
+class Dial {
+    constructor() {
+        this.group = new THREE.Group();
+
+        const line_mat = new THREE.LineBasicMaterial({ color: DIAL_COLOR });
+        this.group.add(new THREE.LineLoop(circle_geometry(INNER_R), line_mat));
+        this.group.add(new THREE.LineLoop(circle_geometry(OUTER_R), line_mat));
+
+        this.fill_material = new THREE.MeshBasicMaterial({
+            color: DIAL_COLOR,
+            side: THREE.DoubleSide,
         });
-        this.sprite = new THREE.Sprite(material);
-        this.sprite.scale.set(SPRITE_W, SPRITE_H, 1);
-        this.draw(0);
+        this.fill = new THREE.Mesh(new THREE.BufferGeometry(), this.fill_material);
+        this.fill.position.z = -0.02;   // sit just behind the outline circles
+        this.group.add(this.fill);
+
+        this.value = -1;
+        this.set(0);
     }
 
-    draw(value) {
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-        ctx.fillStyle = '#00ff66';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 28px monospace';
-        ctx.fillText(this.label, CANVAS_W / 2, CANVAS_H * 0.3);
-        ctx.font = 'bold 52px monospace';
-        ctx.fillText(value.toFixed(2), CANVAS_W / 2, CANVAS_H * 0.68);
-        this.texture.needsUpdate = true;
+    // value in [0, 1] -> fraction of the ring filled, clockwise from the bottom.
+    set(value) {
+        if (Math.abs(value - this.value) < 1e-4) {
+            return;
+        }
+        this.value = value;
+        const phi = value * Math.PI * 2;
+        const segs = Math.max(1, Math.ceil(value * SEGMENTS));
+        this.fill.geometry.dispose();
+        // RingGeometry sweeps CCW from thetaStart; place the start phi clockwise
+        // of the bottom so the trailing edge stays pinned at the bottom.
+        this.fill.geometry = new THREE.RingGeometry(
+            INNER_R, OUTER_R, segs, 1, -HALF_PI - phi, phi
+        );
     }
 }
 
-// Debug scene: a grid of numeric readouts showing the live (normalized) values
-// of MIDI knobs 1-16, driven through the standard knob -> property binding path.
+// Debug scene: a grid of 16 round dials showing the live (normalized) values of
+// MIDI knobs 1-16, driven through the standard knob -> property binding path.
 export class DebugScene extends Scene {
     constructor(context) {
         super(context, 'debug');
         this.camera = this.cam_orth;
+        this.camera.position.set(0, 0, 10);
 
-        this.displays = [];
-        for (let i = 0; i < NUM_DISPLAYS; i++) {
-            const display = new Display(`K${i + 1}`);
+        this.dials = [];
+        for (let i = 0; i < NUM_DIALS; i++) {
+            const dial = new Dial();
             const col = i % COLS;
             const row = Math.floor(i / COLS);
-            display.sprite.position.set(
+            dial.group.position.set(
                 (col - (COLS - 1) / 2) * COL_SPACING,
                 ((ROWS - 1) / 2 - row) * ROW_SPACING,
                 0
             );
-            this.add(display.sprite);
-            this.displays.push(display);
+            this.add(dial.group);
+            this.dials.push(dial);
 
-            // One knob -> one display here, but bind() supports many bindings
-            // per knob for one-knob -> many-properties mappings.
-            this.bind('midi', i, (v) => display.draw(v));
+            // One knob -> one dial here, but bind() supports many bindings per
+            // knob for one-knob -> many-properties mappings.
+            this.bind('midi', i, (v) => dial.set(v));
         }
     }
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -10,11 +10,11 @@ import {
     arr_eq,
     load_texture,
     ResourceLoader
-} from './util.js';
-import { InstancedGeometryCollection } from './instanced_geom.js';
+} from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
-export class TessellateScene extends VisScene {
+export class TessellateScene extends Scene {
     constructor(context) {
         super(context, 'tessellate');
 
@@ -37,11 +37,11 @@ export class TessellateScene extends VisScene {
 
         this.materials = [];
 
-        this.scene = new THREE.Scene();
+        this.clear();
 
       var light = new THREE.PointLight(0xffffff, 1, Infinity);
 
-      this.scene.add(light);
+      this.add(light);
 
         
 
@@ -159,7 +159,7 @@ export class TessellateScene extends VisScene {
 
         this.base_group.scale.set(1, 1, 1);
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         this.evolve_time = 0;
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);

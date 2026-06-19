@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { VisScene } from './vis_scene.js';
-import { LightningStrike } from './lightning_strike.js';
+import { Scene } from './scene.js';
+import { LightningStrike } from '../lightning_strike.js';
 import {
     lerp_scalar,
     ease,
@@ -15,9 +15,9 @@ import {
     BeatClock,
     Spark,
     ObjectPool,
-} from './util.js';
+} from '../util.js';
 
-export class IceCreamScene extends VisScene {
+export class IceCreamScene extends Scene {
     constructor(context) {
         super(context, 'ice-cream');
 
@@ -37,7 +37,7 @@ export class IceCreamScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
         this.beat_clock = new BeatClock(this);
@@ -53,17 +53,17 @@ export class IceCreamScene extends VisScene {
 
         this.light = new THREE.PointLight("white", 30, 0, 1.0);
         this.light.position.set(-10, 10, 20);
-        this.scene.add(this.light);
+        this.add(this.light);
 
         this.light2 = new THREE.PointLight("white", 10, 0, 0.8);
         this.light2.position.set(0, -40, 20);
-        this.scene.add(this.light2);
+        this.add(this.light2);
 
         this.fg_group = new THREE.Group();
         this.fg_group.rotation.x = Math.PI / 8;
         this.fg_group.position.y = -8;
         this.fg_group.position.z = 10;
-        this.scene.add(this.fg_group);
+        this.add(this.fg_group);
 
         const shader_loader = new ShaderLoader('glsl/chunks/dither_pars.frag',
             'glsl/chunks/dither.frag');
@@ -175,7 +175,7 @@ export class IceCreamScene extends VisScene {
 
         this.base_group.rotation.y = Math.PI / 4;
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         this.base_group.rotation.x = Math.PI / 4;
 
         this.rot = 512 / 4;

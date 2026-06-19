@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -17,7 +17,7 @@ import {
     ShaderLoader,
     Spark,
     BeatClock
-} from './util.js';
+} from '../util.js';
 
 class TunnelMovementBackground {
     constructor(parent_scene) {
@@ -104,7 +104,7 @@ class TunnelMovementBackground {
 const FILL_COLOR = "black";
 const FILL_OPACITY = 0.5;
 
-export class FastCubeScene extends VisScene {
+export class FastCubeScene extends Scene {
     constructor(context) {
         super(context, 'cubeman');
 
@@ -124,7 +124,7 @@ export class FastCubeScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new BeatClock(this);
         this.sync_clock = new BeatClock(this);
         this.half_beat_clock = new BeatClock(this);
@@ -223,10 +223,10 @@ export class FastCubeScene extends VisScene {
                 this.camera.top - this.camera.bottom);
             this.plane = new THREE.Mesh(geometry, this.vbo_material);
             this.plane.position.z = -100;
-            //this.scene.add(this.plane);
+            //this.add(this.plane);
         });
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
     }
 
     get_foot_shuffle_offset(side_idx, t) {
@@ -362,11 +362,11 @@ export class FastCubeScene extends VisScene {
         renderer.render(this.bg.scene, this.bg.camera);
         this.vbo_material.uniforms.uTexture.value = this.buffer.texture;
         renderer.setRenderTarget(renderTarget);
-        renderer.render(this.scene, this.camera);
+        renderer.render(this, this.camera);
         renderer.setRenderTarget(this.buffer);
         renderer.clear();
         renderer.setRenderTarget(renderTarget);
-        //renderer.render(this.scene, this.camera);
+        //renderer.render(this, this.camera);
     }
 
     create_sparks(pos, num, avg_vel, color) {

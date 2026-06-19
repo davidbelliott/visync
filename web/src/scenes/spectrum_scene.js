@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -9,7 +9,7 @@ import {
     clamp,
     arr_eq,
     ShaderLoader
-} from './util.js';
+} from '../util.js';
 
 function create_instanced_cube(dims, color) {
     let geometry = new THREE.BoxGeometry(...dims);
@@ -79,7 +79,7 @@ class Signal {
 }
 
 
-export class SpectrumScene extends VisScene {
+export class SpectrumScene extends Scene {
     constructor(context) {
         super(context, 'spectrum', 3, 200);
 
@@ -100,7 +100,7 @@ export class SpectrumScene extends VisScene {
         this.orig_line_length = this.line_length;
         this.ceiling_height = 5;
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
         this.state_change_clock = new THREE.Clock(false);
@@ -169,7 +169,7 @@ export class SpectrumScene extends VisScene {
         this.base_group.rotation.x = 0;
         this.base_group.rotation.y = 0;
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         this.camera = this.cam_orth;
 
         this.signals = [];

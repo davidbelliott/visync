@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     clamp,
     lerp_scalar,
     update_persp_camera_aspect,
     create_instanced_cube,
     BeatClock
-} from './util.js';
-import { LightningStrike } from './lightning_strike.js';
+} from '../util.js';
+import { LightningStrike } from '../lightning_strike.js';
 
 const GRID_COLOR = 'white';
 const LINE_WIDTH = 1;
@@ -25,7 +25,7 @@ function make_wireframe_polyhedron(radius, detail) {
     return ls
 }
 
-export class TracersScene extends VisScene {
+export class TracersScene extends Scene {
     constructor(context) {
         super(context, 'tracers', 3);
 
@@ -156,7 +156,7 @@ export class TracersScene extends VisScene {
         update_persp_camera_aspect(this.vbo_camera, aspect);
 
         {
-            this.scene = new THREE.Scene();
+            this.clear();
             const width = window.innerWidth;
             const height = window.innerHeight;
             this.camera = new THREE.OrthographicCamera( width / - 2, width / 2, height / 2, height / - 2, - 10, 10 );
@@ -193,7 +193,7 @@ export class TracersScene extends VisScene {
             } );
             const geometry = new THREE.PlaneGeometry( window.innerWidth, window.innerHeight );
             const mesh = new THREE.Mesh( geometry, this.blend_material );
-            this.scene.add( mesh );
+            this.add( mesh );
         }
     }
 
@@ -328,7 +328,7 @@ export class TracersScene extends VisScene {
         renderer.setRenderTarget(old_render_target);
         renderer.clear();
         renderer.clearDepth();
-        renderer.render(this.scene, this.camera);*/
+        renderer.render(this, this.camera);*/
         //renderer.autoClearColor = old_autoclear;
         //this.cur_buffer_idx = (this.cur_buffer_idx + 1) % this.buffers.length;
     }

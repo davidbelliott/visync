@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -15,8 +15,8 @@ import {
     ShaderLoader,
     Spark,
     BeatClock
-} from './util.js';
-import { BoxDef } from './geom_def.js';
+} from '../util.js';
+import { BoxDef } from '../geom_def.js';
 
 
 const RobotParts = {
@@ -156,7 +156,7 @@ class Robot extends THREE.Object3D {
 }
 
 
-export class SpinningRobotsScene extends VisScene {
+export class SpinningRobotsScene extends Scene {
     constructor(context) {
         super(context);
 
@@ -174,7 +174,7 @@ export class SpinningRobotsScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.base_group = new THREE.Group();
 
         this.curr_spacing = 8;
@@ -221,7 +221,7 @@ export class SpinningRobotsScene extends VisScene {
             }
         );
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         this.clock = new THREE.Clock(true);
         this.half_beat_clock = new BeatClock(this);

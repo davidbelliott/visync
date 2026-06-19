@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -10,13 +10,13 @@ import {
     arr_eq,
     load_texture,
     ResourceLoader
-} from './util.js';
+} from '../util.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 
 const USE_SHADER = true;
 const SVG_SIZE = 80;
 
-export class ChineseScene extends VisScene {
+export class ChineseScene extends Scene {
     constructor(context) {
         super(context, 'rwalkglyphs');
 
@@ -46,7 +46,7 @@ export class ChineseScene extends VisScene {
         // Create interior scene
         {
             this.inner_scene = new THREE.Scene();
-            this.scene = new THREE.Scene();
+            this.clear();
             const loader = new SVGLoader();
             // load a SVG resource
             loader.load(
@@ -139,7 +139,7 @@ export class ChineseScene extends VisScene {
             let geometry = new THREE.PlaneGeometry(1, 1);
             this.plane = new THREE.Mesh(geometry, material);
             this.plane.position.z = -100;   // position in front of other objects
-            this.scene.add(this.plane);
+            this.add(this.plane);
             this.plane.scale.set(width, height, 1);
         });
         this.handle_resize(width, height);
@@ -214,7 +214,7 @@ export class ChineseScene extends VisScene {
             }
             renderer.setRenderTarget(prev_render_target);
             renderer.clearDepth();
-            renderer.render(this.scene, this.camera);
+            renderer.render(this, this.camera);
             renderer.autoClearColor = prev_autoclear;
             renderer.setClearColor(prev_clear_color);
         }

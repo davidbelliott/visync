@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
-import { ResourceLoader } from './util.js';
+import { Scene } from './scene.js';
+import { ResourceLoader } from '../util.js';
 
 const shader_preamble = [
 'uniform vec3 iResolution;       // Viewport resolution (width, height, aspect ratio)',
@@ -17,12 +17,12 @@ const shader_epilogue = ['void main() {',
 '}',
 ].join('\n');
 
-export class ShaderScene extends VisScene {
+export class ShaderScene extends Scene {
     constructor(context, fragmentShaderUrl) {
         super(context, `shader:${fragmentShaderUrl}`);
         
         // Setup basic scene with a full-screen quad
-        this.scene = new THREE.Scene();
+        this.clear();
         this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         
         // Create our shader loader
@@ -60,7 +60,7 @@ export class ShaderScene extends VisScene {
             // Create a plane that fills the entire view
             const geometry = new THREE.PlaneGeometry(2, 2);
             this.quad = new THREE.Mesh(geometry, this.material);
-            this.scene.add(this.quad);
+            this.add(this.quad);
             
             // Mark as initialized
             this.initialized = true;
@@ -146,10 +146,10 @@ render(renderer, underlying_buffer) {
     //this.material.uniforms.iChannel0.value = this.prevRender.texture;
 
     // Render to the screen
-    renderer.render(this.scene, this.camera);
+    renderer.render(this, this.camera);
 
     //renderer.setRenderTarget(this.renderTarget);
-    //renderer.render(this.scene, this.camera);
+    //renderer.render(this, this.camera);
 
     // Swap buffers
     /*const temp = this.prevRender;

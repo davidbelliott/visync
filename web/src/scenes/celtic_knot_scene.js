@@ -1,6 +1,6 @@
-import { VisScene } from "./vis_scene.js";
+import { Scene } from "./scene.js";
 import * as THREE from "three";
-import { BeatClock } from "./util.js";
+import { BeatClock } from "../util.js";
 
 class KnotSegment {
     constructor(geometry, material) {
@@ -19,10 +19,10 @@ class KnotSegment {
     }
 }
 
-export class CelticKnotScene extends VisScene {
+export class CelticKnotScene extends Scene {
     constructor(context) {
         super(context);
-        this.scene = new THREE.Scene();
+        this.clear();
         
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -38,7 +38,7 @@ export class CelticKnotScene extends VisScene {
         );
 
         this.base_group = new THREE.Group();
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         
         this.knot_segments = [];
         this.createWovenBorder();

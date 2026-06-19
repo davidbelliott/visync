@@ -1,10 +1,11 @@
 "use strict";
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js'
+import { Scene } from './scene.js'
 
-export class TextScene extends VisScene {
+export class TextScene extends Scene {
     constructor(context, text_file_path='/txt/drums.txt') {
         super(context, 'text', 0);
+        this.camera = this.cam_persp;   // Scene defaults to cam_orth; preserve original cam_persp
 
         this.paragraphs = [''];
         this.text_div = document.getElementById('textbox');

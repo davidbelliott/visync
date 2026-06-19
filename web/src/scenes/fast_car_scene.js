@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -17,7 +17,7 @@ import {
     make_line,
     ShaderLoader,
     Spark
-} from './util.js';
+} from '../util.js';
 
 class TunnelMovementBackground {
     constructor(context) {
@@ -98,7 +98,7 @@ class TunnelMovementBackground {
     }
 }
 
-export class FastCarScene extends VisScene {
+export class FastCarScene extends Scene {
     constructor(context) {
         super(context);
 
@@ -119,7 +119,7 @@ export class FastCarScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.vbo_scene = new THREE.Scene();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(true);
@@ -221,7 +221,7 @@ export class FastCarScene extends VisScene {
                 this.camera.top - this.camera.bottom);
             this.plane = new THREE.Mesh(geometry, this.vbo_material);
             this.plane.position.z = -100;
-            this.scene.add(this.plane);
+            this.add(this.plane);
         });
 
         this.vbo_scene.add(this.base_group);
@@ -276,7 +276,7 @@ export class FastCarScene extends VisScene {
         renderer.setRenderTarget(null);
         renderer.clear();
         renderer.clearDepth();
-        renderer.render(this.scene, this.camera);
+        renderer.render(this, this.camera);
         renderer.autoClearColor = true;
     }
 }

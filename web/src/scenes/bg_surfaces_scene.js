@@ -1,4 +1,4 @@
-import { VisScene } from "./vis_scene.js";
+import { Scene } from "./scene.js";
 import * as THREE from "three";
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import {
@@ -10,7 +10,7 @@ import {
     Spark,
     ObjectPool,
     rand_int,
-} from "./util.js";
+} from "../util.js";
 
 function radial_wave(u, v, target, t) {
     const r = 50;
@@ -23,10 +23,10 @@ function radial_wave(u, v, target, t) {
 }
 
 
-export class BackgroundSurfacesScene extends VisScene {
+export class BackgroundSurfacesScene extends Scene {
     constructor(context) {
         super(context, 'param-surface');
-        this.scene = new THREE.Scene();
+        this.clear();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 200);
         this.camera = this.cam_persp;
@@ -105,28 +105,28 @@ export class BackgroundSurfacesScene extends VisScene {
         color_amb.setHSL(this.amb_color_hue % 1, 1, 0.5);
 
         this.amblight = new THREE.AmbientLight(color_amb, 0.7);
-        this.scene.add(this.amblight);
+        this.add(this.amblight);
 
         this.dir_light = new THREE.DirectionalLight("white", 0.4);
         this.dir_light.position.set(1, 1, 0);
-        this.scene.add(this.dir_light);
+        this.add(this.dir_light);
 
         const color_dir = new THREE.Color();
         color_dir.setHSL((this.amb_color_hue) % 1, 1, 0.5);
         this.dir_light_2 = new THREE.DirectionalLight(color_dir, 1.4);
         this.dir_light_2.position.set(-1, -1, -1);
-        this.scene.add(this.dir_light_2);
+        this.add(this.dir_light_2);
 
         this.light = new THREE.PointLight("white", 20, 0, 2);
         //this.light.castShadow = true;
-        this.scene.add(this.light);
+        this.add(this.light);
 
         // Sparks
         const spark_constructor = () => { return new Spark(2, "white", [0, 1], false, true, true, false); };
         this.spark_pool = new ObjectPool(spark_constructor, 32);
         this.base_group.add(this.spark_pool);
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         this.evolve_time = 0;
     }
 
@@ -198,7 +198,7 @@ export class BackgroundSurfacesScene extends VisScene {
     render(renderer) {
         const is_shadow_enabled = renderer.shadowMap.enabled;
         renderer.shadowMap.enabled = true;
-        renderer.render(this.scene, this.camera);
+        renderer.render(this, this.camera);
         renderer.shadowMap.enabled = is_shadow_enabled;
     }
 

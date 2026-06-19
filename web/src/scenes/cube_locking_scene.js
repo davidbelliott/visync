@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -17,7 +17,7 @@ import {
     Spark,
     ObjectPool,
     BeatClock
-} from './util.js';
+} from '../util.js';
 
 class CustomSinCurve extends THREE.Curve {
     constructor( scale = 1 ) {
@@ -98,7 +98,7 @@ class CustomSinCurve extends THREE.Curve {
 }
 
 
-export class CubeLockingScene extends VisScene {
+export class CubeLockingScene extends Scene {
     constructor(context) {
         super(context, 'cubetubes', 3);
 
@@ -119,7 +119,7 @@ export class CubeLockingScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.rot_clock = new BeatClock(this);
         this.beat_clock = new BeatClock(this);
 
@@ -232,7 +232,7 @@ export class CubeLockingScene extends VisScene {
         this.base_group.rotation.x = isom_angle;
 
         this.base_group.add(this.cube_wireframe);
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         const spark_constructor = () => { return new Spark(1.0, "white", [0, 1]); };
         this.spark_pool = new ObjectPool(spark_constructor, 64);

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
     lerp_scalar,
@@ -12,7 +12,7 @@ import {
     create_instanced_cube,
     ShaderLoader,
     BeatClock
-} from './util.js';
+} from '../util.js';
 
 const BODY_COLOR = new THREE.Color("red");
 const ROT_BEATS = 3.75;
@@ -252,7 +252,7 @@ class DDRArrow extends THREE.LineSegments {
     }
 }
 
-export class DDRScene extends VisScene {
+export class DDRScene extends Scene {
     constructor(context) {
         super(context, 'ddrrobot', 1, 180);
         const width = window.innerWidth;
@@ -268,7 +268,7 @@ export class DDRScene extends VisScene {
 
         this.clock = new THREE.Clock();
         this.base_group = new THREE.Group();
-        this.scene = new THREE.Scene();
+        this.clear();
 
         const loader = new GLTFLoader();
         const stl_load_promise = loader.loadAsync('stl/ddr-robot.glb');
@@ -342,7 +342,7 @@ export class DDRScene extends VisScene {
         });
 
         this.camera.rotation.x = -Math.asin(1 / Math.sqrt(3));     // isometric angle
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         // Robot rotation, in 90 degree increments starting from 45 degrees
         this.start_robot_rot = 0;

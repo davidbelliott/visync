@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     ease, BeatClock, lerp_scalar, clamp, make_wireframe_cube
-} from './util.js';
-import { InstancedGeometryCollection } from './instanced_geom.js';
+} from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 const CUBES_PER_SIDE = 10;
 const CUBE_SIZE = 1;
@@ -83,7 +83,7 @@ function metaballs(x, y, z, time) {
     return value * 0.5; // Scale the result to get reasonable values
 }
 
-export class CellularAutomataScene extends VisScene {
+export class CellularAutomataScene extends Scene {
     constructor(context) {
         super(context, 'spheregrid', 2, 180);
 
@@ -98,18 +98,18 @@ export class CellularAutomataScene extends VisScene {
             1000
         );
 
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000000);
+        this.clear();
+        this.background = new THREE.Color(0x000000);
         this.cube_group = new THREE.Group();
-        this.scene.add(this.cube_group);
+        this.add(this.cube_group);
 
         this.light = new THREE.PointLight("white", 20, 0, 1.0);
         this.light.position.set(-10, 10, 0);
-        this.scene.add(this.light);
+        this.add(this.light);
 
         this.light2 = new THREE.DirectionalLight("white", 0.1);
         this.light2.position.set(100, 0, 0);
-        this.scene.add(this.light2);
+        this.add(this.light2);
 
         // Create template for wireframe geometry
         {

@@ -1,11 +1,11 @@
-import { VisScene } from "./vis_scene.js";
+import { Scene } from "./scene.js";
 import * as THREE from "three";
 import {
     create_instanced_cube,
     make_wireframe_special,
     make_point_cloud,
     BeatClock
-} from "./util.js";
+} from "../util.js";
 
 
 const NUM_IMPACTS = 16;
@@ -17,13 +17,13 @@ const OSC_DECAY = 5;
 const OSC_PHASE = 0;
 
 
-export class HomeBackgroundScene extends VisScene {
+export class HomeBackgroundScene extends Scene {
     constructor(context) {
         super(context, 'cube-bounce');
         this.base_scale = 1.5;
 
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 10);
         this.camera = this.cam_persp;
@@ -50,11 +50,11 @@ export class HomeBackgroundScene extends VisScene {
         this.ls = make_wireframe_special("white");
         this.ls.material.color.copy(new THREE.Color("gray"));
         this.ls.renderOrder = -1;
-        //this.scene.add(this.ls);
+        //this.add(this.ls);
         this.pc = make_point_cloud();
         this.pc.position.copy(this.camera.position);
-        this.scene.add(this.pc);
-        this.scene.add(this.cubes_group);
+        this.add(this.pc);
+        this.add(this.cubes_group);
 
         this.time_since_update = 0.0;
         this.time_scaling_key = 0.0;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
-import { ShaderLoader, BeatClock } from './util.js';
+import { Scene } from './scene.js';
+import { ShaderLoader, BeatClock } from '../util.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 
 // Double Helix Curve
@@ -72,7 +72,7 @@ class HelixCurve extends THREE.Curve {
     }
 }
 
-export class HelixScene extends VisScene {
+export class HelixScene extends Scene {
     constructor(context) {
         super(context, 'helix', 1);
         const width = window.innerWidth;
@@ -89,11 +89,11 @@ export class HelixScene extends VisScene {
         this.clock = new THREE.Clock();
         this.base_group = new THREE.Group();
         this.base_group.position.set(0, this.frustum_size / 6, 0);
-        this.scene = new THREE.Scene();
+        this.clear();
 
 
         this.camera.rotation.x = -Math.PI / 4;
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
 
         // Parameters
@@ -159,7 +159,7 @@ export class HelixScene extends VisScene {
         {
             this.light = new THREE.PointLight("white", 200, 0, 0.8);
             this.light.position.set(0, 10, 10);
-            this.scene.add(this.light);
+            this.add(this.light);
         }
 
         this.clock.start();

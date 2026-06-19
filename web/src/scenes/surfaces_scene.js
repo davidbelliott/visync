@@ -1,4 +1,4 @@
-import { VisScene } from "./vis_scene.js";
+import { Scene } from "./scene.js";
 import * as THREE from "three";
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import {
@@ -6,7 +6,7 @@ import {
     make_wireframe_special,
     make_point_cloud,
     clamp,
-} from "./util.js";
+} from "../util.js";
 
 function radial_wave(u, v, target, t) {
     const r = 50;
@@ -19,10 +19,10 @@ function radial_wave(u, v, target, t) {
 }
 
 
-export class SurfacesScene extends VisScene {
+export class SurfacesScene extends Scene {
     constructor(context) {
         super(context, 'surfaces');
-        this.scene = new THREE.Scene();
+        this.clear();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 100);
         this.camera = this.cam_persp;
@@ -56,17 +56,17 @@ export class SurfacesScene extends VisScene {
             this.base_group.add(mesh);
         }
         this.base_group.rotation.x = Math.PI / 4;
-        //this.scene.add(mesh);
+        //this.add(mesh);
 
         this.amblight = new THREE.AmbientLight("blue", 0.2);
-        this.scene.add(this.amblight);
+        this.add(this.amblight);
 
         this.light = new THREE.PointLight(0xffffff, 10, 0, 0.75);
         this.light.position.set(0, 40, 10);
         this.light.castShadow = true;
-        this.scene.add(this.light);
+        this.add(this.light);
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         this.rot_vec = new THREE.Vector3(0.01, 0.01, 0.01);
     }
@@ -118,7 +118,7 @@ export class SurfacesScene extends VisScene {
     render(renderer) {
         const is_shadow_enabled = renderer.shadowMap.enabled;
         renderer.shadowMap.enabled = true;
-        renderer.render(this.scene, this.camera);
+        renderer.render(this, this.camera);
         renderer.shadowMap.enabled = is_shadow_enabled;
     }
 }

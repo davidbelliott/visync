@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -11,7 +11,7 @@ import {
     load_texture,
     ResourceLoader,
     create_instanced_cube,
-} from './util.js';
+} from '../util.js';
 
 const ROT_DIV = 1024;
 
@@ -155,7 +155,7 @@ class CubeAssembly extends THREE.Group {
     }
 }
 
-export class HexagonScene extends VisScene {
+export class HexagonScene extends Scene {
     constructor(context) {
         super(context, 'hexagons');
 
@@ -169,7 +169,7 @@ export class HexagonScene extends VisScene {
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new THREE.Clock(true);
 
 
@@ -191,7 +191,7 @@ export class HexagonScene extends VisScene {
             //material = new THREE.MeshBasicMaterial({ color: "red" });
             this.plane = this.create_plane(this.cam_orth, this.background_material);
             this.plane.position.z = -900;
-            this.scene.add(this.plane);
+            this.add(this.plane);
         });
 
         this.base_group = new THREE.Group();
@@ -212,7 +212,7 @@ export class HexagonScene extends VisScene {
         //this.base_group.rotation.x = Math.asin(1 / Math.sqrt(3));
         this.camera.rotation.y = Math.PI / 4;
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
         this.camera = this.cam_orth;
 
         //this.base_group.rotation.x = -Math.asin(1 / Math.sqrt(3));
@@ -268,9 +268,9 @@ export class HexagonScene extends VisScene {
             this.uniforms.pixel_ratio.value = window.devicePixelRatio;
         }
         if (this.plane != null) {
-            this.scene.remove(this.plane);
+            this.remove(this.plane);
             this.plane = this.create_plane(this.cam_orth, this.background_material);
-            this.scene.add(this.plane);
+            this.add(this.plane);
         }
     }
 }

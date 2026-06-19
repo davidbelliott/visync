@@ -10,10 +10,10 @@ import {
     arr_eq,
     clamp,
     BeatClock
-} from './util.js';
-import { BoxDef } from './geom_def.js';
-import { VisScene } from './vis_scene.js';
-import { Tesseract } from './highdim.js';
+} from '../util.js';
+import { BoxDef } from '../geom_def.js';
+import { Scene } from './scene.js';
+import { Tesseract } from '../highdim.js';
 
 
 const RobotParts = {
@@ -94,7 +94,7 @@ class Robot {
 }
 
 
-export class YellowRobotScene extends VisScene {
+export class YellowRobotScene extends Scene {
     constructor(context) {
         super(context, 'ogrobot', 2);
 
@@ -106,7 +106,7 @@ export class YellowRobotScene extends VisScene {
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -8, 1000);
-        this.scene = new THREE.Scene();
+        this.clear();
         this.move_clock = new BeatClock(this);
         this.half_beat_clock = new BeatClock(this);
         this.beat_clock = new BeatClock(this);
@@ -166,7 +166,7 @@ export class YellowRobotScene extends VisScene {
 
         this.all_group.position.y = 0.5;
 
-        this.scene.add(this.all_group);
+        this.add(this.all_group);
 
         /*let loader = new GLTFLoader();
         loader.load( 'static/obj/anaman.glb', function ( gltf ) {

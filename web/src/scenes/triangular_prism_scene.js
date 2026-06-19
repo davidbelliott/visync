@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     ease, BeatClock, lerp_scalar, clamp, make_wireframe_cube
-} from './util.js';
-import { InstancedGeometryCollection } from './instanced_geom.js';
+} from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
-export class TriangularPrismScene extends VisScene {
+export class TriangularPrismScene extends Scene {
     constructor(context) {
         super(context, 'rollingcube', 2, 180);
 
@@ -20,10 +20,10 @@ export class TriangularPrismScene extends VisScene {
             1000
         );
 
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000000);
+        this.clear();
+        this.background = new THREE.Color(0x000000);
         this.tri_group = new THREE.Group();
-        this.scene.add(this.tri_group);
+        this.add(this.tri_group);
 
         this.projectionPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -35,11 +35,11 @@ export class TriangularPrismScene extends VisScene {
         this.camera_rot_clock = new BeatClock(this);
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        this.scene.add(ambientLight);
+        this.add(ambientLight);
 
         const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
         directionalLight.position.set(1, 1, 1);
-        this.scene.add(directionalLight);
+        this.add(directionalLight);
 
         this.scrollSpeed = 1;
         this.scrollPosition = 0;
@@ -61,12 +61,12 @@ export class TriangularPrismScene extends VisScene {
         this.cube_group.add(this.cube_group_1);
         this.cube_group.rotation.z = Math.PI / 6;
         this.cube_group.position.z = this.prismSize * 3;
-        this.scene.add(this.cube_group);
+        this.add(this.cube_group);
         this.cube_group.visible = false;
 
         // Create the projected cube
         this.cube_projection = this.createProjectedCube();
-        this.scene.add(this.cube_projection);
+        this.add(this.cube_projection);
 
         this.rolls_per_sync = 1;
         this.camera_movement_syncs = 8;

@@ -9,33 +9,33 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { LightningStrike } from './src/lightning_strike.js';
 import { Tesseract } from './src/highdim.js';
-import { VisScene } from './src/vis_scene.js';
-import { GantryScene } from './src/gantry_scene.js';
-import { HexagonScene } from './src/hexagon_scene.js';
-import { SlideScene } from './src/slide_scene.js';
-import { SpectrumScene } from './src/spectrum_scene.js';
-import { IntroScene } from './src/intro_scene.js';
-import { IceCreamScene } from './src/ice_cream_scene.js';
-import { FastCubeScene } from './src/fast_cube_scene.js';
-import { ChineseScene } from './src/chinese_scene.js';
-import { TessellateScene } from './src/tessellate_scene.js';
-import { FastCarScene } from './src/fast_car_scene.js';
-import { CubeLockingScene } from './src/cube_locking_scene.js';
-import { YellowRobotScene } from './src/yellow_robot_scene.js';
-import { SpinningRobotsScene } from './src/spinning_robots_scene.js';
-import { DrumboxScene } from './src/drumboxes_scene.js';
-import { TracersScene } from './src/tracers_scene.js';
-import { DDRScene } from './src/ddr_scene.js';
-import { HomeBackgroundScene } from './src/home_background_scene.js';
-import { SurfacesScene } from './src/surfaces_scene.js';
-import { BackgroundSurfacesScene } from './src/bg_surfaces_scene.js';
-import { HelixScene } from './src/helix_scene.js';
-import { TriangularPrismScene } from './src/triangular_prism_scene.js';
-import { CelticKnotScene } from './src/celtic_knot_scene.js';
-import { CellularAutomataScene } from './src/cellular_automata_scene.js';
-import { TextScene } from './src/text_scene.js';
-import { ShaderScene } from './src/shader_scene.js';
-import { BuildingScene } from './src/building_scene.js';
+import { Scene } from './src/scenes/scene.js';
+import { GantryScene } from './src/scenes/gantry_scene.js';
+import { HexagonScene } from './src/scenes/hexagon_scene.js';
+import { SlideScene } from './src/scenes/slide_scene.js';
+import { SpectrumScene } from './src/scenes/spectrum_scene.js';
+import { IntroScene } from './src/scenes/intro_scene.js';
+import { IceCreamScene } from './src/scenes/ice_cream_scene.js';
+import { FastCubeScene } from './src/scenes/fast_cube_scene.js';
+import { ChineseScene } from './src/scenes/chinese_scene.js';
+import { TessellateScene } from './src/scenes/tessellate_scene.js';
+import { FastCarScene } from './src/scenes/fast_car_scene.js';
+import { CubeLockingScene } from './src/scenes/cube_locking_scene.js';
+import { YellowRobotScene } from './src/scenes/yellow_robot_scene.js';
+import { SpinningRobotsScene } from './src/scenes/spinning_robots_scene.js';
+import { DrumboxScene } from './src/scenes/drumboxes_scene.js';
+import { TracersScene } from './src/scenes/tracers_scene.js';
+import { DDRScene } from './src/scenes/ddr_scene.js';
+import { HomeBackgroundScene } from './src/scenes/home_background_scene.js';
+import { SurfacesScene } from './src/scenes/surfaces_scene.js';
+import { BackgroundSurfacesScene } from './src/scenes/bg_surfaces_scene.js';
+import { HelixScene } from './src/scenes/helix_scene.js';
+import { TriangularPrismScene } from './src/scenes/triangular_prism_scene.js';
+import { CelticKnotScene } from './src/scenes/celtic_knot_scene.js';
+import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
+import { TextScene } from './src/scenes/text_scene.js';
+import { ShaderScene } from './src/scenes/shader_scene.js';
+import { BuildingScene } from './src/scenes/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field.js';
 import { DrumKitScene } from './src/scenes/drum_scene.js';
 import { DebugScene } from './src/scenes/debug_scene.js';
@@ -247,10 +247,9 @@ function make_wireframe_sphere(radius) {
 }
 
 
-class VisOpening extends VisScene {
+class VisOpening extends Scene {
     constructor(env, pretitle, title, subtitle, start_stage) {
         super(env);
-        this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.start_stage = start_stage;
         this.stage = 0;
@@ -450,7 +449,7 @@ class GraphicsContext {
 
         // Create scenes
         this.scenes = new Map([
-            [0, new VisScene(this)],
+            [0, new Scene(this)],
             [1, new GantryScene(this)],
             [2, new HexagonScene(this)],
             [3, new SpinningRobotsScene(this)],

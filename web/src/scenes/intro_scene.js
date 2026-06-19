@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -11,11 +11,11 @@ import {
     create_instanced_cube,
     ShaderLoader,
     BeatClock,
-} from './util.js';
-import { Tesseract } from './highdim.js';
+} from '../util.js';
+import { Tesseract } from '../highdim.js';
 
 
-export class IntroScene extends VisScene {
+export class IntroScene extends Scene {
     constructor(context) {
         super(context, 'tesseract', 8);
 
@@ -35,7 +35,7 @@ export class IntroScene extends VisScene {
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new BeatClock(this);
         this.beat_clock = new BeatClock(this);
@@ -53,7 +53,7 @@ export class IntroScene extends VisScene {
         this.tesseract.rot_xz = Math.PI / 4;
         this.tesseract.rot_xw = Math.PI / 4;
 
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         this.start_rot = 0;
         this.end_rot = 0;

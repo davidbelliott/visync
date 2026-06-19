@@ -29,7 +29,7 @@ export class Binding {
 }
 
 export class Scene extends THREE.Scene {
-    constructor(context, shortname='scene') {
+    constructor(context, shortname='scene', num_states=1, max_bpm=140) {
         super();
         this.shortname = shortname;
         this.context = context;
@@ -37,8 +37,11 @@ export class Scene extends THREE.Scene {
         this.target_divisor = this.cur_divisor;
         this.bpm = 120;
         this.sync_rate_hz = this.bpm / 60 * this.cur_divisor;
-        this.max_bpm = 144;
-        this.min_bpm = 81;
+        this.max_bpm = max_bpm;
+        this.min_bpm = max_bpm / 2;
+        this.num_states = num_states;
+        this.cur_state_idx = 0;
+        this.active = false;
         this.div_change_hysteresis_bpm = 5;
         this.div_change_debounce_cnt = 4;
         this.div_change_debounce = 0;
@@ -80,8 +83,11 @@ export class Scene extends THREE.Scene {
     anim_frame(dt) {
         this.update_bindings();
         this.controls.update();
-        this.camera.zoom = 2 + Math.sin(this.get_knob_val('camera_zoom'));
-        this.camera.updateProjectionMatrix();
+        const zoom_knob = this.knobs.get('camera_zoom');
+        if (zoom_knob) {
+            this.camera.zoom = 2 + Math.sin(zoom_knob.cur_val);
+            this.camera.updateProjectionMatrix();
+        }
         this.children.forEach((child) => {
             if (child.anim_frame) {
                 child.anim_frame(dt);

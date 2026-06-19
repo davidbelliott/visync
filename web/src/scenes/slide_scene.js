@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 
 
-export class SlideScene extends VisScene {
+export class SlideScene extends Scene {
     constructor(context, img_paths) {
         super(context, 'slides', img_paths.length);
+        this.camera = this.cam_persp;   // Scene defaults to cam_orth; preserve original cam_persp
         this.img_paths = img_paths;
         this.imgbox = document.getElementById("imgbox");
         const img = document.createElement('img');

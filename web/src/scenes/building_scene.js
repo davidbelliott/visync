@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
@@ -12,8 +12,8 @@ import {
     arr_eq,
     Spark,
     BeatClock
-} from './util.js';
-import { InstancedGeometryCollection } from './instanced_geom.js';
+} from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 const CUBE_WAVE_SPEED = 1.5;
 const NUM_CUBES_PER_SIDE = 10;
@@ -252,7 +252,7 @@ class Gantry {
 }
 
 
-export class BuildingScene extends VisScene {
+export class BuildingScene extends Scene {
     constructor(context) {
         super(context, 'building');
 
@@ -263,7 +263,7 @@ export class BuildingScene extends VisScene {
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
-        this.scene = new THREE.Scene();
+        this.clear();
         this.clock = new THREE.Clock(true);
         this.rot_clock = new BeatClock(this);
         this.zoom_clock = new BeatClock(this);
@@ -385,7 +385,7 @@ export class BuildingScene extends VisScene {
         this.base_group.rotation.y = Math.PI / 4.0;
 
         this.base_group.add(this.cubes_group);
-        this.scene.add(this.base_group);
+        this.add(this.base_group);
 
         this.camera = this.cam_orth;
         this.camera.position.y = this.cube_base_size * (12 + 18) / 2;

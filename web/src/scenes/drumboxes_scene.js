@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VisScene } from './vis_scene.js';
+import { Scene } from './scene.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import {
     lerp_scalar,
@@ -12,8 +12,8 @@ import {
     create_instanced_cube,
     ShaderLoader,
     BeatClock
-} from './util.js';
-import { InstancedGeometryCollection } from './instanced_geom.js';
+} from '../util.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 const COLOR_CHANGE_RATES = [0.00, 0.00, 0.04, 0.08];
 const START_COLOR = new THREE.Color("red");
@@ -259,7 +259,7 @@ class PaddleGroup extends THREE.Group {
     }
 }
 
-export class DrumboxScene extends VisScene {
+export class DrumboxScene extends Scene {
     constructor(context) {
         super(context, 'drumbox', 3);
         const width = window.innerWidth;
@@ -363,8 +363,8 @@ export class DrumboxScene extends VisScene {
         this.camera.rotation.x = Math.PI / 4;
 
 
-        this.scene = new THREE.Scene();
-        this.scene.add(this.base_group);
+        this.clear();
+        this.add(this.base_group);
 
 
         //this.light2 = new THREE.AmbientLight("white", 0.10);

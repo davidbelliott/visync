@@ -484,12 +484,12 @@ async def main_loop_fake_knobs(bpm):
     """Continuously broadcast fake control-change messages for 16 phase-offset
     sinusoids, independent of the sync clock, for smooth knob motion."""
     beat_s = 60.0 / bpm
-    period_s = FAKE_KNOB_PERIOD_BEATS * beat_s
     start_time = time.time()
+    period_s = [(1 + random.random()) * FAKE_KNOB_PERIOD_BEATS * beat_s for i in range(FAKE_KNOB_COUNT)]
     while True:
         elapsed = time.time() - start_time
         for knob in range(FAKE_KNOB_COUNT):
-            phase = 2 * math.pi * (elapsed - knob * beat_s) / period_s
+            phase = 2 * math.pi * (elapsed - knob * beat_s) / period_s[knob]
             # Normalized [0, 1] value, left unquantized for smooth motion.
             value = (math.sin(phase) + 1) / 2
             cc_msg = MsgControlChange(last_msg_latency, knob, value)

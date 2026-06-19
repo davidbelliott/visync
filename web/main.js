@@ -38,6 +38,7 @@ import { ShaderScene } from './src/shader_scene.js';
 import { BuildingScene } from './src/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field.js';
 import { DrumKitScene } from './src/scenes/drum_scene.js';
+import { DebugScene } from './src/scenes/debug_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -51,6 +52,7 @@ import {
     clamp
 } from './src/util.js';
 import { BoxDef } from './src/geom_def.js';
+import { WebsocketController } from './src/controller.js';
 
 import "./src/normalize.css";
 import "./src/style.css";
@@ -85,15 +87,18 @@ var stats = new Stats();
 window.addEventListener("load", init);
 
 
-function connect() {
-    //const socket = new WebSocket(`ws://192.168.1.235:8080`);
-    //let pathname = window.location.pathname;
-    //pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+// URL of the relay that carries all top-level messages (sync, beat, scene
+// changes, control changes, ...). Controllers can connect to this same relay.
+function relay_url() {
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
     const host = window.location.hostname;
-    const relay_url = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
-    //const relay_url = '192.168.5.1/ws/';
-    const socket = new WebSocket(`${protocol}://${relay_url}`);
+    const path = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
+    return `${protocol}://${path}`;
+}
+
+
+function connect() {
+    const socket = new WebSocket(relay_url());
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -436,6 +441,13 @@ class GraphicsContext {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
 
+        // Controllers providing live input (knobs/wheels) over WebSockets.
+        // Created before scenes so scenes can bind to controller knobs.
+        this.controllers = new Map([
+            ["kinect", new WebsocketController(this, "ws://localhost:8766")],
+            ["midi", new WebsocketController(this, relay_url())],
+        ]);
+
         // Create scenes
         this.scenes = new Map([
             [0, new VisScene(this)],
@@ -464,6 +476,7 @@ class GraphicsContext {
             //[21, new TextScene(this)],
             [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
             [23, new DrumKitScene(this)],
+            [24, new DebugScene(this)],
             //[20, new CelticKnotScene(this)],
         ]);
 

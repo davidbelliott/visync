@@ -3,6 +3,7 @@ import asyncio
 from collections import deque
 from enum import Enum
 import json
+import math
 import time
 import serial_asyncio
 import pathlib
@@ -23,6 +24,13 @@ NUM_BPM_SAMPLES = 16 * 24
 
 LOG_MSGS = False
 LOG_SYNC = False
+
+# Fake control-change knobs: 16 sinusoids with a period of 4 bars (16 beats),
+# each phase-shifted by one beat. Sent at a fixed high rate (independent of the
+# sync clock) to give the impression of continuous movement.
+FAKE_KNOB_COUNT = 16
+FAKE_KNOB_PERIOD_BEATS = 16
+FAKE_KNOB_UPDATE_HZ = 60
 
 if USE_LEDS:
     from blink import led_update_loop, led_handle_msgs
@@ -468,6 +476,22 @@ async def main_loop_fake(bpm, cycle=0):
         await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
+async def main_loop_fake_knobs(bpm):
+    """Continuously broadcast fake control-change messages for 16 phase-offset
+    sinusoids, independent of the sync clock, for smooth knob motion."""
+    beat_s = 60.0 / bpm
+    period_s = FAKE_KNOB_PERIOD_BEATS * beat_s
+    start_time = time.time()
+    while True:
+        elapsed = time.time() - start_time
+        for knob in range(FAKE_KNOB_COUNT):
+            phase = 2 * math.pi * (elapsed - knob * beat_s) / period_s
+            value = round((math.sin(phase) + 1) / 2 * 127)
+            cc_msg = MsgControlChange(last_msg_latency, knob, value)
+            websockets.broadcast(connected, cc_msg.to_json())
+        await asyncio.sleep(1.0 / FAKE_KNOB_UPDATE_HZ)
+
+
 async def main_loop_audio(device):
     loop = asyncio.get_running_loop()
     def on_beat(channel, latency_s):
@@ -518,6 +542,7 @@ async def main():
                 t1 = tg.create_task(main_loop_audio(args.audio))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
+                t_knobs = tg.create_task(main_loop_fake_knobs(args.fake))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())

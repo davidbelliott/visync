@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
+import { Knob } from '../controller.js';
 import {
     lerp_scalar,
     ease,
@@ -11,12 +12,19 @@ import {
     clamp
 } from '../util.js';
 
-export class Knob {
-    constructor(min_val=0, max_val=1, default_val=0) {
-        this.min_val = min_val;
-        this.max_val = max_val;
-        this.default_val = this.cur_val;
-        this.cur_val = default_val;
+// Connects a controller Knob to a scene property. Evaluated each frame (pull
+// model): the binding reads the knob's normalized value, runs it through an
+// optional transform, and applies the result. Many bindings may reference the
+// same knob, giving a one-knob -> many-properties mapping.
+export class Binding {
+    constructor(knob, apply, transform = (x) => x) {
+        this.knob = knob;
+        this.apply = apply;            // (value) => void
+        this.transform = transform;    // norm 0..1 -> target value
+    }
+
+    update() {
+        this.apply(this.transform(this.knob.norm));
     }
 }
 
@@ -44,6 +52,9 @@ export class Scene extends THREE.Scene {
         this.prev_sync_idx = 0;
 
         this.knobs = new Map();
+
+        // Controller-knob -> property bindings, evaluated every frame.
+        this.bindings = [];
     }
 
     add_knob(name, min_val=0.0, max_val=1.0, default_val=0.0) {
@@ -54,7 +65,20 @@ export class Scene extends THREE.Scene {
         return this.knobs.get(name).cur_val;
     }
 
+    // Bind a knob from one of the context's controllers to a scene property.
+    // `apply` receives the transformed (default: normalized 0..1) value.
+    bind(controller_name, knob_idx, apply, transform) {
+        const controller = this.context.controllers.get(controller_name);
+        const knob = controller.knobs.get(knob_idx);
+        this.bindings.push(new Binding(knob, apply, transform));
+    }
+
+    update_bindings() {
+        this.bindings.forEach((b) => b.update());
+    }
+
     anim_frame(dt) {
+        this.update_bindings();
         this.controls.update();
         this.camera.zoom = 2 + Math.sin(this.get_knob_val('camera_zoom'));
         this.camera.updateProjectionMatrix();

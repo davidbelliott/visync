@@ -129,12 +129,10 @@ class MinimalDetector:
 
         if kick_spike > KICK_SPIKE_THRESHOLD and kick_energy > KICK_ENERGY_MIN and (now - self.last_kick_time) > self.cooldown_s:
             self.last_kick_time = now
-            print(f"  KICK   k_spike={kick_spike:.2f}  k_e={kick_energy:.1f}  s_e={snare_energy:.1f}")
             if self.on_beat: self.on_beat(1, latency_s)
 
         if snare_spike > SNARE_SPIKE_THRESHOLD and snare_energy > SNARE_ENERGY_MIN and (now - self.last_snare_time) > self.cooldown_s:
             self.last_snare_time = now
-            print(f"  SNARE  s_e={snare_energy:.1f}  s_spike={snare_spike:.2f}  k_e={kick_energy:.1f}")
             if self.on_beat: self.on_beat(4, latency_s)
 
     def _audio_callback(self, indata, frames, time_info, status):
@@ -279,11 +277,14 @@ class PredictiveBeatDetector:
     GRID_TOL_S        = 0.060  # ±60ms on-grid tolerance (covers FFT windowing jitter)
     LOCK_SCORE        = 0.70   # fraction of kicks on-grid required to lock
     UNLOCK_SCORE      = 0.50   # fraction of recent kicks on-grid to stay locked
-    UNLOCK_WINDOW     = 8      # sliding window size for unlock check
+    UNLOCK_WINDOW     = 16     # sliding window size for unlock check
     PPQN              = 24     # sync pulses per quarter note
     ANTICIPATION_S    = 0.10   # fire beat messages this far ahead of the expected beat
     ANTICIP_WINDOW    = 16     # sliding window size for false-positive accuracy
     ANTICIP_THRESHOLD = 0.60   # pause anticipation if TP/(TP+FP) drops below this
+    PATTERN_LEN       = 16     # 16th notes per pattern bar
+    MIN_PATTERN_BARS  = 4      # bars of data required before pattern is used
+    PATTERN_HIT_FRAC  = 0.50   # fraction of bars a slot must be hit to appear in pattern
 
     def __init__(self, on_beat=None, on_sync=None):
         self.on_beat = on_beat
@@ -308,11 +309,14 @@ class PredictiveBeatDetector:
         # Anticipatory beat state
         self._anticipating = False
         self._upcoming = []          # list of _AnticipatedBeat
-        self._kick_sched_t = None    # last kick time added to _upcoming
-        self._snare_sched_t = None   # last snare time added to _upcoming
-        self._snare_times = []       # rolling buffer for snare phase estimation
-        self._snare_phase = None     # snare offset within beat_s (seconds); None = unknown
-        self._anticip_outcomes = []  # [bool]: True=TP, False=FP (only for sent beats)
+        self._anticip_outcomes = []  # [bool]: True=TP, False=FP (kick beats only)
+
+        # Beat pattern: 16th-note histogram → sorted [(slot, channel), ...]
+        self._hit_counts = {}        # (slot, channel) -> int
+        self._bars_seen = 0          # complete bars accumulated so far
+        self._pattern = None         # learned pattern; None = not yet ready
+        self._sched_rep = None       # bar-repetition index of scheduling cursor
+        self._sched_slot_i = -1      # slot index within that rep
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -330,14 +334,6 @@ class PredictiveBeatDetector:
         with self._mu:
             # Try to confirm an anticipated beat (matches only sent beats)
             confirmed = self._try_confirm(beat_time, channel)
-
-            # Track snare timing for phase estimation
-            if channel == 4:
-                self._snare_times.append(beat_time)
-                if len(self._snare_times) > 32:
-                    self._snare_times = self._snare_times[-32:]
-                if self.locked and self._beat_s:
-                    self._update_snare_phase()
 
             # Kicks drive tempo estimation
             if channel == 1:
@@ -361,9 +357,12 @@ class PredictiveBeatDetector:
                         self._apply_lock(beat_s, origin_s, score)
                         do_unlock = False   # fresh lock cancels any pending unlock
 
-        # Send reactively only if not confirmed by an anticipated beat
-        if not confirmed and self.on_beat:
-            self.on_beat(channel, latency_s)
+            # Learn beat pattern from all detected events (kick + snare)
+            self._learn_pattern(beat_time, channel)
+
+        # DEBUG: only send anticipated beats; comment back in for normal operation
+        # if not confirmed and self.on_beat:
+        #     self.on_beat(channel, latency_s)
 
         if do_unlock:
             with self._mu:
@@ -371,11 +370,28 @@ class PredictiveBeatDetector:
                     self.locked = False
                     self._anticipating = False
                     self._upcoming = []
-                    self._kick_sched_t = None
-                    self._snare_sched_t = None
+                    self._sched_rep = None
                     self._grid_window = []
-                    print(f"  [predict] Unlocked. "
-                          f"Sync-only at {60/self._beat_s:.1f} BPM until new lock.")
+                    # Keep _pattern, _hit_counts, _bars_seen so that when we
+                    # re-lock at the same BPM the learned pattern is immediately
+                    # available rather than having to re-learn from scratch.
+                    # _apply_lock already wipes these on a real BPM change.
+                    print("Unlocked")
+
+    # ── Pattern display ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _pattern_grid(pattern):
+        """Return a two-line musical grid for the learned pattern.
+        Top line = snare (ch 4), bottom line = kick (ch 1).
+        16 slots grouped into 4 beats separated by two spaces.
+        """
+        pat_set = set(pattern)
+        snare = ['x' if (s, 4) in pat_set else '.' for s in range(16)]
+        kick  = ['x' if (s, 1) in pat_set else '.' for s in range(16)]
+        def fmt(row):
+            return '  '.join(' '.join(row[i:i+4]) for i in range(0, 16, 4))
+        return f"  snare  {fmt(snare)}\n   kick  {fmt(kick)}"
 
     # ── Grid check ────────────────────────────────────────────────────────────
 
@@ -385,13 +401,16 @@ class PredictiveBeatDetector:
         return min(phase, self._beat_s - phase) < self.GRID_TOL_S
 
     def _try_confirm(self, beat_time, channel):
-        """Match a real beat to the nearest sent-but-unconfirmed anticipated beat.
-        Returns True if confirmed (caller should suppress reactive send).
+        """Match a real beat to the nearest due-but-unconfirmed anticipated beat.
+        Returns True only if the beat was also sent (so reactive send is suppressed).
+        Matching on 'due' rather than 'sent' keeps accuracy tracking alive even when
+        anticipation is temporarily disabled — preventing a permanent deadlock where
+        no outcomes are ever recorded and _anticipating can never recover.
         Called with _mu held.
         """
         best, best_dist = None, float('inf')
         for ab in self._upcoming:
-            if ab.channel != channel or ab.confirmed or not ab.sent:
+            if ab.channel != channel or ab.confirmed or not ab.due:
                 continue
             dist = abs(beat_time - ab.expected_time)
             if dist < best_dist:
@@ -399,19 +418,38 @@ class PredictiveBeatDetector:
                 best = ab
         if best is not None and best_dist < self.GRID_TOL_S:
             best.confirmed = True
-            return True
+            return best.sent  # only suppress reactive send if beat was actually transmitted
         return False
 
-    def _update_snare_phase(self):
-        """Update snare phase estimate using circular mean. Called with _mu held."""
-        if len(self._snare_times) < 3:
+    def _learn_pattern(self, beat_time, channel):
+        """Update the 16th-note pattern histogram from a detected event.
+        Called with _mu held.  Pattern is stored as a sorted list of
+        (slot, channel) pairs; it is updated whenever the histogram changes
+        enough to alter the set of qualifying slots.
+        """
+        if not self.locked or not self._beat_s:
             return
-        phases = [(t - self._origin_s) % self._beat_s for t in self._snare_times[-16:]]
-        angles = [p / self._beat_s * 2 * math.pi for p in phases]
-        sin_m = sum(math.sin(a) for a in angles) / len(angles)
-        cos_m = sum(math.cos(a) for a in angles) / len(angles)
-        mean_angle = math.atan2(sin_m, cos_m) % (2 * math.pi)
-        self._snare_phase = mean_angle / (2 * math.pi) * self._beat_s
+        sixteenth_s = self._beat_s / 4
+        rel = beat_time - self._origin_s
+        if rel < 0:
+            return
+        slot = int(round(rel / sixteenth_s)) % self.PATTERN_LEN
+        bar_idx = int(rel / (sixteenth_s * self.PATTERN_LEN))
+        key = (slot, channel)
+        self._hit_counts[key] = self._hit_counts.get(key, 0) + 1
+        if bar_idx + 1 > self._bars_seen:
+            self._bars_seen = bar_idx + 1
+        if self._bars_seen >= self.MIN_PATTERN_BARS:
+            threshold = max(1, self._bars_seen * self.PATTERN_HIT_FRAC)
+            new_pat = sorted(k for k, v in self._hit_counts.items() if v >= threshold)
+            if new_pat != self._pattern:
+                self._pattern = new_pat
+                # Don't clear _upcoming or reset _sched_rep here — the scheduler
+                # walks the new pattern naturally from the current cursor position,
+                # picking up newly added slots in the next bar repetition.
+                # Clearing _upcoming here would prevent beats from ever firing
+                # during initial learning (pattern changes on every kick).
+                print(self._pattern_grid(new_pat))
 
     # ── Tempo estimation ──────────────────────────────────────────────────────
 
@@ -507,17 +545,19 @@ class PredictiveBeatDetector:
 
         if bpm_changed:
             self._upcoming = []
-            self._kick_sched_t = None
-            self._snare_sched_t = None
+            self._sched_rep = None
+            self._pattern = None
+            self._hit_counts = {}
+            self._bars_seen = 0
 
         bpm = 60.0 / beat_s
         if not prev_locked:
             self._anticipating = True
             self._anticip_outcomes = []
-            print(f"  [predict] Locked! {bpm:.1f} BPM  score={score:.0%}")
+            print(f"Locked  {bpm:.1f} BPM")
         elif bpm_changed:
             self._anticipating = True
-            print(f"  [predict] BPM updated: {bpm:.1f}  score={score:.0%}")
+            print(f"Locked  {bpm:.1f} BPM")
 
         # Re-align sync clock phase to new grid.
         # _next_sync_s is updated so ticks stay phase-accurate after a BPM change,
@@ -555,41 +595,42 @@ class PredictiveBeatDetector:
                     next_wake = now + 0.005
 
                 # ── Anticipatory beat scheduling ────────────────────────────────
-                if self.locked and self._beat_s:
+                if self.locked and self._beat_s and self._pattern:
                     beat_s = self._beat_s
                     origin_s = self._origin_s
-                    look = beat_s * 8
+                    sixteenth_s = beat_s / 4
+                    pattern_s = sixteenth_s * self.PATTERN_LEN
+                    look = pattern_s * 4   # schedule 4 bars ahead
 
-                    # Extend kick schedule up to look-ahead
-                    if self._kick_sched_t is None:
-                        k = math.ceil((now - origin_s) / beat_s)
-                        self._kick_sched_t = origin_s + (k - 1) * beat_s
-                    t = self._kick_sched_t
-                    while t < now + look:
-                        t += beat_s
-                        self._upcoming.append(_AnticipatedBeat(t, 1))
-                    self._kick_sched_t = t
+                    # Initialise cursor at the current bar if needed
+                    if self._sched_rep is None:
+                        self._sched_rep = max(0, math.floor(
+                            (now - origin_s) / pattern_s))
+                        self._sched_slot_i = -1
 
-                    # Extend snare schedule if phase is known
-                    if self._snare_phase is not None:
-                        snare_ref = origin_s + self._snare_phase
-                        if self._snare_sched_t is None:
-                            k = math.ceil((now - snare_ref) / beat_s)
-                            self._snare_sched_t = snare_ref + (k - 1) * beat_s
-                        t = self._snare_sched_t
-                        while t < now + look:
-                            t += beat_s
-                            self._upcoming.append(_AnticipatedBeat(t, 4))
-                        self._snare_sched_t = t
+                    # Walk (rep, slot) pairs until we fill the look-ahead window
+                    while True:
+                        next_slot_i = self._sched_slot_i + 1
+                        next_rep    = self._sched_rep
+                        if next_slot_i >= len(self._pattern):
+                            next_slot_i = 0
+                            next_rep   += 1
+                        slot_idx, ch = self._pattern[next_slot_i]
+                        t = origin_s + next_rep * pattern_s + slot_idx * sixteenth_s
+                        if t > now + look:
+                            break
+                        self._sched_rep    = next_rep
+                        self._sched_slot_i = next_slot_i
+                        if t > now:   # skip beats that already happened
+                            self._upcoming.append(_AnticipatedBeat(t, ch))
 
                     # Fire beats that are due (ANTICIPATION_S before expected time)
                     for ab in self._upcoming:
                         if not ab.due and not ab.confirmed:
                             if now >= ab.expected_time - self.ANTICIPATION_S:
                                 ab.due = True
-                                if self._anticipating:
-                                    ab.sent = True   # only set when on_beat is actually called
-                                    beats_to_fire.append((ab.channel, -self.ANTICIPATION_S))
+                                ab.sent = True
+                                beats_to_fire.append((ab.channel, -self.ANTICIPATION_S))
 
                     # Expire old beats and record kick outcomes only.
                     # Snare outcomes are intentionally excluded: spurious snare detections
@@ -599,7 +640,7 @@ class PredictiveBeatDetector:
                     new_outcomes = False
                     for ab in self._upcoming:
                         if ab.expected_time + self.GRID_TOL_S < now:
-                            if ab.sent and ab.channel == 1:
+                            if ab.due and ab.channel == 1:
                                 self._anticip_outcomes.append(ab.confirmed)
                                 if len(self._anticip_outcomes) > self.ANTICIP_WINDOW:
                                     self._anticip_outcomes = self._anticip_outcomes[-self.ANTICIP_WINDOW:]
@@ -609,15 +650,6 @@ class PredictiveBeatDetector:
                             new_upcoming.append(ab)
                     self._upcoming = new_upcoming
 
-                    # Update anticipation enable/disable based on accuracy
-                    if new_outcomes and len(self._anticip_outcomes) >= 4:
-                        accuracy = sum(self._anticip_outcomes) / len(self._anticip_outcomes)
-                        if self._anticipating and accuracy < self.ANTICIP_THRESHOLD:
-                            self._anticipating = False
-                            print(f"  [predict] Anticipation paused: accuracy={accuracy:.0%}")
-                        elif not self._anticipating and accuracy >= self.ANTICIP_THRESHOLD:
-                            self._anticipating = True
-                            print(f"  [predict] Anticipation resumed: accuracy={accuracy:.0%}")
 
             # Fire beats outside the mutex
             for channel, latency in beats_to_fire:

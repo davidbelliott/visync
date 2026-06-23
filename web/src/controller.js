@@ -12,6 +12,18 @@ export class Knob {
     }
 }
 
+export class Binding {
+    constructor(knob, apply, transform = (x) => x) {
+        this.knob = knob;
+        this.apply = apply;            // (value) => void
+        this.transform = transform;    // norm 0..1 -> target value
+    }
+
+    update() {
+        this.apply(this.transform(this.knob.cur_val));
+    }
+}
+
 // Abstract interface for some sort of controller (MIDI device, Kinect, etc).
 // A controller exposes a set of named Knobs and reacts to incoming events.
 export class Controller {

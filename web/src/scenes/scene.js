@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
+import { Binding } from '../controller.js';
 import {
     lerp_scalar,
     ease,
@@ -10,22 +11,6 @@ import {
     arr_eq,
     clamp
 } from '../util.js';
-
-// Connects a controller Knob to a scene property. Evaluated each frame (pull
-// model): the binding reads the knob's normalized value, runs it through an
-// optional transform, and applies the result. Many bindings may reference the
-// same knob, giving a one-knob -> many-properties mapping.
-export class Binding {
-    constructor(knob, apply, transform = (x) => x) {
-        this.knob = knob;
-        this.apply = apply;            // (value) => void
-        this.transform = transform;    // norm 0..1 -> target value
-    }
-
-    update() {
-        this.apply(this.transform(this.knob.cur_val));
-    }
-}
 
 export class Scene extends THREE.Scene {
     constructor(context, shortname='scene', num_states=1, max_bpm=140) {

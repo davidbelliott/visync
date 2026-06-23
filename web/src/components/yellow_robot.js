@@ -103,7 +103,7 @@ export class YellowRobot extends Component {
                     this.inst_cubes.create_geom(tmp, this.cube_color, rest_pose[k].scale, 0, alpha);
                 }
 
-                const circle = make_wireframe_circle(6, 32, new THREE.Color("yellow"));
+                const circle = make_wireframe_circle(6, 32, new THREE.Color("cyan"));
                 // These ground circles are transparent and overlap nearly
                 // coplanar, so depth-writing makes whichever draws first cull
                 // the others (a dim outer circle can occlude a brighter inner

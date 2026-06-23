@@ -52,7 +52,7 @@ import {
     clamp
 } from './src/util.js';
 import { BoxDef } from './src/geom_def.js';
-import { WebsocketController } from './src/controller.js';
+import { WebsocketController, Binding } from './src/controller.js';
 
 import "./src/normalize.css";
 import "./src/style.css";
@@ -139,19 +139,6 @@ function connect() {
             context.handle_beat(est_tot_latency, msg.channel);
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
-        } else if (type == MSG_TYPE_CONTROL_CHANGE) {
-            console.log("control change");
-            console.log(msg);
-            // msg.value is normalized [0, 1]; map across the available scenes.
-            const scene_idx = Math.min(context.scenes.size - 1,
-                Math.floor(msg.value * context.scenes.size));
-            if (msg.wheel_idx == 1) {
-                // Foreground scene
-                context.change_scene(scene_idx, false);
-            } else if (msg.wheel_idx == 2) {
-                // Background scene
-                context.change_scene(scene_idx, true);
-            }
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);
         }
@@ -446,7 +433,7 @@ class GraphicsContext {
         // Controllers providing live input (knobs/wheels) over WebSockets.
         // Created before scenes so scenes can bind to controller knobs.
         this.controllers = new Map([
-            ["kinect", new WebsocketController(this, "ws://localhost:8766")],
+            ["apc", new WebsocketController(this, "ws://localhost:8766")],
             ["midi", new WebsocketController(this, relay_url())],
         ]);
 
@@ -481,6 +468,21 @@ class GraphicsContext {
             [24, new DebugScene(this)],
             //[20, new CelticKnotScene(this)],
         ]);
+
+        // Scene selection is driven by controller knobs 14 (foreground) and
+        // 15 (background). Each knob's normalized [0, 1] value maps across the
+        // available scenes. Evaluated every frame in anim_frame().
+        {
+            const apc = this.controllers.get("apc");
+            const to_scene_idx = (norm) => Math.min(this.scenes.size - 1,
+                Math.floor(norm * this.scenes.size));
+            this.scene_bindings = [
+                new Binding(apc.knobs.get(14),
+                    (idx) => this.change_scene(idx, false), to_scene_idx),
+                new Binding(apc.knobs.get(15),
+                    (idx) => this.change_scene(idx, true), to_scene_idx),
+            ];
+        }
 
         // Array of scenes on-screen, which are rendered sequentially first-to-last.
         this.shown_scenes = [];
@@ -571,6 +573,7 @@ class GraphicsContext {
 
     anim_frame() {
         const dt = this.clock.getDelta();
+        this.scene_bindings.forEach((b) => b.update());
         this.shown_scenes.forEach((idx) => {
             this.scenes.get(idx).anim_frame(dt);
         });
@@ -670,6 +673,38 @@ class GraphicsContext {
             hud_div.innerHTML = scene_name_pad;
         }
         return popped_idx;
+    }
+
+    change_scene(scene_idx, bg = false) {
+        if (!this.scenes.has(scene_idx)) {
+            return;
+        }
+
+        // Keep exactly one background and one foreground scene on-screen, in
+        // [background, foreground] render order. Changing one leaves the other
+        // (whatever was already shown) untouched; any extra scenes are dropped.
+        const cur_bg = this.shown_scenes[0];
+        const cur_fg = this.shown_scenes[this.shown_scenes.length - 1];
+        const new_bg = bg ? scene_idx : cur_bg;
+        const new_fg = bg ? cur_fg : scene_idx;
+
+        const new_shown = [];
+        if (new_bg !== undefined) new_shown.push(new_bg);
+        if (new_fg !== undefined) new_shown.push(new_fg);
+
+        // Deactivate scenes leaving the screen; activate newly-shown ones.
+        this.shown_scenes.forEach((idx) => {
+            if (!new_shown.includes(idx)) {
+                this.scenes.get(idx).deactivate();
+            }
+        });
+        new_shown.forEach((idx) => {
+            if (!this.shown_scenes.includes(idx)) {
+                this.scenes.get(idx).activate();
+            }
+        });
+
+        this.shown_scenes = new_shown;
     }
 
     advance_state(steps) {

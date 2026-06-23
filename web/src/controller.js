@@ -71,6 +71,7 @@ export class WebsocketController extends Controller {
 
     on_message(e) {
         const msg = JSON.parse(e.data);
+        console.log(msg)
         this.handle_message(msg);
     }
 

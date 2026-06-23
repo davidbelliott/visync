@@ -50,9 +50,9 @@ export class YellowRobotScene extends Scene {
         // MIDI knob 3 -> x spacing (0..8), knob 4 -> y spacing (0..8).
         // Evaluated every frame as part of update_bindings(), so turning a
         // knob updates the grid spacing live.
-        this.bind('midi', 3, (v) => { this.robot.spread_x = v; },
+        this.bind('apc', 3, (v) => { this.robot.spread_x = v; },
             (norm) => norm * 8);
-        this.bind('midi', 4, (v) => { this.robot.spread_y = v; },
+        this.bind('apc', 4, (v) => { this.robot.spread_y = v; },
             (norm) => norm * 8);
 
         this.cam_persp.position.set(0, 0, 8);

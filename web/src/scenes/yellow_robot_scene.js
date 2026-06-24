@@ -2,13 +2,22 @@ import * as THREE from 'three';
 import {
     update_persp_camera_aspect,
     update_orth_camera_aspect,
-    rand_int,
-    arr_eq,
     BeatClock
 } from '../util.js';
 import { Scene } from './scene.js';
 import { YellowRobot } from '../components/yellow_robot.js';
 import { Tesseract } from '../highdim.js';
+
+
+// Rotation is tracked in "divisions": ROT_DIV units == pi radians (180 deg).
+const ROT_DIV = 512;
+// Knob-driven targets snap to multiples of 45 deg (= pi/4 = ROT_DIV/4 units).
+const SNAP_UNITS = ROT_DIV / 4;
+// Each knob sweeps a full turn (360 deg) across its 0..1 range, in 45 deg steps.
+const SNAP_STEPS = 8;
+// norm 0..1 -> nearest 45 deg multiple, in rotation units.
+// (negate to match physical knob rotation direction)
+const snap_to_45 = (norm) => Math.round(-norm * SNAP_STEPS) * SNAP_UNITS;
 
 
 export class YellowRobotScene extends Scene {
@@ -24,11 +33,15 @@ export class YellowRobotScene extends Scene {
             this.frustum_size / 2,
             -this.frustum_size / 2, -8, 1000);
         this.clear();
-        this.move_clock = new BeatClock(this);
+        // One move_clock per rotation axis; each is (re)started when that
+        // axis's target changes, so the two axes interpolate independently.
+        this.move_clocks = [new BeatClock(this), new BeatClock(this)];
 
-        this.start_rot = [0, 0];
-        this.target_rot = [0, 0];
-        this.rot = [0, 512 / 2];
+        this.rot = [0, ROT_DIV / 2];
+        // Start the targets where the rotation already is, so nothing moves
+        // until a knob asserts a new target.
+        this.start_rot = [...this.rot];
+        this.target_rot = [...this.rot];
 
         this.tesseract_group = new THREE.Group();
         this.tesseract = new Tesseract(this.tesseract_group, 4);
@@ -55,6 +68,13 @@ export class YellowRobotScene extends Scene {
         this.bind('apc', 4, (v) => { this.robot.spread_y = v; },
             (norm) => norm * 8);
 
+        // APC knobs 8 and 9 drive the two rotation-axis targets. Each knob's
+        // 0..1 range sweeps a full turn, snapped to the nearest 45 deg.
+        // Evaluated every frame; set_target_axis ignores no-op repeats and
+        // only restarts an axis when its snapped target actually changes.
+        this.bind('apc', 8, (v) => this.set_target_axis(1, v), snap_to_45);
+        this.bind('apc', 9, (v) => this.set_target_axis(0, v), snap_to_45);
+
         this.cam_persp.position.set(0, 0, 8);
         this.cam_orth.position.set(0, 0, 8);
 
@@ -65,62 +85,40 @@ export class YellowRobotScene extends Scene {
         update_persp_camera_aspect(this.cam_persp, aspect);
     }
 
-    handle_sync(t, bpm, beat) {
-        const snap_mult = 64;
-        if (rand_int(0, 4) == 0) {//(song_beat != song_beat_prev && song_beat % 2 == 0 || paused) {// && rand_int(0, 2) == 0) {
-            // if close enough, can clear the existing movement to start a new one
-            if (this.go_to_target) {
-                const manhattan_dist = Math.abs(this.target_rot[0] - this.rot[0]) +
-                    Math.abs(this.target_rot[1] - this.rot[1]);
-                if (manhattan_dist <= 8) {
-                    this.go_to_target = false;
-                }
-            }
-            // if done moving to target, start a new movement
-            if (!this.go_to_target) {
-                for (var i = 0; i < 2; i++) {
-                    this.start_rot[i] = Math.round(this.rot[i] / snap_mult) * snap_mult;
-                }
-                let motion_idx = rand_int(0, 8);   // -1, 0, 1 about 2 axes, but no 0, 0
-                if (motion_idx > 3) {
-                    motion_idx += 1;            // make it 0-8 (9 options) for ease
-                }
-                let rot_dirs = [motion_idx % 3 - 1, Math.floor(motion_idx / 3) - 1];
-                this.target_rot = [(Math.round(this.start_rot[0] / snap_mult) + rot_dirs[0]) * snap_mult,
-                    (Math.round(this.start_rot[1] / snap_mult) + rot_dirs[1]) * snap_mult];
-                this.go_to_target = true;
-                this.move_clock.start();
-            }
+    // Point one rotation axis at a new target. Recording start_rot and
+    // (re)starting that axis's move_clock together restarts interpolation
+    // cleanly from wherever the axis currently is.
+    set_target_axis(axis, target) {
+        if (target === this.target_rot[axis]) {
+            return;
         }
-
-        // Drive the robot grid's dance.
-        super.handle_sync(t, bpm, beat);
+        this.start_rot[axis] = this.rot[axis];
+        this.target_rot[axis] = target;
+        this.move_clocks[axis].start();
     }
 
     anim_frame(dt) {
-        const div = 512;    // # of divisions per pi radians
-
         this.tesseract.rot_xw -= 0.05;
         this.tesseract.update_geom();
 
-        if (this.go_to_target) {
-            let elapsed = this.move_clock.getElapsedBeats();
-            for (var i = 0; i < 2; i++) {
-                const ang_vel = (this.target_rot[i] - this.start_rot[i]);
-                const sign_before = Math.sign(this.target_rot[i] - this.rot[i]);
-                this.rot[i] = this.start_rot[i] + ang_vel * elapsed;
-                const sign_after = Math.sign(this.target_rot[i] - this.rot[i]);
-                if (sign_after != sign_before) {
-                    this.rot[i] = this.target_rot[i];
-                }
+        // Interpolate every axis whose current rotation hasn't reached its
+        // target, each at a constant angular velocity timed by its own clock.
+        for (let i = 0; i < 2; i++) {
+            if (this.rot[i] === this.target_rot[i]) {
+                continue;
             }
-            if (arr_eq(this.rot, this.target_rot)) {
-                this.go_to_target = false;
+            const elapsed = this.move_clocks[i].getElapsedBeats();
+            const ang_vel = this.target_rot[i] - this.start_rot[i];
+            const sign_before = Math.sign(this.target_rot[i] - this.rot[i]);
+            this.rot[i] = this.start_rot[i] + ang_vel * elapsed;
+            const sign_after = Math.sign(this.target_rot[i] - this.rot[i]);
+            if (sign_after != sign_before) {
+                this.rot[i] = this.target_rot[i];
             }
         }
 
-        //this.robot.rotation.x = this.rot[0] * Math.PI / div;
-        this.robot.rotation.y = this.rot[1] * Math.PI / div;
+        //this.robot.rotation.x = this.rot[0] * Math.PI / ROT_DIV;
+        this.robot.rotation.y = this.rot[1] * Math.PI / ROT_DIV;
 
         // Drive the robot grid's dance (and any other child components).
         super.anim_frame(dt);

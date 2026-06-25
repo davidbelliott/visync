@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -114,7 +115,9 @@ class CubeAssembly extends THREE.Group {
     }
 
     anim_frame(dt, beats_per_sec) {
-        this.cur_rotation = (this.cur_rotation + 2) % ROT_DIV;
+        // Knob 8 scales the continuous Y spin to [-cur_rate, +cur_rate]
+        // (rate bound on the parent scene; see HexagonScene constructor).
+        this.cur_rotation = (this.cur_rotation + 2 * this.parent_scene.rot_rate) % ROT_DIV;
         if (this.depth == 1) {
             this.axis_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
             this.orbit_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
@@ -158,6 +161,11 @@ class CubeAssembly extends THREE.Group {
 export class HexagonScene extends Scene {
     constructor(context) {
         super(context, 'hexagons');
+
+        // Knob 8 sets the continuous Y spin rate/direction in [-cur_rate,
+        // +cur_rate]; the CubeAssembly children read this.rot_rate each frame.
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -230,6 +238,7 @@ export class HexagonScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
 
         for (const asm of this.assemblies) {

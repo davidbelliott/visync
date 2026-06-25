@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -209,6 +210,11 @@ export class FastCubeScene extends Scene {
         this.rot_dir = 1;
         this.base_group.rotation.y = this.start_rot * Math.PI / 8;
 
+        // Knob 8 selects one of 16 eighth-pi (22.5 deg) Y orientations; the
+        // scene interpolates from the current angle towards the chosen step.
+        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+            knob_to_snap(16));
+
 
         this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/texture.frag');
         this.shader_loader.load().then(([vertex_shader, fragment_shader]) => {
@@ -262,7 +268,23 @@ export class FastCubeScene extends Scene {
         return position_options[pos_idx] * 0.8;
     }
 
+    // Point the Y rotation at a new discrete step (knob-driven). Recording
+    // start_rot at the current angle and restarting sync_clock together makes
+    // the scene interpolate cleanly from wherever it is to the chosen step.
+    set_rot_y_target(target) {
+        if (target === this.end_rot) {
+            return;
+        }
+        const beats_per_lerp = 1.0;
+        const t = this.sync_clock.getElapsedBeats();
+        const frac = clamp((t - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
+        this.start_rot = this.start_rot + frac * (this.end_rot - this.start_rot);
+        this.end_rot = target;
+        this.sync_clock.start();
+    }
+
     anim_frame(dt) {
+        this.update_bindings();
         this.cur_frame++;
         const beats_per_lerp = 1.0;
         const t = this.sync_clock.getElapsedBeats();
@@ -314,12 +336,6 @@ export class FastCubeScene extends Scene {
 
     handle_sync(t, bpm, beat) {
         this.bg.handle_sync(t, bpm, beat);
-        if (Math.abs(this.end_rot) == 4) {
-            //this.rot_dir *= -1;
-        }
-        this.start_rot = this.end_rot;
-        this.end_rot = this.start_rot + this.rot_dir;
-        this.sync_clock.start();
         if (beat % 2 == 0) {
             this.half_beat_clock.start();
         }

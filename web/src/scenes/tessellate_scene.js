@@ -13,6 +13,7 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 
 export class TessellateScene extends Scene {
     constructor(context) {
@@ -161,6 +162,12 @@ export class TessellateScene extends Scene {
 
         this.add(this.base_group);
         this.evolve_time = 0;
+        // Separate accumulator for the Z spin so knob 8 can scale its rate
+        // without affecting the pattern's evolution speed (evolve_time).
+        this.rot_z = 0;
+        // Knob 8 sets the spin rate/direction in [-cur_rate, +cur_rate].
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 
@@ -183,15 +190,20 @@ export class TessellateScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 8;
-        this.evolve_time += 1.0 * clock_dt;
+        let evolve_dt = 1.0 * clock_dt;
         if (this.beat_clock.running) {
-            this.evolve_time += clock_dt * (beat_elapsed < 1.0 ? 4.0 : 0.0);
+            evolve_dt += clock_dt * (beat_elapsed < 1.0 ? 4.0 : 0.0);
         }
-        const cur_rot = this.evolve_time * Math.PI * 2 / 128
+        this.evolve_time += evolve_dt;
+        // Knob 8 scales the Z spin rate/direction to [-cur_rate, +cur_rate].
+        // Colour stays tied to the actual rotation (cur_rot) as before.
+        this.rot_z += evolve_dt * Math.PI * 2 / 128 * this.rot_rate;
+        const cur_rot = this.rot_z;
         this.base_group.rotation.z = cur_rot;
         //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
 

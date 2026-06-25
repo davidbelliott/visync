@@ -14,6 +14,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
+import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
 
 const CUBE_WAVE_SPEED = 1.5;
 const NUM_CUBES_PER_SIDE = 10;
@@ -295,6 +296,11 @@ export class BuildingScene extends Scene {
         this.start_rot_y = 0;       // integer multiples of PI / 16
         this.rotation_movement_beats = 8;
 
+        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
+        // interpolates from the current angle towards the chosen step.
+        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+            knob_to_snap(4));
+
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
             (NUM_CUBES_PER_SIDE - 1) * this.cube_base_spacing;
         const center_offset = -(width - this.cube_base_size) / 2;
@@ -398,6 +404,7 @@ export class BuildingScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const cube_moves_per_beat = 4;
 
         for (const cube of this.cubes) {
@@ -409,7 +416,7 @@ export class BuildingScene extends Scene {
         }
 
 
-        // Y rotation
+        // Y rotation (driven by the knob-8 binding registered in the ctor).
         const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
         this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
         const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
@@ -437,18 +444,22 @@ export class BuildingScene extends Scene {
         }*/
     }
 
+    // Point the Y rotation at a new discrete step (knob-driven). Recording
+    // start_rot_y at the current interpolated angle and restarting rot_clock
+    // together makes the scene ease cleanly from wherever it is to the step.
+    set_rot_y_target(target) {
+        if (target === this.target_rot_y) {
+            return;
+        }
+        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
+        this.start_rot_y = lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac);
+        this.target_rot_y = target;
+        this.rot_clock.start();
+    }
+
     handle_sync(t, bpm, beat) {
         console.log('sync');
         if (beat % 4 == 0) {
-            if (rand_int(0, 2) == 0 && (
-                    (!this.rot_clock.running) ||
-                    (this.rot_clock.getElapsedBeats() > this.rotation_movement_beats))) {
-                console.log('start rot');
-
-                this.start_rot_y = this.target_rot_y;
-                this.target_rot_y++;
-                this.rot_clock.start();
-            }
             if (rand_int(0, 8) == 0) {
                 this.start_zoom = this.target_zoom;
                 if (this.target_zoom == 1) {

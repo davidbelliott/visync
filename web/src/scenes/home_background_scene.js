@@ -1,5 +1,6 @@
 import { Scene } from "./scene.js";
 import * as THREE from "three";
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     create_instanced_cube,
     make_wireframe_special,
@@ -20,6 +21,10 @@ const OSC_PHASE = 0;
 export class HomeBackgroundScene extends Scene {
     constructor(context) {
         super(context, 'cube-bounce');
+
+        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.base_scale = 1.5;
 
 
@@ -69,6 +74,7 @@ export class HomeBackgroundScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
@@ -85,8 +91,10 @@ export class HomeBackgroundScene extends Scene {
         this.cubes_group.scale.setScalar(all_scale);
 
 
-        this.cubes_group.rotation.x += 0.1 * dt;
-        this.cubes_group.rotation.y += 0.4 * dt;
+        // Knob 8 scales the cube group's continuous spin (both axes) to
+        // [-cur_rate, +cur_rate], so it can slow, stop, or reverse.
+        this.cubes_group.rotation.x += 0.1 * dt * this.rot_rate;
+        this.cubes_group.rotation.y += 0.4 * dt * this.rot_rate;
         this.ls.rotation.x += 0.2 * dt;
         this.ls.rotation.y += 0.1 * dt;
         //this.pc.rotation.y += 0.05 * dt;

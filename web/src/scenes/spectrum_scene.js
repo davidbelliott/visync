@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -82,6 +83,11 @@ class Signal {
 export class SpectrumScene extends Scene {
     constructor(context) {
         super(context, 'spectrum', 3, 200);
+
+        // Knob 8 sets the continuous Y spin rate/direction (per frame, when
+        // rotating_y is active).
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -206,11 +212,13 @@ export class SpectrumScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
 
 
         if (this.rotating_y) {
-            this.rot++;
+            // Knob 8 sets the continuous Y spin rate/direction (full = +1/frame).
+            this.rot += this.rot_rate;
         }
         //const target_x_rot_delta = this.target_rot_x - this.base_group.rotation.x;
         //this.base_group.rotation.x += Math.sign(target_x_rot_delta) * Math.min(Math.abs(target_x_rot_delta), 0.01);

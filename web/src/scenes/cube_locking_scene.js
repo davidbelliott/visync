@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -243,6 +244,11 @@ export class CubeLockingScene extends Scene {
         this.start_rot = 2;
         this.cur_rot = 2;
         this.end_rot = 2;
+
+        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
+        // interpolates from the current angle towards the chosen step.
+        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+            knob_to_snap(4));
         this.rot_dir = 1;
 
 
@@ -251,6 +257,7 @@ export class CubeLockingScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
         if (this.tube_geometries) {
             this.draw_range = (this.draw_range + 360);
@@ -261,7 +268,7 @@ export class CubeLockingScene extends Scene {
             }
         }
 
-        // Handle rotation
+        // Handle rotation (driven by the knob-8 binding registered in the ctor).
         {
             const t = this.rot_clock.getElapsedBeats();
             let frac = t / this.beats_per_rotation;
@@ -296,14 +303,21 @@ export class CubeLockingScene extends Scene {
         }
     }
 
+    // Point the Y rotation at a new discrete step (knob-driven). Recording
+    // start_rot at the current angle and restarting rot_clock together makes
+    // the scene interpolate cleanly from wherever it is to the chosen step.
+    set_rot_y_target(target) {
+        if (target === this.end_rot) {
+            return;
+        }
+        this.start_rot = this.cur_rot;
+        this.end_rot = target;
+        this.rot_clock.start();
+    }
+
     handle_sync(t, bpm, beat) {
         this.rot_clock.updateBPM(bpm);
         this.beat_clock.updateBPM(bpm);
-        if (beat % this.beats_per_rotation == 0 && this.do_rotation) {
-            this.rot_clock.start();
-            this.start_rot = this.cur_rot;
-            this.end_rot = this.start_rot + this.rot_dir;
-        }
     }
 
     handle_beat(t, channel) {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -60,6 +61,11 @@ export class IntroScene extends Scene {
         this.cur_rot = this.start_rot;
         this.rot_dir = 1;
 
+        // Knob 8 selects one of 8 quarter-pi (45 deg) Y orientations; the
+        // scene interpolates from the current angle towards the chosen step.
+        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+            knob_to_snap(8));
+
         this.cur_dim = 1;
         this.dim_change_direction = 0;
 
@@ -70,9 +76,10 @@ export class IntroScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         const beats_per_lerp = 2;
 
-        // Handle rotation
+        // Handle rotation (driven by the knob-8 binding registered in the ctor).
         {
             const t_sync = this.sync_clock.getElapsedBeats();
             const frac = ease(clamp(t_sync / beats_per_lerp, 0, 1));
@@ -142,15 +149,19 @@ export class IntroScene extends Scene {
         this.tesseract.update_geom(this.camera);
     }
 
-    handle_sync(t, bpm, beat) {
-        if (beat % 4 == 0) {
-            if (this.do_rotation) {
-                this.start_rot = this.cur_rot;
-                this.end_rot = Math.round(this.start_rot + this.rot_dir);
-                console.log(`rotating ${this.start_rot} -> ${this.end_rot}`);
-                this.sync_clock.start();
-            }
+    // Point the Y rotation at a new discrete step (knob-driven). Recording
+    // start_rot at the current angle and restarting sync_clock together makes
+    // the scene interpolate cleanly from wherever it is to the chosen step.
+    set_rot_y_target(target) {
+        if (target === this.end_rot) {
+            return;
         }
+        this.start_rot = this.cur_rot;
+        this.end_rot = target;
+        this.sync_clock.start();
+    }
+
+    handle_sync(t, bpm, beat) {
         if (beat % 4 == 0) {
             this.beat_clock.start();
         }

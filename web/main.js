@@ -31,7 +31,6 @@ import { SurfacesScene } from './src/scenes/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/scenes/bg_surfaces_scene.js';
 import { HelixScene } from './src/scenes/helix_scene.js';
 import { TriangularPrismScene } from './src/scenes/triangular_prism_scene.js';
-import { CelticKnotScene } from './src/scenes/celtic_knot_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
 import { TextScene } from './src/scenes/text_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
@@ -466,7 +465,6 @@ class GraphicsContext {
             [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
-            //[20, new CelticKnotScene(this)],
         ]);
 
         // Scene selection is driven by controller knobs 14 (foreground) and

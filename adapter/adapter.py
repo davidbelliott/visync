@@ -17,6 +17,7 @@ import sys
 
 USE_STROBE = False
 USE_LEDS = False
+FAKE_KNOB_MOVEMENT = False
 BEAT_RESET_TIMEOUT_S = 1
 WS_PORT = 8765
 MIN_BPM_SAMPLES = 4 * 24
@@ -480,7 +481,7 @@ async def main_loop_fake(bpm, cycle=0):
         await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
-async def main_loop_fake_knobs(bpm):
+async def main_loop_FAKE_KNOB_MOVEMENT(bpm):
     """Continuously broadcast fake control-change messages for 16 phase-offset
     sinusoids, independent of the sync clock, for smooth knob motion."""
     beat_s = 60.0 / bpm
@@ -547,7 +548,8 @@ async def main():
                 t1 = tg.create_task(main_loop_audio(args.audio))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
-                t_knobs = tg.create_task(main_loop_fake_knobs(args.fake))
+                if FAKE_KNOB_MOVEMENT:
+                    t_knobs = tg.create_task(main_loop_FAKE_KNOB_MOVEMENT(args.fake))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())

@@ -1,5 +1,6 @@
 import { Scene } from "./scene.js";
 import * as THREE from "three";
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import {
     create_instanced_cube,
@@ -22,6 +23,10 @@ function radial_wave(u, v, target, t) {
 export class SurfacesScene extends Scene {
     constructor(context) {
         super(context, 'surfaces');
+
+        // Knob 8 sets the continuous drift rate/direction in [-cur_rate, +cur_rate].
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.clear();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 100);
@@ -72,8 +77,10 @@ export class SurfacesScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
+        // Knob 8 scales the continuous drift rate to [-cur_rate, +cur_rate].
         const rot_change = this.rot_vec.clone();
-        rot_change.multiplyScalar(dt);
+        rot_change.multiplyScalar(dt * this.rot_rate);
         this.base_group.rotation.x += rot_change.x;
         this.base_group.rotation.y += rot_change.y;
         this.base_group.rotation.z += rot_change.z;

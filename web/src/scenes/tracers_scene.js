@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
+import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     clamp,
     lerp_scalar,
@@ -28,6 +29,10 @@ function make_wireframe_polyhedron(radius, detail) {
 export class TracersScene extends Scene {
     constructor(context) {
         super(context, 'tracers', 3);
+
+        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
+        this.rot_rate = 1;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -232,6 +237,7 @@ export class TracersScene extends Scene {
     }
 
     anim_frame(dt) {
+        this.update_bindings();
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;
@@ -252,8 +258,10 @@ export class TracersScene extends Scene {
         //this.cubes_group.scale.setScalar(this.base_scale);
 
 
-        this.cubes_group.rotation.x += 0.1 * dt;
-        this.cubes_group.rotation.y += 0.4 * dt;
+        // Knob 8 scales the cube group's continuous spin (both axes) to
+        // [-cur_rate, +cur_rate], so it can slow, stop, or reverse.
+        this.cubes_group.rotation.x += 0.1 * dt * this.rot_rate;
+        this.cubes_group.rotation.y += 0.4 * dt * this.rot_rate;
 
         this.ls.rotation.x += 0.2 * dt;
         this.ls.rotation.y += 0.1 * dt;

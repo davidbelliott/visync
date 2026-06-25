@@ -13,6 +13,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
+import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
 
 const CUBE_WAVE_SPEED = 1.5;
 const NUM_CUBES_PER_SIDE = 26;
@@ -242,6 +243,11 @@ export class GantryScene extends Scene {
         this.start_rot_y = 0;       // integer multiples of PI / 16
         this.rotation_movement_beats = 8;
 
+        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
+        // interpolates from the current angle towards the chosen step.
+        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+            knob_to_snap(4));
+
         this.start_zoom = 1;
         this.target_zoom = 1;
         this.zoom_movement_beats = 1;
@@ -301,13 +307,27 @@ export class GantryScene extends Scene {
 
     }
 
+    // Point the Y rotation at a new discrete step (knob-driven). Recording
+    // start_rot_y at the current interpolated angle and restarting rot_clock
+    // together makes the scene ease cleanly from wherever it is to the step.
+    set_rot_y_target(target) {
+        if (target === this.target_rot_y) {
+            return;
+        }
+        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
+        this.start_rot_y = lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac);
+        this.target_rot_y = target;
+        this.rot_clock.start();
+    }
+
     anim_frame(dt) {
+        this.update_bindings();
         const cube_moves_per_beat = 4;
 
 
         this.cubes_group.position.z += this.drift_vel * dt;
 
-        // Y rotation
+        // Y rotation (driven by the knob-8 binding registered in the ctor).
         const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
         this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
         const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
@@ -401,14 +421,6 @@ export class GantryScene extends Scene {
             this.gantries[this.moving_gantry_idx].move_clock.start();
         }
         if (beat % 4 == 0) {
-            if (rand_int(0, 4) == 0 && (
-                    (!this.rot_clock.running) ||
-                    (this.rot_clock.getElapsedBeats() > this.rotation_movement_beats))) {
-
-                this.start_rot_y = this.target_rot_y;
-                this.target_rot_y += rand_int(0, 2) * 2 - 1;
-                this.rot_clock.start();
-            }
             if (rand_int(0, 8) == 0) {
                 this.start_zoom = this.target_zoom;
                 if (this.target_zoom == 1) {

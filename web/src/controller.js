@@ -9,6 +9,11 @@ export class Knob {
     // how to map this to whatever range a given property needs.
     constructor(default_val=0) {
         this.cur_val = default_val;
+        this.bindings = [];
+    }
+
+    bind_to(binding) {
+        this.bindings.push(binding);
     }
 }
 
@@ -20,7 +25,6 @@ export class Binding {
     }
 
     update() {
-        this.apply(this.transform(this.knob.cur_val));
     }
 }
 
@@ -71,7 +75,6 @@ export class WebsocketController extends Controller {
 
     on_message(e) {
         const msg = JSON.parse(e.data);
-        console.log(msg)
         this.handle_message(msg);
     }
 
@@ -81,6 +84,9 @@ export class WebsocketController extends Controller {
             if (knob) {
                 // Value is normalized [0, 1]; clamp defensively.
                 knob.cur_val = Math.max(0, Math.min(1, msg.value));
+                knob.bindings.forEach((binding) => {
+                    binding.apply(binding.transform(knob.cur_val));
+                });
             }
         }
     }

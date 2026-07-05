@@ -234,7 +234,6 @@ export class SpinningRobotsScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
         // Knob 8 scales the continuous spin rate to [-0.1, +0.1] rad/s.

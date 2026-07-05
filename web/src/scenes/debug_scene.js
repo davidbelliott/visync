@@ -92,7 +92,6 @@ export class DebugScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         this.controls.update();
     }
 }

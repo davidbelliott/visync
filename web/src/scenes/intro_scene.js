@@ -76,7 +76,6 @@ export class IntroScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_lerp = 2;
 
         // Handle rotation (driven by the knob-8 binding registered in the ctor).

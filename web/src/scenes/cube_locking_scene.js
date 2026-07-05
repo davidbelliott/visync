@@ -257,7 +257,6 @@ export class CubeLockingScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
         if (this.tube_geometries) {
             this.draw_range = (this.draw_range + 360);

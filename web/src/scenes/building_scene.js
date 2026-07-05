@@ -404,7 +404,6 @@ export class BuildingScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const cube_moves_per_beat = 4;
 
         for (const cube of this.cubes) {

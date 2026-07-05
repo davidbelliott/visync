@@ -284,7 +284,6 @@ export class FastCubeScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         this.cur_frame++;
         const beats_per_lerp = 1.0;
         const t = this.sync_clock.getElapsedBeats();

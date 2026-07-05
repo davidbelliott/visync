@@ -190,7 +190,6 @@ export class TessellateScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
         const clock_dt = this.clock.getDelta();
         this.elapsed_time_beats += clock_dt * beats_per_sec;

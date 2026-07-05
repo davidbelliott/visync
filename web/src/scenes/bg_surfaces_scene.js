@@ -144,7 +144,6 @@ export class BackgroundSurfacesScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         //this.base_group.rotation.x += 0.04 * dt;
         //this.base_group.rotation.z += 1.0 * dt;
         // Get the current time

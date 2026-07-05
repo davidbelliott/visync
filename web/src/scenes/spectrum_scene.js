@@ -212,7 +212,6 @@ export class SpectrumScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
 
 

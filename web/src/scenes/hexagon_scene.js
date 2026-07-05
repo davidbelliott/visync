@@ -238,7 +238,6 @@ export class HexagonScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         const beats_per_sec = this.get_local_bpm() / 60;
 
         for (const asm of this.assemblies) {

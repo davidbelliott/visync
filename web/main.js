@@ -469,23 +469,25 @@ class GraphicsContext {
 
         // Scene selection is driven by controller knobs 14 (foreground) and
         // 15 (background). Each knob's normalized [0, 1] value maps across the
-        // available scenes. Evaluated every frame in anim_frame().
+        // available scenes, applied whenever the knob changes (see bind_to).
         {
             const apc = this.controllers.get("apc");
             const to_scene_idx = (norm) => Math.min(this.scenes.size - 1,
                 Math.floor(norm * this.scenes.size));
-            this.scene_bindings = [
-                new Binding(apc.knobs.get(14),
-                    (idx) => this.change_scene(idx, false), to_scene_idx),
-                new Binding(apc.knobs.get(15),
-                    (idx) => this.change_scene(idx, true), to_scene_idx),
-            ];
+            apc.knobs.get(14).bind_to(new Binding(apc.knobs.get(14),
+                (idx) => this.change_scene(idx, false), to_scene_idx));
+            apc.knobs.get(15).bind_to(new Binding(apc.knobs.get(15),
+                (idx) => this.change_scene(idx, true), to_scene_idx));
         }
 
         // Array of scenes on-screen, which are rendered sequentially first-to-last.
         this.shown_scenes = [];
 
-        //this.push_scene(23);
+        // Show a default scene at startup. The scene-selection bindings above
+        // used to run every frame and did this implicitly from the knobs'
+        // default value; now that bindings only fire on a knob change, do it
+        // explicitly.
+        this.change_scene(0);
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
@@ -571,7 +573,6 @@ class GraphicsContext {
 
     anim_frame() {
         const dt = this.clock.getDelta();
-        this.scene_bindings.forEach((b) => b.update());
         this.shown_scenes.forEach((idx) => {
             this.scenes.get(idx).anim_frame(dt);
         });

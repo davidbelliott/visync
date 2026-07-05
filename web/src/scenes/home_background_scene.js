@@ -74,7 +74,6 @@ export class HomeBackgroundScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         for (const cube of this.cubes) {
             cube.rotation.x += 0.5 * dt;
             cube.rotation.y += 0.5 * dt;

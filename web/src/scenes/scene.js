@@ -37,25 +37,18 @@ export class Scene extends THREE.Scene {
         this.controls = new OrbitControls(this.camera, this.context.renderer.domElement);
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
-
-        // Controller-knob -> property bindings, evaluated every frame.
-        this.bindings = [];
     }
 
     // Bind a knob from one of the context's controllers to a scene property.
-    // `apply` receives the transformed (default: normalized 0..1) value.
+    // `apply` receives the transformed (default: normalized 0..1) value, and is
+    // invoked whenever the knob's value changes (see Knob.bind_to).
     bind(controller_name, knob_idx, apply, transform) {
         const controller = this.context.controllers.get(controller_name);
         const knob = controller.knobs.get(knob_idx);
-        this.bindings.push(new Binding(knob, apply, transform));
-    }
-
-    update_bindings() {
-        this.bindings.forEach((b) => b.update());
+        knob.bind_to(new Binding(knob, apply, transform));
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         this.controls.update();
         this.children.forEach((child) => {
             if (child.anim_frame) {

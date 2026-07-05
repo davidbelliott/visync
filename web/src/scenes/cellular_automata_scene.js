@@ -191,7 +191,6 @@ export class CellularAutomataScene extends Scene {
     }
     
     anim_frame(dt) {
-        this.update_bindings();
         const adjusted_elapsed = (this.beat_clock.running && this.beat_clock.getElapsedBeats() < 0.5 ? 4 : 1) * dt;
         // Knob 8 scales the continuous spin rate to [-0.05, +0.05] rad/s.
         this.cube_group.rotation.y += 0.05 * dt * this.rot_rate;

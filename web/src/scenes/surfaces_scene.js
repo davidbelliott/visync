@@ -77,7 +77,6 @@ export class SurfacesScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.update_bindings();
         // Knob 8 scales the continuous drift rate to [-cur_rate, +cur_rate].
         const rot_change = this.rot_vec.clone();
         rot_change.multiplyScalar(dt * this.rot_rate);

@@ -153,7 +153,8 @@ export class TriangularPrismScene extends Scene {
                     pos.y += this.prismSize / 2;
                     rotation = Math.PI;
                 }
-                const prism = this.prism_collection.create_geom(pos, color, scale, rotation);
+                const prism = this.prism_collection.create_geom(pos, color, scale);
+                this.prism_collection.set_rotation_z(prism, rotation);
             }
         }
     }

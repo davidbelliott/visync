@@ -4,6 +4,15 @@ import {
     ShaderLoader
 } from './util.js';
 
+// Rotates v by unit quaternion q, using the same (counter-clockwise) sign
+// convention as THREE.Quaternion. A zeroed q (a freshly allocated buffer)
+// also acts as the identity, so uninitialized instances are safe.
+const QUAT_ROTATE_GLSL = [
+    "vec3 quat_rotate(vec4 q, vec3 v) {",
+    "    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);",
+    "}"
+].join("\n");
+
 
 function create_wireframe_mat() {
     var vertexShader = [
@@ -16,22 +25,16 @@ function create_wireframe_mat() {
     "attribute vec3 instanceOffset;",
     "attribute vec4 instanceColor;",
     "attribute vec3 instanceScale;",
-    "attribute float instanceRotation;",
+    "attribute vec4 instanceQuaternion;",
     "",
     "varying vec4 vColor;",
     "",
+    QUAT_ROTATE_GLSL,
+    "",
     "void main() {",
-    "",
-       "",
-    "mat4 worldPosTrans = mat4( ",
-        "vec4( instanceScale.x * cos(instanceRotation), instanceScale.x * -sin(instanceRotation), 0.0,     0.0), ",
-        "vec4( instanceScale.y * sin(instanceRotation), instanceScale.y *  cos(instanceRotation), 0.0,     0.0),",
-        "vec4( 0.0,                    0.0,                     instanceScale.z, 0.0),",
-        "vec4( instanceOffset.xyz,                                          1.0)",
-    ");",
-    "	gl_Position = projectionMatrix * modelViewMatrix * worldPosTrans * vec4( position, 1.0 );",
-    "       vColor = instanceColor;",
-    "",
+    "    vec3 transformed = quat_rotate(instanceQuaternion, position * instanceScale) + instanceOffset;",
+    "    gl_Position = projectionMatrix * modelViewMatrix * vec4( transformed, 1.0 );",
+    "    vColor = instanceColor;",
     "}"
     ].join("\n");
     var fragmentShader = [
@@ -66,24 +69,24 @@ function create_fill_mat() {
         "attribute vec3 instanceOffset;",
         "attribute vec4 instanceColor;",
         "attribute vec3 instanceScale;",
-        "attribute float instanceRotation;",
+        "attribute vec4 instanceQuaternion;",
         "varying vec4 vInstanceColor;",
+        QUAT_ROTATE_GLSL,
     ].join("\n");
 
-    var fragmentShaderPars = [
-        "#define USE_INSTANCING_COLOR",
+    // The instance rotation must also spin the lighting normals. The scale
+    // is deliberately not folded in: a non-uniform scale would need an
+    // inverse-transpose, and skipping it keeps zero scales (used by scenes
+    // to hide instances) from producing NaN normals.
+    var vertexShaderNormal = [
+        "#include <beginnormal_vertex>",
+        "objectNormal = quat_rotate(instanceQuaternion, objectNormal);",
     ].join("\n");
 
     var vertexShaderProject = [
-        "vec4 mvPosition = vec4( transformed, 1.0 );",
-        "mat4 worldPosTrans = mat4( ",
-            "vec4( instanceScale.x * cos(instanceRotation), instanceScale.x * -sin(instanceRotation), 0.0,     0.0), ",
-            "vec4( instanceScale.y * sin(instanceRotation), instanceScale.y *  cos(instanceRotation), 0.0,     0.0),",
-            "vec4( 0.0,                    0.0,                     instanceScale.z, 0.0),",
-            "vec4( instanceOffset.xyz,                                          1.0)",
-        ");",
-        "mvPosition = modelViewMatrix * worldPosTrans * vec4( position, 1.0 );",
-        "	gl_Position = projectionMatrix * mvPosition;",
+        "vec3 inst_transformed = quat_rotate(instanceQuaternion, transformed * instanceScale) + instanceOffset;",
+        "vec4 mvPosition = modelViewMatrix * vec4( inst_transformed, 1.0 );",
+        "gl_Position = projectionMatrix * mvPosition;",
         "vInstanceColor = instanceColor;",
     ].join("\n");
 
@@ -122,6 +125,9 @@ function create_fill_mat() {
                     vertexShaderPars + '\n' +
                     '#include <common>'
                 ).replace(
+                    '#include <beginnormal_vertex>',
+                    vertexShaderNormal
+                ).replace(
                     '#include <project_vertex>',
                     vertexShaderProject
                 );
@@ -132,6 +138,9 @@ function create_fill_mat() {
 }
 
 
+// A batch of identical geometries drawn in a single call, with per-instance
+// position, scale, rotation (a quaternion), and RGBA color. Alpha only
+// blends for the line draw types; the triangle fill renders opaque.
 // Valid types: Lines, LineStrip, Triangles
 export class InstancedGeometryCollection {
     constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024) {
@@ -144,63 +153,16 @@ export class InstancedGeometryCollection {
         this.instancedGeometry.instanceCount = 0;
 
 
-        // Pre-allocating position, color, and scale attributes
+        // Pre-allocating position, color, scale, and rotation attributes
         this.offsets = new THREE.InstancedBufferAttribute(new Float32Array(this.maxInstances * 3), 3);
-        this.rotations = new THREE.InstancedBufferAttribute(new Float32Array(this.maxInstances * 1), 1);
+        this.quaternions = new THREE.InstancedBufferAttribute(new Float32Array(this.maxInstances * 4), 4);
         this.colors = new THREE.InstancedBufferAttribute(new Float32Array(this.maxInstances * 4), 4);
         this.scales = new THREE.InstancedBufferAttribute(new Float32Array(this.maxInstances * 3), 3);
 
         this.instancedGeometry.setAttribute('instanceOffset', this.offsets);
         this.instancedGeometry.setAttribute('instanceColor', this.colors);
         this.instancedGeometry.setAttribute('instanceScale', this.scales);
-        this.instancedGeometry.setAttribute('instanceRotation', this.rotations);
-
-
-        /*const shader_transform = function(shader) {
-            shader.vertexShader = `
-                #define USE_INSTANCING_COLOR
-                attribute vec4 instanceColor;
-                attribute vec3 instanceOffset;
-                attribute vec3 instanceScale;
-                ${shader.vertexShader}
-            `.replace(
-                `#include <begin_vertex>`,
-                `#include <begin_vertex>
-                transformed *= instanceScale;
-                transformed += instanceOffset;`)
-            .replace(
-                `#include <color_pars_vertex>`,
-                `varying vec4 vColor;`)
-            .replace(
-                `#include <color_vertex>`,
-                `vColor = vec4( 1.0 );
-                //vColor.rgba *= instanceColor.rgba;`);
-            /*shader.fragmentShader = `
-                        #define USE_COLOR_ALPHA
-                        varying vec4 instanceColor;
-                        ${shader.fragmentShader}
-                    `.replace(
-                        `#include <dithering_fragment>`,
-                        `if (instanceColor.a == 0.0) discard;
-                        #include <dithering_fragment>`
-                    );*/
-            /*shader.fragmentShader = `
-            #define USE_COLOR_ALPHA
-            ${shader.fragmentShader}`
-        };*/
-
-        /*if (wireframe) {
-            this.mat = new THREE.LineBasicMaterial({
-                color: "#ffffff",
-                onBeforeCompile: shader_transform});
-        } else {
-            this.mat = new THREE.MeshBasicMaterial({
-                color: "#ffffff",
-                transparent: true,
-                onBeforeCompile: shader_transform});
-        }*/
-
-        //this.mat = new THREE.LineBasicMaterial({color: "white"});
+        this.instancedGeometry.setAttribute('instanceQuaternion', this.quaternions);
 
         if (this.draw_type == 'Lines') {
             this.mat = create_wireframe_mat();
@@ -225,7 +187,8 @@ export class InstancedGeometryCollection {
         }
     }
 
-    create_geom(pos, color, scale, rotation=0, alpha=1) {
+    // quat is a THREE.Quaternion, or null for the identity orientation.
+    create_geom(pos, color, scale, quat=null, alpha=1) {
         if (this.instancedGeometry.instanceCount >= this.maxInstances) {
             console.error('Max instances reached');
             return -1;
@@ -234,7 +197,7 @@ export class InstancedGeometryCollection {
         this.set_pos(this.instancedGeometry.instanceCount, pos);
         this.set_color(this.instancedGeometry.instanceCount, color, alpha);
         this.set_scale(this.instancedGeometry.instanceCount, scale);
-        this.set_rotation(this.instancedGeometry.instanceCount, rotation);
+        this.set_quaternion(this.instancedGeometry.instanceCount, quat);
 
         return this.instancedGeometry.instanceCount++;
     }
@@ -262,8 +225,19 @@ export class InstancedGeometryCollection {
         this.scales.needsUpdate = true;
     }
 
-    set_rotation(idx, rotation) {
-        this.rotations.setComponent(idx, 0, rotation);
-        this.rotations.needsUpdate = true;
+    set_quaternion(idx, quat) {
+        if (quat == null) {
+            this.quaternions.setXYZW(idx, 0, 0, 0, 1);
+        } else {
+            this.quaternions.setXYZW(idx, quat.x, quat.y, quat.z, quat.w);
+        }
+        this.quaternions.needsUpdate = true;
+    }
+
+    // Convenience for planar scenes: counter-clockwise rotation about +Z,
+    // written straight into the buffer so hot loops need no Quaternion.
+    set_rotation_z(idx, angle) {
+        this.quaternions.setXYZW(idx, 0, 0, Math.sin(angle / 2), Math.cos(angle / 2));
+        this.quaternions.needsUpdate = true;
     }
 }

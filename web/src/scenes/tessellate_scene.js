@@ -111,6 +111,11 @@ export class TessellateScene extends Scene {
                     const quaternion = new THREE.Quaternion();
                     quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), i * 2 * Math.PI / 3);
                     vector.applyQuaternion(quaternion);
+                    // The cell offsets rotate counter-clockwise while each
+                    // lizard outline rotates clockwise; that pairing is what
+                    // makes the y-flipped (negative-scale) template tessellate.
+                    const outline_quat = new THREE.Quaternion();
+                    outline_quat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -i * 2 * Math.PI / 3);
                     this.indices_of_cells.push([]);
                     for (let j = -4; j < 5; j++) {
                         for (let k = -4; k < 5; k++) {
@@ -137,7 +142,7 @@ export class TessellateScene extends Scene {
 
                             for (let l = 0; l < this.inst_geoms.length; l++) {
                                 this.indices_of_cells[i].push([l,
-                                        this.inst_geoms[l].create_geom(this_pos, new THREE.Color("blue"), new THREE.Vector3(0.05, -0.05, 0.05), i * 2 * Math.PI / 3)
+                                        this.inst_geoms[l].create_geom(this_pos, new THREE.Color("blue"), new THREE.Vector3(0.05, -0.05, 0.05), outline_quat)
                                     ]
                                 );
                             }

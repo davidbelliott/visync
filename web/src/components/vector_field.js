@@ -264,6 +264,9 @@ this.tracerGeom.setAttribute('tracerOpacity',
 
   _spawnCubeFromTemplate(slot, channel) {
     // copy default positions into cubePos, zero velocities
+    if (channel >= this.geomsPerChannel.length) {
+        return;
+    }
     const p = this.geomsPerChannel[channel - 1].getAttribute('position');
     const default_pos = p.array.slice();
     const dstPosOff = this._cubeOffset(slot);

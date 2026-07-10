@@ -100,7 +100,7 @@ export class YellowRobot extends Component {
                 this.robot_alphas.push(alpha);
                 for (let k = 0; k < CUBES_PER_ROBOT; k++) {
                     tmp.copy(rest_pose[k].pos).add(g);
-                    this.inst_cubes.create_geom(tmp, this.cube_color, rest_pose[k].scale, 0, alpha);
+                    this.inst_cubes.create_geom(tmp, this.cube_color, rest_pose[k].scale, null, alpha);
                 }
 
                 const circle = make_wireframe_circle(6, 32, new THREE.Color("cyan"));

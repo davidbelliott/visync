@@ -10,7 +10,8 @@ import {
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 // Hue drift rate (cycles/sec) per scene state; 0 = hold the start color.
-const COLOR_CHANGE_RATES = [0.00, 0.00, 0.04, 0.08];
+const COLOR_CHANGE_RATE = 0.08;
+const DRIFT_VEL = 5;
 const START_COLOR = new THREE.Color("red");
 const PADDLE_COLOR = new THREE.Color("white");
 
@@ -31,11 +32,6 @@ const POINT_LIGHT_INTENSITY = 30;
 const POINT_LIGHT_HEIGHT = 40;      // world units above the drum plane
 const DIRECTIONAL_INTENSITY = 0.3;
 
-// NOTE: InstancedGeometryCollection's shader composes instanceRotation as
-// Rz(-angle), so every rotation written below is negated to keep the
-// original counter-clockwise spin, and CPU-side offset rotations use the
-// standard Rz convention.
-
 // Scratch objects reused by per-frame instance updates (no per-frame alloc).
 const SCRATCH_POS = new THREE.Vector3();
 const SCRATCH_COLOR = new THREE.Color();
@@ -55,13 +51,13 @@ class PaddleGroup {
         // top paddle and four side paddles per group. Fill and wire
         // collections allocate in lockstep, so one index serves both.
         this.top_idx = parent_scene.paddle_top_fill.create_geom(
-            this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, 0, FILL_ALPHA);
+            this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA);
         parent_scene.paddle_top_wire.create_geom(
             this.retreat_pos, PADDLE_COLOR, UNIT_SCALE);
         this.side_idxs = [];
         for (let i = 0; i < 4; i++) {
             this.side_idxs.push(parent_scene.paddle_side_fill.create_geom(
-                this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, 0, FILL_ALPHA));
+                this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA));
             parent_scene.paddle_side_wire.create_geom(
                 this.retreat_pos, PADDLE_COLOR, UNIT_SCALE);
         }
@@ -78,14 +74,13 @@ class PaddleGroup {
         this.movement_time_secs = 0.25;
         this.impacts = [];
 
-        this.cur_state_idx = 0;
         this.in_position = false;
 
         this.movement_clock = new THREE.Clock(false);
         this.movement_clock.start();
 
-        this.movement_start_pos = this.retreat_pos.clone();
-        this.movement_end_pos = this.retreat_pos.clone();
+        this.movement_start_pos = this.parent_scene.drum_pos_in_array(...this.cur_drum_idx).clone();
+        this.movement_end_pos = this.movement_start_pos.clone();
         this.retreat_movement_secs = 4;
         this.time_for_this_movement = this.retreat_movement_secs;
     }
@@ -136,7 +131,7 @@ class PaddleGroup {
         let top_paddle_pos = this.paddle_pos(1, target_drum_z)[0];
         let side_paddle_pos = this.side_paddle_pos(1, 0);
 
-        this.in_position = this.cur_state_idx != 0 && frac > 0.9;
+        this.in_position = frac > 0.9;
 
         for (let i = 0; i < this.impacts.length; i++) {
             const new_time = this.impacts[i][0] - dt;
@@ -171,16 +166,15 @@ class PaddleGroup {
         }
 
         // Track the target drum's spin, then write this group's five paddle
-        // instances into the shared collections (rotations negated for the
-        // shader's Rz(-angle) convention, see file-top note).
+        // instances into the shared collections.
         this.rot_z = drum.rot_z;
 
         SCRATCH_POS.set(this.position.x, this.position.y,
             this.position.z + top_paddle_pos);
         scene.paddle_top_fill.set_pos(this.top_idx, SCRATCH_POS);
         scene.paddle_top_wire.set_pos(this.top_idx, SCRATCH_POS);
-        scene.paddle_top_fill.set_rotation(this.top_idx, -this.rot_z);
-        scene.paddle_top_wire.set_rotation(this.top_idx, -this.rot_z);
+        scene.paddle_top_fill.set_rotation_z(this.top_idx, this.rot_z);
+        scene.paddle_top_wire.set_rotation_z(this.top_idx, this.rot_z);
 
         for (let i = 0; i < 4; i++) {
             // Each side paddle sits at (1,1,1)/2 * side_paddle_pos in its own
@@ -194,23 +188,9 @@ class PaddleGroup {
                 this.position.z + r);
             scene.paddle_side_fill.set_pos(this.side_idxs[i], SCRATCH_POS);
             scene.paddle_side_wire.set_pos(this.side_idxs[i], SCRATCH_POS);
-            scene.paddle_side_fill.set_rotation(this.side_idxs[i], -ang);
-            scene.paddle_side_wire.set_rotation(this.side_idxs[i], -ang);
+            scene.paddle_side_fill.set_rotation_z(this.side_idxs[i], ang);
+            scene.paddle_side_wire.set_rotation_z(this.side_idxs[i], ang);
         }
-    }
-
-    start() {
-        this.movement_start_pos.copy(this.position);
-        this.movement_end_pos.copy(this.parent_scene.drum_pos_in_array(...this.cur_drum_idx));
-        this.movement_clock.start();
-        this.cur_state_idx = 1;
-    }
-
-    retreat() {
-        this.movement_start_pos.copy(this.position);
-        this.movement_end_pos.copy(this.retreat_pos);
-        this.movement_clock.start();
-        this.cur_state_idx = 0;
     }
 
     handle_sync(t, bpm, beat) {
@@ -234,7 +214,7 @@ class PaddleGroup {
 
 export class DrumboxScene extends Scene {
     constructor(context) {
-        super(context, 'drumbox', 3);
+        super(context, 'drumbox');
         this.frustum_size = 60;
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size / 2,
@@ -252,8 +232,6 @@ export class DrumboxScene extends Scene {
         this.drums_group = new THREE.Group();
         this.base_group.add(this.drums_group);
 
-        this.drift_vels = [0, 2, 5];
-        this.drift_vel = this.drift_vels[0];
 
         this.spacing = 16;
         this.num_per_side = 12;
@@ -298,7 +276,7 @@ export class DrumboxScene extends Scene {
                     for (let j = 0; j < this.num_per_side; j++) {
                         const pos = this.drum_pos_in_array(i, j);
                         const idx = this.drum_fill.create_geom(
-                            pos, START_COLOR, UNIT_SCALE, 0, FILL_ALPHA);
+                            pos, START_COLOR, UNIT_SCALE, null, FILL_ALPHA);
                         this.drum_wire.create_geom(pos, START_COLOR, UNIT_SCALE);
                         // Per-drum spring state; rendering lives entirely in
                         // the instance buffers.
@@ -372,7 +350,7 @@ export class DrumboxScene extends Scene {
             return;
         }
 
-        this.drums_group.position.y += this.drift_vel * dt;
+        this.drums_group.position.y += DRIFT_VEL * dt;
         const max_offset = 2 * this.spacing * Math.sqrt(2);
         while (this.drums_group.position.y > max_offset) {
             this.drums_group.position.y -= max_offset;
@@ -396,7 +374,7 @@ export class DrumboxScene extends Scene {
 
         // Advance the shared hue, then integrate the drum springs and write
         // position/rotation/color straight into the instance buffers.
-        this.color_hue += dt * COLOR_CHANGE_RATES[this.cur_state_idx];
+        this.color_hue += dt * COLOR_CHANGE_RATE;
         SCRATCH_COLOR.copy(START_COLOR);
         SCRATCH_COLOR_OFFSET.setHSL(this.color_hue % 1, 1, 0.5);
         SCRATCH_COLOR.add(SCRATCH_COLOR_OFFSET);
@@ -408,8 +386,8 @@ export class DrumboxScene extends Scene {
                 SCRATCH_POS.set(drum.x, drum.y, drum.z);
                 this.drum_fill.set_pos(drum.idx, SCRATCH_POS);
                 this.drum_wire.set_pos(drum.idx, SCRATCH_POS);
-                this.drum_fill.set_rotation(drum.idx, -drum.rot_z);
-                this.drum_wire.set_rotation(drum.idx, -drum.rot_z);
+                this.drum_fill.set_rotation_z(drum.idx, drum.rot_z);
+                this.drum_wire.set_rotation_z(drum.idx, drum.rot_z);
                 this.drum_fill.set_color(drum.idx, SCRATCH_COLOR, FILL_ALPHA);
                 this.drum_wire.set_color(drum.idx, SCRATCH_COLOR);
             }
@@ -442,18 +420,5 @@ export class DrumboxScene extends Scene {
             this.start_zoom = this.camera.zoom;
             this.zoom_clock.start();
         }
-    }
-
-    state_transition(old_state_idx, new_state_idx) {
-        if (old_state_idx == 0 && new_state_idx == 1) {
-            for (const paddle_group of this.paddle_groups) {
-                paddle_group.start();
-            }
-        } else if (new_state_idx == 0) {
-            for (const paddle_group of this.paddle_groups) {
-                paddle_group.retreat();
-            }
-        }
-        this.drift_vel = this.drift_vels[this.cur_state_idx];
     }
 }

@@ -46,8 +46,8 @@ class Cube {
         this.scale = scale;
         this.state = state;
 
-        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, 0, 1);
-        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, 0, 0.5);
+        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, null, 1);
+        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, null, 0.5);
     }
 
     update(dt) {
@@ -72,8 +72,8 @@ class Kicker {
         this.position = position;
         this.scale = scale;
 
-        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, 0, 1);
-        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, 0, 0.5);
+        this.wireframe_geom_idx = wireframe_collection.create_geom(position, wireframe_color, scale, null, 1);
+        this.solid_geom_idx = solid_collection.create_geom(position, solid_color, scale, null, 0.5);
     }
 
     update(dt) {

@@ -270,7 +270,7 @@ export class GantryScene extends Scene {
                     0,
                     i * (this.cube_base_size + this.cube_base_spacing) + center_offset);
                 //const cube_mesh = create_instanced_cube(, "magenta", true, "black", 0.5);
-                let cube_idx = this.inst_cubes.create_geom(position, new THREE.Color("magenta"), new THREE.Vector3(1, 1, 1), 0);
+                let cube_idx = this.inst_cubes.create_geom(position, new THREE.Color("magenta"), new THREE.Vector3(1, 1, 1));
                 cube_row.push(cube_idx);
                 starting_scale_row.push(1);
                 target_scale_row.push(1);

@@ -240,4 +240,11 @@ export class InstancedGeometryCollection {
         this.quaternions.setXYZW(idx, 0, 0, Math.sin(angle / 2), Math.cos(angle / 2));
         this.quaternions.needsUpdate = true;
     }
+
+    // For callers that rebuild the whole batch every update instead of
+    // managing persistent instances: write attributes for indices
+    // [0, count) with the set_* methods, then truncate the draw count here.
+    set_num_instances(count) {
+        this.instancedGeometry.instanceCount = count;
+    }
 }

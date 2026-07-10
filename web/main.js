@@ -31,6 +31,7 @@ import { SurfacesScene } from './src/scenes/surfaces_scene.js';
 import { BackgroundSurfacesScene } from './src/scenes/bg_surfaces_scene.js';
 import { HelixScene } from './src/scenes/helix_scene.js';
 import { TriangularPrismScene } from './src/scenes/triangular_prism_scene.js';
+import { SphereGridScene } from './src/scenes/sphere_grid_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
 import { TextScene } from './src/scenes/text_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
@@ -464,13 +465,14 @@ class GraphicsContext {
             [17, new TracersScene(this)],
             [18, new HelixScene(this)],
             [19, new TriangularPrismScene(this)],
-            [20, new CellularAutomataScene(this)],
+            [20, new SphereGridScene(this)],
             [21, new VectorFieldScene(this)],
             //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
             //[21, new TextScene(this)],
             [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
+            [25, new CellularAutomataScene(this)],
         ]);
 
         // Scene selection is driven by controller knobs 14 (foreground) and
@@ -722,18 +724,24 @@ class GraphicsContext {
         });
     }
 
+    // Keyboard scene selection follows the physical left-to-right key
+    // order: keys 1-9 pick slots 0-8 within the bank and 0 picks slot 9.
+    key_digit_to_slot(digit) {
+        return (digit + 9) % 10;
+    }
+
     keydown(e) {
         const num = parseInt(e.key);
         const shift_chars = ')!@#$%^&*(';
         console.log(e.key);
         if (!isNaN(num)) {
-            const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
-                (num % 10));
+            const scene_idx = this.cur_scene_bank * SCENES_PER_BANK +
+                this.key_digit_to_slot(num % 10);
             while (this.pop_scene() !== undefined) { };
             this.push_scene(scene_idx);
         } else if (shift_chars.includes(e.key)) {
-            const scene_idx = Math.trunc(this.cur_scene_bank * SCENES_PER_BANK + 
-                shift_chars.indexOf(e.key));
+            const scene_idx = this.cur_scene_bank * SCENES_PER_BANK +
+                this.key_digit_to_slot(shift_chars.indexOf(e.key));
             this.push_scene(scene_idx);
         } else if (e.code == "Space") {
             this.immediate_mode = !this.immediate_mode;

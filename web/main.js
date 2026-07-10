@@ -78,6 +78,12 @@ const BG_COLOR = 'black';
 
 const SCENES_PER_BANK = 10;
 
+// Longest frame delta (seconds) passed to scene animation. rAF stops while
+// the tab/window is hidden, so an unclamped delta can span minutes and blow
+// up the scenes' Euler-integrated spring physics; ~3 frames of slack absorbs
+// ordinary hitches without visibly slowing motion.
+const MAX_FRAME_DT = 0.1;
+
 const MIN_SWIPE_LENGTH = 50;
 
 var context = null;
@@ -572,7 +578,7 @@ class GraphicsContext {
     }
 
     anim_frame() {
-        const dt = this.clock.getDelta();
+        const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.shown_scenes.forEach((idx) => {
             this.scenes.get(idx).anim_frame(dt);
         });
@@ -709,7 +715,10 @@ class GraphicsContext {
     advance_state(steps) {
         console.log(`advance ${steps} steps`);
         this.shown_scenes.forEach((idx) => {
-            this.scenes.get(idx).advance_state(steps);
+            const scene = this.scenes.get(idx);
+            if (scene) {
+                scene.advance_state(steps);
+            }
         });
     }
 
@@ -747,7 +756,10 @@ class GraphicsContext {
             this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
         } else {
             this.shown_scenes.forEach((idx) => {
-                this.scenes[idx].handle_key(e.key);
+                const scene = this.scenes.get(idx);
+                if (scene) {
+                    scene.handle_key(e.key);
+                }
             });
         }
     }
@@ -779,8 +791,11 @@ class GraphicsContext {
     }
 
     handle_beat(latency, channel) {
-        this.scenes.forEach((scene) => {
-            scene.handle_beat(latency, channel);
+        // Beats only go to on-screen scenes. Hidden scenes never damp their
+        // physics (anim_frame doesn't run for them), so delivering hits
+        // would wind their springs up unboundedly until re-shown.
+        this.shown_scenes.forEach((idx) => {
+            this.scenes.get(idx).handle_beat(latency, channel);
         });
     }
 

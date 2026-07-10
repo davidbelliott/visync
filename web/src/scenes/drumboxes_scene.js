@@ -9,9 +9,18 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 
-// Hue drift rate (cycles/sec) per scene state; 0 = hold the start color.
+// Hue drift rate of the drum color (cycles/sec).
 const COLOR_CHANGE_RATE = 0.08;
+// Upward drift of the drum grid (world units/sec; drums sit 16 apart).
 const DRIFT_VEL = 5;
+
+// Jump timing within the 4-beat cycle. Paddles strike ON the beat, then hop
+// to the next drum in the gap before the following beat: the hop starts
+// JUMP_DELAY_BEATS after the strike and lasts JUMP_DURATION_BEATS, so the
+// paddle is planted again (in_position needs frac > 0.9) with margin to
+// wind up for beat 1.
+const JUMP_DELAY_BEATS = 0.25;
+const JUMP_DURATION_BEATS = 0.5;
 const START_COLOR = new THREE.Color("red");
 const PADDLE_COLOR = new THREE.Color("white");
 
@@ -43,27 +52,24 @@ class PaddleGroup {
         this.parent_scene = parent_scene;
         this.cur_drum_idx = drum_indices;
 
-        this.retreat_pos = new THREE.Vector3(40, 40, 0);
-        this.position = this.retreat_pos.clone();
+        this.position = parent_scene.drum_pos_in_array(
+            drum_indices[0], drum_indices[1]);
         this.rot_z = 0;
 
         // Instance handles into the scene's shared paddle collections: one
         // top paddle and four side paddles per group. Fill and wire
         // collections allocate in lockstep, so one index serves both.
         this.top_idx = parent_scene.paddle_top_fill.create_geom(
-            this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA);
+            this.position, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA);
         parent_scene.paddle_top_wire.create_geom(
-            this.retreat_pos, PADDLE_COLOR, UNIT_SCALE);
+            this.position, PADDLE_COLOR, UNIT_SCALE);
         this.side_idxs = [];
         for (let i = 0; i < 4; i++) {
             this.side_idxs.push(parent_scene.paddle_side_fill.create_geom(
-                this.retreat_pos, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA));
+                this.position, PADDLE_COLOR, UNIT_SCALE, null, FILL_ALPHA));
             parent_scene.paddle_side_wire.create_geom(
-                this.retreat_pos, PADDLE_COLOR, UNIT_SCALE);
+                this.position, PADDLE_COLOR, UNIT_SCALE);
         }
-
-        // Last jump axis: 0 = x, 1 = y
-        this.last_jump_axis = 0;
 
         // Physical constants for paddles
         this.top_paddle_strike_vel = 80;
@@ -71,18 +77,17 @@ class PaddleGroup {
 
         this.top_paddle_pound_time = 0.08;
         this.side_paddle_pound_time = 0.15;
-        this.movement_time_secs = 0.25;
         this.impacts = [];
 
         this.in_position = false;
 
-        this.movement_clock = new THREE.Clock(false);
+        // Paces the hop between drums in beats (JUMP_DURATION_BEATS).
+        // Started here so frac clamps to 1 and strikes land from the start.
+        this.movement_clock = new BeatClock(parent_scene);
         this.movement_clock.start();
 
-        this.movement_start_pos = this.parent_scene.drum_pos_in_array(...this.cur_drum_idx).clone();
-        this.movement_end_pos = this.movement_start_pos.clone();
-        this.retreat_movement_secs = 4;
-        this.time_for_this_movement = this.retreat_movement_secs;
+        this.movement_start_pos = this.position.clone();
+        this.movement_end_pos = this.position.clone();
     }
 
 
@@ -124,7 +129,7 @@ class PaddleGroup {
         const target_drum_z = drum.z;
 
         const frac = clamp(
-            this.movement_clock.getElapsedTime() / this.time_for_this_movement, 0, 1);
+            this.movement_clock.getElapsedBeats() / JUMP_DURATION_BEATS, 0, 1);
         this.position.lerpVectors(this.movement_start_pos, this.movement_end_pos, frac);
         this.position.z = this.paddle_group_movement_y(frac);
 
@@ -147,8 +152,6 @@ class PaddleGroup {
                 new_vel -= strike_vel;
                 new_vel = clamp(new_vel, -this.top_paddle_strike_vel, this.top_paddle_strike_vel);
                 drum.vel_z = new_vel;
-                // It now takes a normal # of beats to move between drums
-                this.time_for_this_movement = this.movement_time_secs;
             }
             this.impacts[i][0] = new_time;
 
@@ -193,22 +196,22 @@ class PaddleGroup {
         }
     }
 
-    handle_sync(t, bpm, beat) {
-        if (this.in_position) {
-            if (beat % 4 == 3) {
-                // Do a jump
-                this.last_jump_axis = (this.last_jump_axis + 1) % 2;
-                this.cur_drum_idx[this.last_jump_axis] -= 1;
-                if (this.cur_drum_idx[this.last_jump_axis] < 0) {
-                    this.cur_drum_idx[this.last_jump_axis] += this.parent_scene.num_per_side;
-                } else {
-                    this.movement_clock.start();
-                }
-                this.movement_start_pos.copy(this.position);
-                this.movement_end_pos.copy(this.parent_scene.drum_pos_in_array(
-                    this.cur_drum_idx[0], this.cur_drum_idx[1]));
-            }
+    // Hop one drum along the given axis (0 = x, 1 = y). Unconditional: the
+    // scene commands all groups together, so even a group that is still
+    // mid-move just retargets and the checkerboard cover stays in phase.
+    jump(axis) {
+        this.cur_drum_idx[axis] -= 1;
+        if (this.cur_drum_idx[axis] < 0) {
+            // Wrapping to the far side: leave the movement clock alone so
+            // frac stays at 1 and the paddle snaps across instead of
+            // lerping the whole width of the grid.
+            this.cur_drum_idx[axis] += this.parent_scene.num_per_side;
+        } else {
+            this.movement_clock.start();
         }
+        this.movement_start_pos.copy(this.position);
+        this.movement_end_pos.copy(this.parent_scene.drum_pos_in_array(
+            this.cur_drum_idx[0], this.cur_drum_idx[1]));
     }
 }
 
@@ -227,6 +230,13 @@ export class DrumboxScene extends Scene {
 
         this.drums = [];
         this.paddle_groups = [];
+        // One axis toggle shared by every paddle group so their jumps stay
+        // in lockstep; per-group toggles could fall out of phase.
+        this.last_jump_axis = 0;    // 0 = x, 1 = y
+        // Delays each hop until the strike on the jump beat has landed
+        // (see JUMP_DELAY_BEATS); checked in anim_frame.
+        this.jump_clock = new BeatClock(this);
+        this.jump_pending = false;
 
         this.base_group = new THREE.Group();
         this.drums_group = new THREE.Group();
@@ -368,6 +378,17 @@ export class DrumboxScene extends Scene {
             }
         }
 
+        // Start the scheduled hop once the jump beat's strike has landed,
+        // partway into the gap before the next beat.
+        if (this.jump_pending &&
+                this.jump_clock.getElapsedBeats() >= JUMP_DELAY_BEATS) {
+            this.jump_pending = false;
+            this.last_jump_axis = (this.last_jump_axis + 1) % 2;
+            for (const paddle_group of this.paddle_groups) {
+                paddle_group.jump(this.last_jump_axis);
+            }
+        }
+
         for (const paddle_group of this.paddle_groups) {
             paddle_group.anim_frame(dt);
         }
@@ -402,6 +423,15 @@ export class DrumboxScene extends Scene {
         }
     }
 
+    activate() {
+        super.activate();
+        // Strikes that were in flight when the scene was last hidden froze
+        // with it; drop them so they don't all land on the first frame back.
+        for (const paddle_group of this.paddle_groups) {
+            paddle_group.impacts.length = 0;
+        }
+    }
+
     handle_beat(t, channel) {
         if (this.active) {
             const time_till_impact = this.get_beat_delay(t);
@@ -412,8 +442,11 @@ export class DrumboxScene extends Scene {
     }
 
     handle_sync(t, bpm, beat) {
-        for (const paddle_group of this.paddle_groups) {
-            paddle_group.handle_sync(t, bpm, beat);
+        if (beat % 4 == 3) {
+            // Don't jump yet — let this beat's strike land first. The hop
+            // itself starts from anim_frame once JUMP_DELAY_BEATS elapse.
+            this.jump_clock.start();
+            this.jump_pending = true;
         }
         if (beat % 8 == 0) {
             this.target_zoom = Math.random() * 0.5 + 0.85;

@@ -11,7 +11,7 @@ from message import MsgControlChange
 
 # Same websocket port adapter.py serves on, so the web client connects here
 # unchanged (it just won't get any sync/beat traffic from this script).
-WS_PORT = 8765
+WS_PORT = 8766
 
 # How often we sample the cursor and broadcast, in Hz.
 UPDATE_HZ = 60
@@ -19,8 +19,8 @@ UPDATE_HZ = 60
 # Knob indices to drive. The WebsocketController on the client maps a
 # control-change `wheel_idx` straight onto its knob of the same index, and the
 # yellow-robot scene binds knobs 3 (x spread) and 4 (y spread).
-X_WHEEL_IDX = 3
-Y_WHEEL_IDX = 4
+X_WHEEL_IDX = 8
+Y_WHEEL_IDX = 9
 
 
 # Connected viewer clients (mirrors adapter.py).

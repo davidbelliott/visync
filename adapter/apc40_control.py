@@ -34,9 +34,28 @@ KNOB_CC_BASE = 48
 KNOB_COUNT = 8
 KNOB_WHEEL_BASE = 8
 
+# How often the broadcast loop eases the smoothed values toward the MIDI
+# targets, in Hz (mirrors kinect_control.py's update rate).
+UPDATE_HZ = 30
+
+# Exponential-moving-average factor for smoothing the discrete 7-bit MIDI
+# steps (as in kinect_control.py). Higher = snappier but steppier, lower =
+# smoother but laggier.
+SMOOTHING_ALPHA = 0.35
+
+# Once a smoothed value is within half a MIDI step of its target it snaps to
+# the target exactly and stops broadcasting, so idle knobs send nothing and
+# can't override values set on the front-end by other controllers.
+SNAP_EPSILON = 0.5 / MIDI_CC_MAX
+
 
 # Connected viewer clients (mirrors adapter.py / control.py).
 connected = set()
+
+# Latest raw normalized value per knob from MIDI, keyed by wheel index. The
+# broadcast loop smooths toward these. Only touched on the event loop thread
+# (the MIDI callback hands updates over via call_soon_threadsafe).
+targets = {}
 
 # Last message's roundtrip latency divided by two, in seconds. Updated from the
 # ack messages clients send back.
@@ -58,19 +77,20 @@ async def handler(websocket):
 
 class Apc40FaderHandler:
     """rtmidi callback: turn track-fader control-change events into normalized
-    MsgControlChange broadcasts. Invoked on rtmidi's own thread, so it hands the
-    actual broadcast back to the event loop via call_soon_threadsafe."""
+    knob targets for the broadcast loop. Invoked on rtmidi's own thread, so it
+    hands the actual update back to the event loop via call_soon_threadsafe."""
 
     def __init__(self, loop):
         self.loop = loop
 
     def __call__(self, event, data=None):
         message, _deltatime = event
-        ws_msg = self.translate(message)
-        if ws_msg is not None:
-            print(ws_msg)
+        translated = self.translate(message)
+        if translated is not None:
+            print(translated)
+            wheel_idx, value = translated
             self.loop.call_soon_threadsafe(
-                websockets.broadcast, connected, ws_msg.to_json())
+                targets.__setitem__, wheel_idx, value)
 
     def translate(self, midi_msg):
         print(midi_msg)
@@ -89,8 +109,37 @@ class Apc40FaderHandler:
 
         if wheel_idx is None:
             return None
-        return MsgControlChange(
-            last_msg_latency, wheel_idx, control_val / MIDI_CC_MAX)
+        return wheel_idx, control_val / MIDI_CC_MAX
+
+
+async def broadcast_loop():
+    """Ease smoothed knob values toward the latest MIDI targets (as in
+    kinect_control.py) so the discrete 7-bit steps reach the client as a
+    continuous ramp. Unlike kinect_control, a knob is only broadcast while it
+    is still converging: once it snaps to its target it goes quiet until the
+    hardware moves again."""
+    # Smoothed knob values, keyed by wheel index, persisted across ticks.
+    smoothed = {}
+    period = 1.0 / UPDATE_HZ
+    while True:
+        tick = time.time()
+        for idx, target in targets.items():
+            prev = smoothed.get(idx)
+            if prev == target:
+                continue  # converged; quiet until MIDI moves the target
+            if prev is None:
+                # First event for this knob: no ramp start point, jump there.
+                value = target
+            else:
+                value = (SMOOTHING_ALPHA * target
+                         + (1 - SMOOTHING_ALPHA) * prev)
+                if abs(value - target) < SNAP_EPSILON:
+                    value = target  # close enough; land exactly and go quiet
+            smoothed[idx] = value
+            websockets.broadcast(
+                connected,
+                MsgControlChange(last_msg_latency, idx, value).to_json())
+        await asyncio.sleep(max(0.0, period - (time.time() - tick)))
 
 
 async def main():
@@ -108,7 +157,7 @@ async def main():
             print(f'Serving on ws://0.0.0.0:{WS_PORT} '
                   f'(APC40 "{port_name}" faders -> knobs 0-7, '
                   f'top knobs -> knobs 8-15)')
-            await asyncio.Future()  # run forever
+            await broadcast_loop()  # runs forever
     finally:
         midiin.close_port()
         del midiin

@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
+import { CH_ROT_X, CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
-    lerp_scalar,
     ease,
     update_persp_camera_aspect,
     update_orth_camera_aspect,
@@ -19,6 +18,10 @@ import {
     ObjectPool,
     BeatClock
 } from '../util.js';
+
+// Nominal free-rotation rate in rad/s; knob_to_rate scales it to [-2, 2] x
+// this. Chosen to match the old quarter-turn-per-8-beats pace at 120 bpm.
+const NOM_ROT_RATE = 0.4;
 
 class CustomSinCurve extends THREE.Curve {
     constructor( scale = 1 ) {
@@ -121,10 +124,7 @@ export class CubeLockingScene extends Scene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.clear();
-        this.rot_clock = new BeatClock(this);
         this.beat_clock = new BeatClock(this);
-
-        this.beats_per_rotation = 8;
 
         this.base_group = new THREE.Group();
 
@@ -230,8 +230,6 @@ export class CubeLockingScene extends Scene {
             }
         }
 
-        this.base_group.rotation.x = isom_angle;
-
         this.base_group.add(this.cube_wireframe);
         this.add(this.base_group);
 
@@ -240,18 +238,15 @@ export class CubeLockingScene extends Scene {
         this.base_group.add(this.spark_pool);
         this.draw_range = 0;
 
-        // rotation
-        this.start_rot = 2;
-        this.cur_rot = 2;
-        this.end_rot = 2;
-
-        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
-        // interpolates from the current angle towards the chosen step.
-        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
-            knob_to_snap(4));
-        this.rot_dir = 1;
-
-
+        // Free rotation: knob 8 sets the yaw rate about the assembly's Y axis
+        // and knob 9 the pitch rate about the viewport-horizontal (world X)
+        // axis, each in [-2, 2] * NOM_ROT_RATE rad/s (knob centred = stopped).
+        this.yaw = Math.PI / 2 * 2.5;
+        this.pitch = isom_angle;
+        this.rot_rate = 1;
+        this.pitch_rate = 0;
+        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind('apc', CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
     }
@@ -267,18 +262,25 @@ export class CubeLockingScene extends Scene {
             }
         }
 
-        // Handle rotation (driven by the knob-8 binding registered in the ctor).
+        // Free rotation (driven by the knob-8/9 bindings registered in the
+        // ctor). The default XYZ euler order applies yaw about the group's Y
+        // axis first, then pitch about the world X axis, so the pitch axis
+        // stays horizontal in the viewport whatever the yaw.
         {
-            const t = this.rot_clock.getElapsedBeats();
-            let frac = t / this.beats_per_rotation;
-            this.cur_rot = this.start_rot +
-                lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot);
-            this.base_group.rotation.y = Math.PI / 2 * (0.5 + this.cur_rot);
+            this.yaw += dt * NOM_ROT_RATE * this.rot_rate;
+            this.pitch += dt * NOM_ROT_RATE * this.pitch_rate;
+            this.base_group.rotation.x = this.pitch;
+            this.base_group.rotation.y = this.yaw;
 
-            const start_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "orange" : "magenta"));
-            const end_color = new THREE.Color((Math.round(this.start_rot) % 2 == 0 ? "magenta" : "orange"));
+            // Fill colour swings orange <-> magenta once per quarter turn of
+            // yaw, as it did per discrete quarter-turn step.
+            const turn = this.yaw / (Math.PI / 2) - 0.5;
+            const frac = turn - Math.floor(turn);
+            const from_orange = Math.floor(turn) % 2 == 0;
+            const start_color = new THREE.Color(from_orange ? "orange" : "magenta");
+            const end_color = new THREE.Color(from_orange ? "magenta" : "orange");
             const cur_color = new THREE.Color();
-            cur_color.lerpColors(start_color, end_color, clamp(frac, 0, 1));
+            cur_color.lerpColors(start_color, end_color, frac);
             if (this.fill_mat != null) {
                 this.fill_mat.color.copy(cur_color);
             }
@@ -302,20 +304,7 @@ export class CubeLockingScene extends Scene {
         }
     }
 
-    // Point the Y rotation at a new discrete step (knob-driven). Recording
-    // start_rot at the current angle and restarting rot_clock together makes
-    // the scene interpolate cleanly from wherever it is to the chosen step.
-    set_rot_y_target(target) {
-        if (target === this.end_rot) {
-            return;
-        }
-        this.start_rot = this.cur_rot;
-        this.end_rot = target;
-        this.rot_clock.start();
-    }
-
     handle_sync(t, bpm, beat) {
-        this.rot_clock.updateBPM(bpm);
         this.beat_clock.updateBPM(bpm);
     }
 

@@ -196,7 +196,7 @@ export class TessellateScene extends Scene {
         const beat_elapsed = this.beat_clock.getElapsedTime() * beats_per_sec * 8;
         let evolve_dt = 1.0 * clock_dt;
         if (this.beat_clock.running) {
-            evolve_dt += clock_dt * (beat_elapsed < 1.0 ? 4.0 : 0.0);
+            evolve_dt += clock_dt * (beat_elapsed < 2.0 ? 2.0 : 0.0);
         }
         this.evolve_time += evolve_dt;
         // Knob 8 scales the Z spin rate/direction to [-cur_rate, +cur_rate].

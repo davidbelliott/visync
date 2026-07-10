@@ -450,7 +450,6 @@ update_field_pointers() {
 
     anim_frame(dt) {
         super.anim_frame();
-        this.base_group.rotation.z += 0.05 * dt;
 
         // Integrate each ACTIVE cube’s per-vertex positions using the field
         for (let c = 0; c < MAX_CUBES; c++) {

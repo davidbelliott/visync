@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
+import { CH_ROT_X, CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
@@ -162,8 +162,10 @@ export class SpinningRobotsScene extends Scene {
         super(context);
 
         // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.pitch_rate = 1;
+        this.yaw_rate = 1;
+        this.bind('apc', CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
+        this.bind('apc', CH_ROT_Y, (v) => { this.yaw_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -237,8 +239,8 @@ export class SpinningRobotsScene extends Scene {
         const beats_per_sec = this.get_local_bpm() / 60;
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
         // Knob 8 scales the continuous spin rate to [-0.1, +0.1] rad/s.
-        this.base_group.rotation.y += 0.1 * dt * this.rot_rate;
-        this.camera.rotation.x = -0.5 * (1 + Math.sin(this.clock.getElapsedTime() * 0.1)) * isom_angle;
+        this.base_group.rotation.y += 0.1 * dt * this.yaw_rate;
+        this.camera.rotation.x += 0.1 * dt * this.pitch_rate; //-0.5 * (1 + Math.sin(this.clock.getElapsedTime() * 0.1)) * isom_angle;
 
         const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;;
         const throw_time = this.throw_clock.getElapsedBeats();

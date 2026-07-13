@@ -4,7 +4,7 @@ Grabs RGB frames from an Xbox 360 Kinect (via libfreenect) or a regular
 webcam, runs MediaPipe Pose on them, and broadcasts four normalized
 control-change knobs derived from the tracked body:
 
-    knob 8  - rotation of the body about the vertical (Y) axis  (yaw)
+    knob 8  - left/right rotation of the head                   (head yaw)
     knob 9  - bending forward / back                            (torso pitch)
     knob 3  - distance between the two hands
     knob 4  - height of the hands above the ground
@@ -65,7 +65,7 @@ UPDATE_HZ = 30
 # client maps a control-change `wheel_idx` straight onto the knob of the same
 # index. Knobs 3 and 4 are what the yellow-robot scene binds (x / y spread),
 # which lines up with hand distance / hand height.
-YAW_WHEEL_IDX = 8     # body rotation about the vertical axis
+YAW_WHEEL_IDX = 8     # head rotation about the vertical axis
 PITCH_WHEEL_IDX = 9   # bending forward / back
 HAND_DIST_WHEEL_IDX = 3
 HAND_HEIGHT_WHEEL_IDX = 4
@@ -73,7 +73,9 @@ HAND_HEIGHT_WHEEL_IDX = 4
 # Input ranges used to normalize each raw measurement into [0, 1]. Tune these
 # from the debug display: the on-screen bars show the normalized value, the
 # numbers next to them show the raw measurement feeding the normalization.
-YAW_RANGE_DEG = 75.0      # +/- this maps to [0, 1], facing the camera -> 0.5
+YAW_RANGE_DEG = 60.0      # +/- this maps to [0, 1], facing the camera -> 0.5;
+                          # tighter than a body turn since the head only
+                          # rotates so far before the shoulders follow
 PITCH_RANGE_DEG = 45.0    # +/- this maps to [0, 1], upright -> 0.5
 HAND_DIST_MAX_M = 1.6     # hands together -> 0, full span -> 1
 HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
@@ -83,6 +85,7 @@ HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
 SMOOTHING_ALPHA = 0.35
 
 # MediaPipe Pose landmark indices we use (see the Pose model card).
+L_EAR, R_EAR = 7, 8
 L_SHOULDER, R_SHOULDER = 11, 12
 L_WRIST, R_WRIST = 15, 16
 L_HIP, R_HIP = 23, 24
@@ -186,14 +189,15 @@ def compute_controls(pts):
     """Derive the four raw measurements from a (33, 3) world-landmark array.
 
     Returns a dict of raw values plus their normalized [0, 1] knob values."""
-    shoulder_vec = pts[L_SHOULDER] - pts[R_SHOULDER]
     shoulder_mid = (pts[L_SHOULDER] + pts[R_SHOULDER]) / 2
     hip_mid = (pts[L_HIP] + pts[R_HIP]) / 2
 
-    # Yaw: rotation about the vertical axis. The shoulder line lies along x
-    # when facing the camera; as the body turns, that line acquires a z
-    # component. atan2(z, x) is 0 facing the camera and grows as you turn.
-    yaw_deg = math.degrees(math.atan2(shoulder_vec[2], shoulder_vec[0]))
+    # Yaw: head rotation about the vertical axis, from the ear-to-ear line
+    # (so turning just the head steers it, independent of the body). The ear
+    # line lies along x when facing the camera; as the head turns, it acquires
+    # a z component. atan2(z, x) is 0 facing the camera and grows as you turn.
+    ear_vec = pts[L_EAR] - pts[R_EAR]
+    yaw_deg = math.degrees(math.atan2(ear_vec[2], ear_vec[0]))
     # Fold the +/-180 ambiguity (facing toward vs away) onto a +/-90 range.
     if yaw_deg > 90:
         yaw_deg -= 180
@@ -247,7 +251,7 @@ def draw_debug(cv2, frame_rgb, norm_landmarks, controls, smoothed):
         draw_skeleton(cv2, bgr, norm_landmarks)
 
     rows = [
-        (f"knob {YAW_WHEEL_IDX} yaw",
+        (f"knob {YAW_WHEEL_IDX} head yaw",
          smoothed.get(YAW_WHEEL_IDX),
          f"{controls['yaw_deg']:+5.1f} deg" if controls else ""),
         (f"knob {PITCH_WHEEL_IDX} pitch",
@@ -390,7 +394,7 @@ async def main():
     try:
         async with websockets.serve(handler, "0.0.0.0", WS_PORT):
             print(f'Serving on ws://0.0.0.0:{WS_PORT} '
-                  f'(yaw -> knob {YAW_WHEEL_IDX}, '
+                  f'(head yaw -> knob {YAW_WHEEL_IDX}, '
                   f'pitch -> knob {PITCH_WHEEL_IDX}, '
                   f'hand dist -> knob {HAND_DIST_WHEEL_IDX}, '
                   f'hand height -> knob {HAND_HEIGHT_WHEEL_IDX})')

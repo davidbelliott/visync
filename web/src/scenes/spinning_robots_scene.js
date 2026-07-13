@@ -1,160 +1,62 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_X, CH_ROT_Y, knob_to_rate } from '../controller_map.js';
+import {
+    CH_EXPAND_X, CH_EXPAND_Y, CH_ROT_X, CH_ROT_Y, knob_to_rate
+} from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
-    rand_int,
     clamp,
-    arr_eq,
-    create_instanced_cube,
-    make_wireframe_rectangle,
-    make_wireframe_cone,
-    make_wireframe_circle,
-    make_line,
-    ShaderLoader,
-    Spark,
+    create_instanced_cube_templates,
     BeatClock
 } from '../util.js';
-import { BoxDef } from '../geom_def.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 
-const RobotParts = {
+// Wireframe opacity [0, 1] for the robots at the middle edges of the grid; the
+// center robot stays at 1.0 and opacity falls off linearly with distance
+// (clamped to 0, so the far corners fade out completely).
+// 0.15 keeps the mid-edge robots just visible against the black background.
+const EDGE_WIREFRAME_OPACITY = 0.15;
+
+// Robot-local geometry (y up, robot faces +z), in scene units. The torso
+// center sits BODY_BASE_Y above the robot origin; arms and shoes hang off the
+// torso, so the body bob shifts every part (the shoes ride the bob too).
+const ARM_BASE_Y = 0.0;             // arm center y, relative to torso center
+const BODY_BASE_Y = 1.0;            // torso center y, relative to robot origin
+const FOOT_BASE_Y = -3.0;           // shoe center y, relative to torso center
+const FOOT_BASE_Z = 0.0;            // shoe center z, relative to torso center
+const THROW_HEIGHT = 8.0;           // peak spinner height above the arm mid-throw
+const THROW_MOVEMENT_BEATS = 4;     // beats a full spinner throw arc takes
+
+// The robot hierarchy (torso -> head -> eyes, torso -> arm -> spinner) is
+// flattened into per-instance transforms so the whole grid of robots renders
+// from one InstancedGeometryCollection (same approach as
+// components/yellow_robot.js). Instance index = robot * MAX + part.
+const CubeParts = {
     TORSO: 0,
-    LEGS: [1, 2],
-    HEAD: 3,
-    HANDS: [4, 5],
-    FEET: [6, 7],
-    ARMS: [8, 9],
-    EYES: 10,
-    MAX: 11
-}
+    HEAD: 1,
+    EYES: 2,
+    ARMS: [3, 4],       // left, right
+    SPINNERS: [5, 6],   // left, right
+    MAX: 7
+};
 
-function cube_at(pos, dims, color="white") {
-    const created_mesh = create_instanced_cube(dims, color);
-    created_mesh.position.set(...pos);
-    return created_mesh;
-}
+// Static per-part instance scale (= cube dims), indexed by CubeParts.
+const CUBE_SCALES = [
+    new THREE.Vector3(4, 2, 2),             // torso
+    new THREE.Vector3(3, 1, 2),             // head
+    new THREE.Vector3(2.0, 0.25, 0.25),     // eyes
+    new THREE.Vector3(0.5, 1.0, 3.0),       // arms
+    new THREE.Vector3(0.5, 1.0, 3.0),
+    new THREE.Vector3(0.5, 0.5, 5.0),       // spinners
+    new THREE.Vector3(0.5, 0.5, 5.0)
+];
 
-class Robot extends THREE.Object3D {
-    constructor(shoe_mesh, spinner_phase_offset) {
-        super('spinningrobots');
-        this.arm_base_y = 0.0;
-        this.body_base_y = 1.0;
-        this.foot_base_y = -3.0;
-        this.foot_base_z = 0.0;
-        this.spinners = [
-            cube_at([-0.5, 0, 1.25], [0.5, 0.5, 5.0]),
-            cube_at([+0.5, 0, 1.25], [0.5, 0.5, 5.0])
-        ];
-        this.arms = [
-            cube_at([-2.25, this.arm_base_y, 1.5], [0.5, 1.0, 3.0]),
-            cube_at([+2.25, this.arm_base_y, 1.5], [0.5, 1.0, 3.0])
-        ];
-        this.eyes = cube_at([0, 0, 1.125], [2.0, 0.25, 0.25]);
-        this.head = cube_at([0, 2.5, 0], [3, 1, 2]);
-        this.head.add(this.eyes);
-        this.torso = cube_at([0, this.body_base_y, 0], [4, 2, 2]);
-        //this.head.add(this.eyes);
-        this.torso.add(this.head);
-        for (let i = 0; i < 2; i++) {
-            this.arms[i].add(this.spinners[i]);
-            this.spinners[i].rotation.x = spinner_phase_offset;
-            this.torso.add(this.arms[i]);
-        }
-
-        this.feet = [];
-        for (let i = 0; i < 2; i++) {
-            const this_shoe = shoe_mesh.clone();
-            this_shoe.position.set(1.5 * (2 * i - 1), this.foot_base_y, this.foot_base_z);
-            this.torso.add(this_shoe);
-            this.feet.push(this_shoe);
-        }
-        this.add(this.torso);
-
-        this.clock = new THREE.Clock(true);
-
-        this.throw_height = 8.0;
-        this.throw_movement_beats = 4;
-    }
-
-    anim_frame(dt, half_beat_time, throw_time, bpm) {
-        const beats_per_sec = bpm / 60;
-
-        const body_offset = this.get_body_shuffle_offset(half_beat_time);
-        const arms_offset = this.get_arms_pump_offset(half_beat_time);
-
-        const throw_frac = clamp(throw_time / this.throw_movement_beats, 0, 1);
-        let cur_throw_y = this.throw_height * (1 - (2 * throw_frac - 1) ** 2);
-        if (throw_frac > 0 && throw_frac < 1) {
-            cur_throw_y - arms_offset;
-        }
-
-        for (let i = 0; i < 2; i++) {
-            this.spinners[i].rotation.x += Math.PI * dt * beats_per_sec;
-            this.spinners[i].position.y = cur_throw_y;
-            this.spinners[i].material.color.setHSL(Math.sin(this.spinners[i].rotation.x / 32), 1, 0.5);
-            this.spinners[i].children[0].material.color.setHSL(Math.sin(this.spinners[i].rotation.x / 32), 1, 0.5);
-            this.spinners[i].children[0].material.opacity = 0.0;
-        }
-
-        for (let side = 0; side < 2; side++) {
-            const shuffle_offset = this.get_foot_shuffle_offset(side, half_beat_time);
-            this.feet[side].position.y = this.foot_base_y + shuffle_offset[1];
-            this.feet[side].position.z = this.foot_base_z + shuffle_offset[2];
-            this.torso.position.y = this.body_base_y + body_offset;
-            this.arms[side].position.y = this.arm_base_y + arms_offset;
-        }
-    }
-
-
-    get_foot_shuffle_offset(side_idx, t) {
-        // get shuffle offset for this side as an array [x, y, z]
-        // side_idx: 0 for left, 1 for right
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
-            [0, ease(Math.max(0, 1 - dt / t_mov)), ease(Math.min(1, dt / t_mov))],
-            [0, 0, ease(Math.max(0, 1 - dt / t_mov))],
-            [0, 0, ease(Math.max(-1, -dt / t_mov))]];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % position_options.length;
-        return position_options[pos_idx];
-    }
-
-    get_body_shuffle_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.8;
-    }
-
-    get_arms_pump_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.6;
-    }
-}
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
+const WHITE = new THREE.Color('white');
 
 
 export class SpinningRobotsScene extends Scene {
@@ -179,48 +81,99 @@ export class SpinningRobotsScene extends Scene {
 
         this.camera = this.cam_orth;
 
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
-
         this.clear();
         this.base_group = new THREE.Group();
 
-        this.curr_spacing = 8;
-        this.robots_per_side = 10;
-        this.robots = [];
+        this.robots_per_side = 12;
 
-        const this_class = this;
+        // Grid spacing along x / z, driven live by MIDI knobs 3 and 4 like
+        // the yellow robot grid; starts at the scene's original spacing.
+        this.spread_x = 8;
+        this.spread_y = 8;
+        this.bind('apc', CH_EXPAND_X, (v) => { this.spread_x = v; },
+            (norm) => norm * 8);
+        this.bind('apc', CH_EXPAND_Y, (v) => { this.spread_y = v; },
+            (norm) => norm * 8);
 
+        // Per-robot statics, in the same (i, j) row-major order as the
+        // instance layout below.
+        this.grid_coords = [];      // unit grid coords, centered; the live
+                                    // spread_x/spread_y scale them per frame
+        this.robot_alphas = [];     // wireframe opacity, fading toward the edges
+        this.spinner_phases = [];   // spin phase, so the grid shimmers instead
+                                    // of strobing in unison
+
+        const half_side = (this.robots_per_side - 1) / 2;
+        // Center to mid-edge distance: dist_from_center_norm reaches 1 at the
+        // middle of each grid edge and overshoots at the corners.
+        const edge_dist = Math.max(half_side, 1e-6);
+        for (let i = 0; i < this.robots_per_side; i++) {
+            for (let j = 0; j < this.robots_per_side; j++) {
+                this.grid_coords.push(new THREE.Vector2(
+                    i - half_side, j - half_side));
+                const dist_from_center_norm = Math.hypot(i - half_side, j - half_side) / edge_dist;
+                this.robot_alphas.push(clamp(
+                    lerp_scalar(1.0, EDGE_WIREFRAME_OPACITY, dist_from_center_norm), 0, 1));
+                this.spinner_phases.push(Math.PI / 8 * (i + j));
+            }
+        }
+        const num_robots = this.grid_coords.length;
+
+        // Robot-local cube centers, refilled by compute_robot_pose each frame
+        // and shared by every robot (only spinner rotation/color are per-robot).
+        this.pose = [];
+        for (let k = 0; k < CubeParts.MAX; k++) {
+            this.pose.push(new THREE.Vector3());
+        }
+        this.compute_robot_pose(0, 0);
+
+        // All body cubes of all robots draw from one wireframe collection.
+        const [cube_wire_template] = create_instanced_cube_templates(1, 1, 1);
+        this.inst_cubes = new InstancedGeometryCollection(
+            this.base_group, cube_wire_template, 'Lines',
+            num_robots * CubeParts.MAX);
+
+        const tmp = new THREE.Vector3();
+        for (let r = 0; r < num_robots; r++) {
+            const gc = this.grid_coords[r];
+            for (let k = 0; k < CubeParts.MAX; k++) {
+                const p = this.pose[k];
+                tmp.set(p.x + gc.x * this.spread_x, p.y,
+                    p.z + gc.y * this.spread_y);
+                this.inst_cubes.create_geom(tmp, WHITE, CUBE_SCALES[k], null,
+                    this.robot_alphas[r]);
+            }
+        }
+
+        // Shoes: the STL's edges instanced as lines, wireframe-only like the
+        // body cubes. Stays null until the mesh loads; instance index =
+        // robot * 2 + side.
+        this.shoe_wires = null;
         const loader = new STLLoader();
         loader.load('stl/shoe.stl',
-            function(geometry) {
-                const wireframe_mat = new THREE.LineBasicMaterial( { color: "white", linewidth: 1 } );
-                const fill_mat = new THREE.MeshBasicMaterial({
-                    color: "black",
-                    polygonOffset: true,
-                    polygonOffsetFactor: 1, // positive value pushes polygon further away
-                    polygonOffsetUnits: 1,
-                    transparent: true,
-                    opacity: 0.5
-                });
+            (geometry) => {
+                // Bake the mesh-local transform (the STL is mm-scale and
+                // z-up) into the templates so instances only carry a position.
+                geometry.scale(0.01, 0.01, 0.01);
+                geometry.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(
+                    new THREE.Euler(-Math.PI / 2, 0, -Math.PI / 2)));
                 const edges = new THREE.EdgesGeometry(geometry, 30);
-                const mesh = new THREE.LineSegments(edges, wireframe_mat);
-                const mesh_inner = new THREE.Mesh(geometry, fill_mat);
-                mesh.add(mesh_inner);
-                mesh.scale.set(0.01, 0.01, 0.01);
-                mesh.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
 
+                this.shoe_wires = new InstancedGeometryCollection(
+                    this.base_group, edges, 'Lines', num_robots * 2);
 
-                for (let i = 0; i < this_class.robots_per_side; i++) {
-                    for (let j = 0; j < this_class.robots_per_side; j++) {
-                        const position = new THREE.Vector3((i - (this_class.robots_per_side - 1) / 2) * this_class.curr_spacing, 0,
-                            (j - (this_class.robots_per_side - 1) / 2) * this_class.curr_spacing);
-                        const robot = new Robot(mesh, Math.PI / 8 * (i + j));
-                        robot.position.copy(position);
-                        this_class.robots.push(robot);
-                        this_class.base_group.add(robot);
+                const shoe_pos = new THREE.Vector3();
+                for (let r = 0; r < num_robots; r++) {
+                    const gc = this.grid_coords[r];
+                    for (let side = 0; side < 2; side++) {
+                        shoe_pos.set(
+                            1.5 * (2 * side - 1) + gc.x * this.spread_x,
+                            BODY_BASE_Y + FOOT_BASE_Y,
+                            FOOT_BASE_Z + gc.y * this.spread_y);
+                        this.shoe_wires.create_geom(shoe_pos, WHITE, UNIT_SCALE,
+                            null, this.robot_alphas[r]);
                     }
                 }
-
             },
             (xhr) => { },
             (error) => {
@@ -233,20 +186,129 @@ export class SpinningRobotsScene extends Scene {
         this.clock = new THREE.Clock(true);
         this.half_beat_clock = new BeatClock(this);
         this.throw_clock = new BeatClock(this);
+
+        this.spinner_angle = 0;     // accumulated spinner rotation, radians
+        this.spinner_quat = new THREE.Quaternion();
+        this.spinner_color = new THREE.Color();
+        this.tmp_vec = new THREE.Vector3();
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
         // Knob 8 scales the continuous spin rate to [-0.1, +0.1] rad/s.
         this.base_group.rotation.y += 0.1 * dt * this.yaw_rate;
-        this.camera.rotation.x += 0.1 * dt * this.pitch_rate; //-0.5 * (1 + Math.sin(this.clock.getElapsedTime() * 0.1)) * isom_angle;
+        this.camera.rotation.x += 0.1 * dt * this.pitch_rate;
 
-        const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;;
+        const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         const throw_time = this.throw_clock.getElapsedBeats();
-        for (const r of this.robots) {
-            r.anim_frame(dt, half_beat_time, throw_time, this.get_local_bpm());
+
+        this.compute_robot_pose(half_beat_time, throw_time);
+        this.spinner_angle += Math.PI * dt * beats_per_sec;
+
+        // Every robot shuffles in lockstep: one offset per side per frame.
+        const shuffles = [
+            this.get_foot_shuffle_offset(0, half_beat_time),
+            this.get_foot_shuffle_offset(1, half_beat_time)
+        ];
+        const torso_y = this.pose[CubeParts.TORSO].y;
+
+        // Spread can change live (MIDI knobs), so grid positions are laid
+        // out every frame.
+        const tmp = this.tmp_vec;
+        for (let r = 0; r < this.grid_coords.length; r++) {
+            const gc = this.grid_coords[r];
+            const gx = gc.x * this.spread_x;
+            const gz = gc.y * this.spread_y;
+            const base = r * CubeParts.MAX;
+            for (let k = 0; k < CubeParts.MAX; k++) {
+                const p = this.pose[k];
+                tmp.set(p.x + gx, p.y, p.z + gz);
+                this.inst_cubes.set_pos(base + k, tmp);
+            }
+
+            // Spinners spin about x and slowly cycle hue with their angle.
+            const angle = this.spinner_angle + this.spinner_phases[r];
+            this.spinner_quat.setFromAxisAngle(X_AXIS, angle);
+            this.spinner_color.setHSL(Math.sin(angle / 32), 1, 0.5);
+            for (const k of CubeParts.SPINNERS) {
+                this.inst_cubes.set_quaternion(base + k, this.spinner_quat);
+                this.inst_cubes.set_color(base + k, this.spinner_color,
+                    this.robot_alphas[r]);
+            }
+
+            if (this.shoe_wires !== null) {
+                for (let side = 0; side < 2; side++) {
+                    tmp.set(1.5 * (2 * side - 1) + gx,
+                        torso_y + FOOT_BASE_Y + shuffles[side][1],
+                        FOOT_BASE_Z + shuffles[side][2] + gz);
+                    this.shoe_wires.set_pos(2 * r + side, tmp);
+                }
+            }
         }
+    }
+
+    // Fill this.pose with robot-local cube centers for the shared dance pose:
+    // half_beat_time is normalized time since the half-note beat, throw_time
+    // beats since the last spinner throw (both from the scene's BeatClocks).
+    compute_robot_pose(half_beat_time, throw_time) {
+        const body_offset = this.get_body_shuffle_offset(half_beat_time);
+        const arms_offset = this.get_arms_pump_offset(half_beat_time);
+
+        // Parabolic throw arc: 0 at the ends, THROW_HEIGHT at the midpoint.
+        const throw_frac = clamp(throw_time / THROW_MOVEMENT_BEATS, 0, 1);
+        const cur_throw_y = THROW_HEIGHT * (1 - (2 * throw_frac - 1) ** 2);
+
+        const torso_y = BODY_BASE_Y + body_offset;
+        this.pose[CubeParts.TORSO].set(0, torso_y, 0);
+        this.pose[CubeParts.HEAD].set(0, torso_y + 2.5, 0);
+        this.pose[CubeParts.EYES].set(0, torso_y + 2.5, 1.125);
+        for (let side = 0; side < 2; side++) {
+            const sign = 2 * side - 1;      // -1 left, +1 right
+            const arm_y = torso_y + ARM_BASE_Y + arms_offset;
+            this.pose[CubeParts.ARMS[side]].set(sign * 2.25, arm_y, 1.5);
+            this.pose[CubeParts.SPINNERS[side]].set(
+                sign * 2.75, arm_y + cur_throw_y, 2.75);
+        }
+    }
+
+    get_foot_shuffle_offset(side_idx, t) {
+        // get shuffle offset for this side as an array [x, y, z]
+        // side_idx: 0 for left, 1 for right
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
+            [0, ease(Math.max(0, 1 - dt / t_mov)), ease(Math.min(1, dt / t_mov))],
+            [0, 0, ease(Math.max(0, 1 - dt / t_mov))],
+            [0, 0, ease(Math.max(-1, -dt / t_mov))]];
+        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % position_options.length;
+        return position_options[pos_idx];
+    }
+
+    get_body_shuffle_offset(t) {
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            ease(Math.min(1, dt / t_mov)),
+            ease(Math.max(0, 1 - dt / t_mov))];
+        const pos_idx = Math.floor(t / t_period) % position_options.length;
+        return position_options[pos_idx] * 0.8;
+    }
+
+    get_arms_pump_offset(t) {
+        // t: normalized time since half-note beat (0 - 1)
+        const t_period = 1.0 / 4.0;
+        const t_mov = t_period * 0.8;
+        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
+        const position_options = [
+            ease(Math.min(1, dt / t_mov)),
+            ease(Math.max(0, 1 - dt / t_mov))];
+        const pos_idx = Math.floor(t / t_period) % position_options.length;
+        return position_options[pos_idx] * 0.6;
     }
 
     handle_sync(t, bpm, beat) {

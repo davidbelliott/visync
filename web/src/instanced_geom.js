@@ -63,7 +63,7 @@ function create_wireframe_mat() {
 }
 
 
-function create_fill_mat() {
+function create_fill_mat(transparent=false) {
 
     var vertexShaderPars = [
         "attribute vec3 instanceOffset;",
@@ -100,7 +100,8 @@ function create_fill_mat() {
             color: 'white',
             polygonOffset: true,
             polygonOffsetFactor: 1, // positive value pushes polygon further away
-            polygonOffsetUnits: 1
+            polygonOffsetUnits: 1,
+            transparent: transparent
         });
         fill_mat.flatShading = false;
 
@@ -140,10 +141,12 @@ function create_fill_mat() {
 
 // A batch of identical geometries drawn in a single call, with per-instance
 // position, scale, rotation (a quaternion), and RGBA color. Alpha only
-// blends for the line draw types; the triangle fill renders opaque.
+// blends for the line draw types and, when transparent_fill is set, for
+// Triangles; an opaque (default) triangle fill ignores instance alpha.
 // Valid types: Lines, LineStrip, Triangles
 export class InstancedGeometryCollection {
-    constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024) {
+    constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024,
+                transparent_fill=false) {
         this.scene = scene;
         this.maxInstances = maxInstances;
         this.draw_type = draw_type;
@@ -151,6 +154,15 @@ export class InstancedGeometryCollection {
         // Creating an instanced geometry based on the template
         this.instancedGeometry = new THREE.InstancedBufferGeometry().copy(templateGeometry);
         this.instancedGeometry.instanceCount = 0;
+
+        // An auto-computed bounding sphere would cover only the template, not
+        // the instance offsets (hence frustumCulled = false below), and its
+        // template-dependent center feeds the renderer's transparent z-sort —
+        // sibling collections would swap draw order as the camera moves. Pin
+        // it to the origin so collections under one parent sort as equal and
+        // draw in creation order.
+        this.instancedGeometry.boundingSphere =
+            new THREE.Sphere(new THREE.Vector3(0, 0, 0), Infinity);
 
 
         // Pre-allocating position, color, scale, and rotation attributes
@@ -175,7 +187,7 @@ export class InstancedGeometryCollection {
             this.mesh.frustumCulled = false;
             this.scene.add(this.mesh);
         } else if (this.draw_type == 'Triangles') {
-            create_fill_mat().then((mat) => {
+            create_fill_mat(transparent_fill).then((mat) => {
                 this.mat = mat;
                 this.mesh = new THREE.Mesh(this.instancedGeometry, this.mat);
                 this.mesh.frustumCulled = false;

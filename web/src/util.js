@@ -181,10 +181,15 @@ export function make_wireframe_cube(dims, color) {
 }
 
 
-export function create_instanced_cube(dims, color, add_fill=true, fill_color="black", fill_opacity=0.0) {
+export function create_instanced_cube(dims, color, add_fill=true, fill_color="black", fill_opacity=0.0, wireframe_opacity=1.0) {
     let geometry = new THREE.BoxGeometry(...dims);
     let wireframe = new THREE.EdgesGeometry(geometry);
-    const wireframe_mat = new THREE.LineBasicMaterial( { color: color, linewidth: 2 } );
+    const wireframe_mat = new THREE.LineBasicMaterial( {
+        color: color,
+        linewidth: 2,
+        transparent: (wireframe_opacity < 1.0),
+        opacity: wireframe_opacity,
+    } );
     const mesh = new THREE.LineSegments(wireframe, wireframe_mat);
 
     if (add_fill) {

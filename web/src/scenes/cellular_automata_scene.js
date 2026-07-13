@@ -15,12 +15,12 @@ const CELL_DRAW_SIZE = 1.0;
 // Automaton generations per beat.
 const GENS_PER_BEAT = 16;
 // A rule change (with a board clear) every 16 bars of 4 beats.
-const BEATS_PER_RULE = 64;
+const BEATS_PER_RULE = 32;
 // Seed blob dropped at the box center on every beat: cells within
 // SEED_RADIUS are born with probability SEED_FILL. Dense enough to satisfy
 // high-birth-count rules like Clouds (a cell needs 13+ alive neighbors).
 const SEED_RADIUS = 5;
-const SEED_FILL = 0.5;
+const SEED_FILL = 0.2;
 // Cap on drawn cubes; cells beyond it (very dense boards) go undrawn.
 const MAX_INSTANCES = 1 << 18;
 // Continuous drift of the whole box (rad/s), scaled by knobs 8/9.
@@ -40,17 +40,17 @@ const RULESETS = [
     // 445: sparse skeletal growth - crisp white/magenta/blue neon
     { rule: '4/4/5/M', colors: [0xffffff, 0xff00ff, 0x0000ff] },
     // Pyroclastic: billowing plumes - white heat through ember to dark red
-    { rule: '4-7/6-8/10/M', colors: [0xffffff, 0xff5500, 0x660000] },
+    { rule: '6/3/15/M', colors: [0xffffff, 0xff5500, 0x660000] },
     // Amoeba: writhing blobs - bioluminescent green sinking into teal
-    { rule: '9-26/5-7,12-13,15/5/M', colors: [0xffffff, 0x00ff80, 0x005050] },
+    { rule: '9-15/5-8,12-13,15/10/M', colors: [0xeeffee, 0x00ff80, 0x005050] },
     // Builder 1: scaffolding structures - work-light gold rusting away
     { rule: '2,6,9/4,6,8-9/10/M', colors: [0xffffff, 0xffcc00, 0x662200] },
     // 678 678: coral shells - hot pink calcifying to purple
-    { rule: '6-8/6-8/3/M', colors: [0xffffff, 0xff2e88, 0x5500aa] },
+    { rule: '6-8/5-10/15/M', colors: [0xffffff, 0x80ff80, 0x00ff00] },
     // Clouds 1: dense rolling clouds - a single icy blue-white
-    { rule: '13-26/13-14,17-19/2/M', colors: [0x88ddff, 0x00ccff, 0x000066] },
+    { rule: '5-8/6-7/20/M', colors: [0x88ddff, 0x00ccff, 0x000066] },
     // Slow Decay: melting mass - violet rotting down to deep indigo
-    { rule: '8,11,13-26/13-26/5/M', colors: [0xffffff, 0xaa44ff, 0x220066] },
+    { rule: '3-7/6/8/M', colors: [0xffffff, 0xaa44ff, 0x220066] },
 ];
 
 const S = GRID_SIZE;
@@ -155,12 +155,14 @@ export class CellularAutomataScene extends Scene {
         this.add(this.base_group);
 
         // Lights stay outside base_group so they don't spin with the box.
-        this.point_light = new THREE.PointLight("white", 150, 0, 1.0);
-        this.point_light.position.set(60, 100, 160);
-        this.add(this.point_light);
+        this.point_light = new THREE.PointLight("white", 100, 0, 1.0);
+        this.point_light.position.set(100, 100, 100);
+        this.base_group.add(this.point_light);
         this.directional_light = new THREE.DirectionalLight("white", 0.3);
-        this.directional_light.position.set(1, 1, 1);
+        this.directional_light.position.set(-1, 1, 1);
         this.add(this.directional_light);
+        this.amb_light = new THREE.AmbientLight("white", 0.2);
+        this.add(this.amb_light);
 
         // Simulation state: per-cell values in [0, num_states), a 0/1 copy
         // of the alive cells, and two scratch buffers the box-sum passes

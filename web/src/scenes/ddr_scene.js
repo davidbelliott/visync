@@ -16,6 +16,10 @@ import {
 
 const BODY_COLOR = new THREE.Color("red");
 const ROT_BEATS = 3.75;
+// Beats to lerp the clap arm orientation (front vs. overhead) after each
+// measure's toggle. 1 beat finishes the swing before the next clap (beat 2),
+// so the flip reads as part of the wind-up instead of a snap.
+const CLAP_DIR_TRANSITION_BEATS = 1;
 const ARROW_VEL = 5;
 const ARROW_TOP_Y = 1.27;
 
@@ -59,6 +63,8 @@ class DDRRobot extends THREE.Object3D {
         this.cur_foot_dir = 0;
         this.cur_foot_rot = 0;
         this.clap_dir = 0;
+        this.prev_clap_dir = 0;
+        this.clap_dir_cur = 0;
         this.dance_mode = 0;
         this.add(this.body);
         for (const child_mesh of gltf_parent_object.children) {
@@ -155,16 +161,13 @@ class DDRRobot extends THREE.Object3D {
         x *= 1.75 * (side * 2 - 1);
 
         const vec = new THREE.Vector3(x, y, 0);
-        vec.applyAxisAngle(new THREE.Vector3(1, 0, 0), this.clap_dir * Math.PI / 2);
+        vec.applyAxisAngle(new THREE.Vector3(1, 0, 0), this.clap_dir_cur * Math.PI / 2);
         return vec;
     }
 
     toggle_clap_mode() {
-        if (this.clap_dir == 0) {
-            this.clap_dir = 1;
-        } else {
-            this.clap_dir = 0;
-        }
+        this.prev_clap_dir = this.clap_dir;
+        this.clap_dir = (this.clap_dir == 0) ? 1 : 0;
     }
 
     anim_frame(dt, half_beat_time, measure_time, clap_time, bpm) {
@@ -180,6 +183,12 @@ class DDRRobot extends THREE.Object3D {
             this.cur_foot_rot = Math.max(0, this.cur_foot_rot - 0.1);
         }
 
+
+        // measure_time resets in lockstep with toggle_clap_mode (both fire on
+        // handle_sync's beat % 4 == 1), so it doubles as the transition clock.
+        const clap_dir_frac = ease(clamp(
+            measure_time * 4 / CLAP_DIR_TRANSITION_BEATS, 0, 1));
+        this.clap_dir_cur = lerp_scalar(this.prev_clap_dir, this.clap_dir, clap_dir_frac);
 
         const body_offset = this.get_body_shuffle_offset(half_beat_time);
         const arms_offset = this.get_arms_pump_offset(half_beat_time);

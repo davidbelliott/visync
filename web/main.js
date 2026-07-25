@@ -79,6 +79,7 @@ const ENABLE_GLOBAL_TRACERS = false;
 const BG_COLOR = 'black';
 
 const SCENES_PER_BANK = 10;
+const NUM_SLOTS = 10;
 
 // Longest frame delta (seconds) passed to scene animation. rAF stops while
 // the tab/window is hidden, so an unclamped delta can span minutes and blow
@@ -490,8 +491,17 @@ class GraphicsContext {
                 (idx) => this.change_scene(idx, true), to_scene_idx));
         }
 
-        // Array of scenes on-screen, which are rendered sequentially first-to-last.
-        this.shown_scenes = [];
+        // Fixed NUM_SLOTS render layers: shown_scenes[slot] is the scene
+        // registry index currently occupying that slot, or undefined if
+        // empty. Rendered/dispatched in ascending slot order, so higher
+        // slots draw on top. Slot 0 is background, slot 1 is foreground
+        // (see change_scene/set_slot); slots 2-9 are only reachable from the
+        // keyboard (see keydown) and always draw above both.
+        this.shown_scenes = new Array(NUM_SLOTS).fill(undefined);
+
+        // Which slot plain number-key presses target; shift+<numkey>
+        // changes this instead of changing a scene (see keydown).
+        this.active_slot = 1;
 
         // Show a default scene at startup. The scene-selection bindings above
         // used to run every frame and did this implicitly from the knobs'
@@ -584,6 +594,9 @@ class GraphicsContext {
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.shown_scenes.forEach((idx) => {
+            if (idx === undefined) {
+                return;
+            }
             this.scenes.get(idx).anim_frame(dt);
         });
     }
@@ -619,7 +632,7 @@ class GraphicsContext {
     }
 
     render() {
-            // Use direct rendering to screen in scene bg -> fg order
+            // Render slots in ascending order, so higher slots draw on top.
 
             // Clear buffer 0 (background)
             this.renderer.setRenderTarget(this.buffers[0]);
@@ -629,6 +642,9 @@ class GraphicsContext {
             this.renderer.clear();
 
             this.shown_scenes.forEach((idx) => {
+                if (idx === undefined) {
+                    return;
+                }
                 this.scenes.get(idx).render(this.renderer, this.buffers[0]);
                 const vector = new THREE.Vector2(0, 0);
                 this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
@@ -649,85 +665,52 @@ class GraphicsContext {
         });
     }
 
-    push_scene(new_scene_idx) {
-        if (this.scenes.has(new_scene_idx) && !this.shown_scenes.includes(new_scene_idx)) {
-            this.shown_scenes.unshift(new_scene_idx);
-            this.scenes.get(new_scene_idx).activate();
-
-            // Update relevant element in the HTML overlay
-            const str_len = 10;
-            const hud_div = document.getElementById('bg-name');
-            const scene_name_pad = this.scenes.get(new_scene_idx).shortname
-                .substring(0, str_len).padEnd(str_len);
-            console.log(scene_name_pad);
-            hud_div.innerHTML = scene_name_pad;
-        }
-    }
-
-    pop_scene() {
-        const popped_idx = this.shown_scenes.pop();
-        if (this.scenes.has(popped_idx)) {
-            this.scenes.get(popped_idx).deactivate()
-
-            // Update relevant element in the HTML overlay
-            const str_len = 10;
-            const hud_div = document.getElementById('fg-name');
-            let scene_name = "";
-            if (this.shown_scenes.length > 0) {
-                const scene_name = this.scenes.get(this.shown_scenes[
-                    this.shown_scenes.length - 1]).shortname;
-            }
-            const scene_name_pad = scene_name.substring(0, str_len).padEnd(str_len);
-            console.log(scene_name_pad);
-            hud_div.innerHTML = scene_name_pad;
-        }
-        return popped_idx;
-    }
-
-    change_scene(scene_idx, bg = false) {
-        if (!this.scenes.has(scene_idx)) {
+    // Put scene_idx in the given slot, leaving every other slot untouched.
+    // Deactivates whatever scene is leaving the slot (unless it's still
+    // shown in another slot) and activates the new one; updates the fg/bg
+    // HUD labels if this is slot 0 or 1, the only slots with one.
+    set_slot(slot, scene_idx) {
+        if (!this.scenes.has(scene_idx) || this.shown_scenes[slot] === scene_idx) {
             return;
         }
 
-        // Keep exactly one background and one foreground scene on-screen, in
-        // [background, foreground] render order. Changing one leaves the other
-        // (whatever was already shown) untouched; any extra scenes are dropped.
-        const cur_bg = this.shown_scenes[0];
-        const cur_fg = this.shown_scenes[this.shown_scenes.length - 1];
-        const new_bg = bg ? scene_idx : cur_bg;
-        const new_fg = bg ? cur_fg : scene_idx;
+        const old_idx = this.shown_scenes[slot];
+        this.shown_scenes[slot] = scene_idx;
 
-        const new_shown = [];
-        if (new_bg !== undefined) new_shown.push(new_bg);
-        if (new_fg !== undefined) new_shown.push(new_fg);
+        if (old_idx !== undefined && !this.shown_scenes.includes(old_idx)) {
+            this.scenes.get(old_idx).deactivate();
+        }
+        this.scenes.get(scene_idx).activate();
 
-        // Deactivate scenes leaving the screen; activate newly-shown ones.
-        this.shown_scenes.forEach((idx) => {
-            if (!new_shown.includes(idx)) {
-                this.scenes.get(idx).deactivate();
-            }
-        });
-        new_shown.forEach((idx) => {
-            if (!this.shown_scenes.includes(idx)) {
-                this.scenes.get(idx).activate();
-            }
-        });
+        const hud_id = slot === 0 ? 'bg-name' : (slot === 1 ? 'fg-name' : null);
+        if (hud_id !== null) {
+            const str_len = 10;
+            const name_pad = this.scenes.get(scene_idx).shortname
+                .substring(0, str_len).padEnd(str_len);
+            document.getElementById(hud_id).innerHTML = name_pad;
+        }
+    }
 
-        this.shown_scenes = new_shown;
+    // Scene-change messages (MIDI/network MsgGotoScene, and the APC knobs 14
+    // / 15 bound above) always target the fixed foreground (slot 1) /
+    // background (slot 0) slots, regardless of which slot the keyboard
+    // currently has active (see keydown).
+    change_scene(scene_idx, bg = false) {
+        this.set_slot(bg ? 0 : 1, scene_idx);
     }
 
     advance_state(steps) {
         console.log(`advance ${steps} steps`);
         this.shown_scenes.forEach((idx) => {
-            const scene = this.scenes.get(idx);
+            const scene = idx !== undefined ? this.scenes.get(idx) : undefined;
             if (scene) {
                 scene.advance_state(steps);
             }
         });
     }
 
-    // Keyboard scene selection follows the physical left-to-right key
-    // order: keys 1-9 pick slots 0-8 within the bank and 0 picks slot 9.
+    // Physical left-to-right key order for both the digit->bank-position and
+    // digit->render-slot mappings below: keys 1-9 give 0-8, 0 gives 9.
     key_digit_to_slot(digit) {
         return (digit + 9) % 10;
     }
@@ -737,14 +720,16 @@ class GraphicsContext {
         const shift_chars = ')!@#$%^&*(';
         console.log(e.key);
         if (!isNaN(num)) {
+            // Plain digit: show the corresponding scene from the current
+            // bank in whichever slot is currently active.
             const scene_idx = this.cur_scene_bank * SCENES_PER_BANK +
                 this.key_digit_to_slot(num % 10);
-            while (this.pop_scene() !== undefined) { };
-            this.push_scene(scene_idx);
+            this.set_slot(this.active_slot, scene_idx);
         } else if (shift_chars.includes(e.key)) {
-            const scene_idx = this.cur_scene_bank * SCENES_PER_BANK +
-                this.key_digit_to_slot(shift_chars.indexOf(e.key));
-            this.push_scene(scene_idx);
+            // Shift+digit: switch which slot subsequent digit presses
+            // target, without changing any scene.
+            this.active_slot = this.key_digit_to_slot(shift_chars.indexOf(e.key));
+            console.log(`active slot: ${this.active_slot}`);
         } else if (e.code == "Space") {
             this.immediate_mode = !this.immediate_mode;
             this.update_mode_hud();
@@ -805,14 +790,20 @@ class GraphicsContext {
         // physics (anim_frame doesn't run for them), so delivering hits
         // would wind their springs up unboundedly until re-shown.
         this.shown_scenes.forEach((idx) => {
+            if (idx === undefined) {
+                return;
+            }
             this.scenes.get(idx).handle_beat(latency, channel);
         });
     }
 
-    handle_pose(landmarks) {
+    handle_pose(skeletons) {
         // Same reasoning as handle_beat: only on-screen scenes need it.
         this.shown_scenes.forEach((idx) => {
-            this.scenes.get(idx).handle_pose(landmarks);
+            if (idx === undefined) {
+                return;
+            }
+            this.scenes.get(idx).handle_pose(skeletons);
         });
     }
 

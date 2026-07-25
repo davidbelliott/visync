@@ -91,7 +91,7 @@ export class WebsocketController extends Controller {
                 });
             }
         } else if (msg.msg_type == MSG_TYPE_POSE) {
-            this.context.handle_pose(msg.landmarks);
+            this.context.handle_pose(msg.skeletons);
         }
     }
 }

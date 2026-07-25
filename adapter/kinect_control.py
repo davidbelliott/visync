@@ -2,7 +2,8 @@
 
 Grabs frames from an Xbox 360 Kinect (via libfreenect) or a regular webcam,
 runs MediaPipe Pose on them, and broadcasts four normalized control-change
-knobs derived from the tracked body:
+knobs derived from the tracked body (averaged across everyone in frame, up
+to MAX_PEOPLE):
 
     knob 8  - left/right "steering" turn of the two hands         (hand yaw)
     knob 9  - nodding the head up / down                        (head pitch)
@@ -11,7 +12,8 @@ knobs derived from the tracked body:
 
 Values are normalized to [0, 1] and smoothed, then broadcast on the same
 websocket the web client already connects to, exactly like mouse_control.py /
-apc40_control.py.
+apc40_control.py. Every detected person's full skeleton is also broadcast
+raw (see MsgPose) for the frontend's PoseScene to draw.
 
 Hardware / install notes (macOS):
   - The Xbox 360 Kinect talks to the host through libfreenect (the OpenKinect
@@ -62,6 +64,13 @@ MODEL_PATH = pathlib.Path(__file__).parent / "pose_landmarker_full.task"
 # How often we grab a frame, run pose estimation and broadcast, in Hz. Pose
 # inference is the real limiter; this just caps the loop.
 UPDATE_HZ = 30
+
+# Maximum number of people MediaPipe will track at once. Knob values are the
+# average of every currently-detected person's raw measurements (see
+# average_raw_measurements); each person's full skeleton is broadcast too
+# (see MsgPose) for PoseScene to draw one per person. Higher costs more
+# per-frame inference time.
+MAX_PEOPLE = 4
 
 # Pose detector confidence thresholds. MediaPipe's own default (0.5) rejects
 # essentially everything on IR footage: the model was trained on RGB photos,
@@ -114,6 +123,16 @@ HAND_DIST_MIN_M = 0.25    # wrist-to-wrist with hands pressed together (the
 HAND_DIST_MAX_M = 1.3     # a comfortable outstretched span -> 1, kept under a
                           # full wingspan so the knob reliably pegs
 HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
+
+# How much of the camera's normalized [0, 1] field of view maps to, in
+# metres, when spreading multiple people's skeletons across frame (see
+# frame_offset_m) -- centred, so an X span of 3m means someone at the left
+# edge of frame offsets -1.5m and someone at the right edge +1.5m. This is
+# an approximation (no real camera calibration/depth-dependent FOV), tuned
+# for a plausible few-metres-back framing; retune if people land too
+# close/far apart on real footage.
+FRAME_SPAN_X_M = 3.0
+FRAME_SPAN_Y_M = 2.0
 
 # Exponential-moving-average factor for smoothing the (jittery) per-frame
 # values -- each broadcast value is lerp(prev, new, SMOOTHING_ALPHA). Higher
@@ -260,10 +279,26 @@ def landmarks_to_array(world_landmarks):
     return np.array([[lm.x, lm.y, lm.z] for lm in world_landmarks])
 
 
-def compute_controls(pts):
-    """Derive the four raw measurements from a (33, 3) world-landmark array.
+def frame_offset_m(norm_landmarks):
+    """Approximate where this person's hip centre sits in the camera's field
+    of view, as an (x, y, 0) offset in metres to translate their (already
+    hip-centred) world landmarks by -- so PoseScene draws multiple people
+    spread out roughly where the camera actually saw them instead of
+    stacking every skeleton at the origin. z is left alone: world landmarks
+    carry each person's own body-relative depth, not an absolute distance
+    from the camera to offset by."""
+    norm_x = (norm_landmarks[L_HIP].x + norm_landmarks[R_HIP].x) / 2
+    norm_y = (norm_landmarks[L_HIP].y + norm_landmarks[R_HIP].y) / 2
+    return np.array([
+        (norm_x - 0.5) * FRAME_SPAN_X_M,
+        (norm_y - 0.5) * FRAME_SPAN_Y_M,
+        0.0,
+    ])
 
-    Returns a dict of raw values plus their normalized [0, 1] knob values."""
+
+def compute_raw_measurements(pts):
+    """Derive the four raw measurements (degrees / metres) from one person's
+    (33, 3) world-landmark array."""
     # Yaw: rotation about the vertical axis, from the horizontal-plane normal
     # of the wrist-to-wrist line (as if the hands were opposite ends of a
     # bar/wheel) rather than head orientation -- a deliberate arm gesture is
@@ -302,6 +337,32 @@ def compute_controls(pts):
         'pitch_deg': pitch_deg,
         'hand_dist_m': hand_dist_m,
         'hand_height_m': hand_height_m,
+    }
+
+
+def average_raw_measurements(raw_list):
+    """Arithmetic mean of each field across several people's raw-measurement
+    dicts (as returned by compute_raw_measurements). Averaging the derived
+    per-person measurements -- not the raw landmark positions -- matters:
+    averaging positions would blend different people's hands together into
+    a meaningless midpoint, e.g. two people each holding their hands 2m
+    apart on opposite sides of frame would average to hands ~0 apart in the
+    middle, destroying the actual distance signal."""
+    keys = raw_list[0].keys()
+    return {k: sum(r[k] for r in raw_list) / len(raw_list) for k in keys}
+
+
+def normalize_controls(raw):
+    """Normalize raw measurements (one person's, or an average across
+    several -- see average_raw_measurements) into the [0, 1] knob values.
+
+    Returns a dict of the raw values plus their normalized knob values."""
+    yaw_deg = raw['yaw_deg']
+    pitch_deg = raw['pitch_deg']
+    hand_dist_m = raw['hand_dist_m']
+    hand_height_m = raw['hand_height_m']
+    return {
+        **raw,
         YAW_WHEEL_IDX: clamp01(0.5 + yaw_deg / (2 * YAW_RANGE_DEG)),
         PITCH_WHEEL_IDX: clamp01(0.5 + pitch_deg / (2 * PITCH_RANGE_DEG)),
         HAND_DIST_WHEEL_IDX: clamp01((hand_dist_m - HAND_DIST_MIN_M)
@@ -315,7 +376,8 @@ def compute_controls(pts):
 # ---------------------------------------------------------------------------
 
 def draw_skeleton(cv2, bgr, norm_landmarks):
-    """Draw the pose skeleton from normalized (image-space) landmarks."""
+    """Draw one person's pose skeleton from normalized (image-space)
+    landmarks."""
     h, w = bgr.shape[:2]
     pts = [(int(lm.x * w), int(lm.y * h)) for lm in norm_landmarks]
     for a, b in POSE_CONNECTIONS:
@@ -324,10 +386,11 @@ def draw_skeleton(cv2, bgr, norm_landmarks):
         cv2.circle(bgr, p, 3, (0, 0, 255), -1, cv2.LINE_AA)
 
 
-def draw_debug(cv2, frame_rgb, norm_landmarks, controls, smoothed):
-    """Render the camera frame with the pose skeleton and the control bars."""
+def draw_debug(cv2, frame_rgb, norm_landmarks_list, controls, smoothed):
+    """Render the camera frame with every detected person's pose skeleton
+    and the (averaged) control bars."""
     bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-    if norm_landmarks is not None:
+    for norm_landmarks in norm_landmarks_list:
         draw_skeleton(cv2, bgr, norm_landmarks)
 
     rows = [
@@ -385,7 +448,7 @@ def make_landmarker():
     options = vision.PoseLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=vision.RunningMode.VIDEO,
-        num_poses=1,
+        num_poses=MAX_PEOPLE,
         min_pose_detection_confidence=POSE_DETECTION_CONFIDENCE,
         min_pose_presence_confidence=POSE_PRESENCE_CONFIDENCE,
         min_tracking_confidence=POSE_TRACKING_CONFIDENCE,
@@ -407,7 +470,7 @@ async def main_loop(source, debug):
             tick = time.time()
             frame_rgb = source.read()
             controls = None
-            norm_landmarks = None
+            norm_landmarks_list = []
             if frame_rgb is not None:
                 # detect_for_video needs a monotonically increasing timestamp.
                 mp_image = mp.Image(
@@ -416,20 +479,33 @@ async def main_loop(source, debug):
                     mp_image, int(tick * 1000))
 
                 if result.pose_world_landmarks:
-                    # num_poses=1, so we only ever look at the first person.
-                    pts = landmarks_to_array(result.pose_world_landmarks[0])
-                    norm_landmarks = result.pose_landmarks[0]
-                    controls = compute_controls(pts)
+                    # One entry per detected person (up to MAX_PEOPLE).
+                    pts_list = [landmarks_to_array(person)
+                                for person in result.pose_world_landmarks]
+                    norm_landmarks_list = result.pose_landmarks
+                    raw_list = [compute_raw_measurements(pts) for pts in pts_list]
+                    controls = normalize_controls(average_raw_measurements(raw_list))
                     for idx in (YAW_WHEEL_IDX, PITCH_WHEEL_IDX,
                                 HAND_DIST_WHEEL_IDX, HAND_HEIGHT_WHEEL_IDX):
                         prev = smoothed.get(idx, controls[idx])
                         smoothed[idx] = (SMOOTHING_ALPHA * controls[idx]
                                          + (1 - SMOOTHING_ALPHA) * prev)
 
-                    # Raw (unsmoothed), sent only on frames a pose is actually
-                    # retrieved -- unlike the knob broadcast below, which
-                    # repeats the last-good value every tick.
-                    pose_msg = MsgPose(last_msg_latency, pts.tolist())
+                    # Raw (unsmoothed) skeletons, one per detected person,
+                    # sent only on frames a pose is actually retrieved --
+                    # unlike the knob broadcast below, which repeats the
+                    # last-good value every tick. Offset each person's
+                    # (hip-centred) world landmarks by roughly where they
+                    # stand in the camera's field of view -- pts_list itself
+                    # stays untouched (the control math above is translation
+                    # invariant, but there's no reason to risk it).
+                    positioned_pts_list = [
+                        pts + frame_offset_m(norm_landmarks)
+                        for pts, norm_landmarks in zip(pts_list, norm_landmarks_list)
+                    ]
+                    pose_msg = MsgPose(
+                        last_msg_latency,
+                        [pts.tolist() for pts in positioned_pts_list])
                     websockets.broadcast(connected, pose_msg.to_json())
 
                 # Broadcast every tick once we have values (like mouse_control)
@@ -440,7 +516,7 @@ async def main_loop(source, debug):
                         MsgControlChange(last_msg_latency, idx, value).to_json())
 
                 if debug:
-                    key = draw_debug(cv2, frame_rgb, norm_landmarks,
+                    key = draw_debug(cv2, frame_rgb, norm_landmarks_list,
                                      controls, smoothed)
                     if key in (ord('q'), 27):  # q or Esc
                         break

@@ -86,9 +86,10 @@ class MsgPromotion(Msg):
 
 
 class MsgPose(Msg):
-    # landmarks: list of 33 [x, y, z] world-space points in metres, MediaPipe
-    # Pose's convention (origin at the hip centre, x right, y down, z toward
-    # the camera). See kinect_control.py's landmarks_to_array/POSE_CONNECTIONS.
-    def __init__(self, last_transmit_latency, landmarks):
+    # skeletons: list of skeletons, one per detected person, each a list of
+    # 33 [x, y, z] world-space points in metres, MediaPipe Pose's convention
+    # (origin at the hip centre, x right, y down, z toward the camera). See
+    # kinect_control.py's landmarks_to_array/POSE_CONNECTIONS.
+    def __init__(self, last_transmit_latency, skeletons):
         super().__init__(Msg.Type.POSE, last_transmit_latency)
-        self.landmarks = landmarks
+        self.skeletons = skeletons

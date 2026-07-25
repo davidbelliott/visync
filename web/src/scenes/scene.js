@@ -124,6 +124,11 @@ export class Scene extends THREE.Scene {
         });
     }
 
+    // landmarks: array of 33 [x, y, z] world-space points in metres (see
+    // adapter/message.py's MsgPose). No-op by default; PoseScene overrides it.
+    handle_pose(landmarks) {
+    }
+
     state_transition(old_state_idx, new_state_idx) {
 
     }

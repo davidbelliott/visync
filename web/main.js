@@ -39,6 +39,7 @@ import { BuildingScene } from './src/scenes/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field.js';
 import { DrumKitScene } from './src/scenes/drum_scene.js';
 import { DebugScene } from './src/scenes/debug_scene.js';
+import { PoseScene } from './src/scenes/pose_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import {
@@ -473,6 +474,7 @@ class GraphicsContext {
             [22, new CellularAutomataScene(this)],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
+            [25, new PoseScene(this)],
         ]);
 
         // Scene selection is driven by controller knobs 14 (foreground) and
@@ -804,6 +806,13 @@ class GraphicsContext {
         // would wind their springs up unboundedly until re-shown.
         this.shown_scenes.forEach((idx) => {
             this.scenes.get(idx).handle_beat(latency, channel);
+        });
+    }
+
+    handle_pose(landmarks) {
+        // Same reasoning as handle_beat: only on-screen scenes need it.
+        this.shown_scenes.forEach((idx) => {
+            this.scenes.get(idx).handle_pose(landmarks);
         });
     }
 

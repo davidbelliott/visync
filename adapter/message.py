@@ -17,6 +17,7 @@ class Msg:
         PITCH_BEND = 7
         CONTROL_CHANGE = 8
         PROGRAM_CHANGE = 8
+        POSE = 9
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -82,3 +83,12 @@ class MsgPromotion(Msg):
     def __init__(self, secret):
         super().__init__(Msg.Type.PROMOTION, 0)
         self.secret = secret
+
+
+class MsgPose(Msg):
+    # landmarks: list of 33 [x, y, z] world-space points in metres, MediaPipe
+    # Pose's convention (origin at the hip centre, x right, y down, z toward
+    # the camera). See kinect_control.py's landmarks_to_array/POSE_CONNECTIONS.
+    def __init__(self, last_transmit_latency, landmarks):
+        super().__init__(Msg.Type.POSE, last_transmit_latency)
+        self.landmarks = landmarks

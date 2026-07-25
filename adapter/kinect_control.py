@@ -4,7 +4,7 @@ Grabs frames from an Xbox 360 Kinect (via libfreenect) or a regular webcam,
 runs MediaPipe Pose on them, and broadcasts four normalized control-change
 knobs derived from the tracked body:
 
-    knob 8  - left/right rotation of the head                   (head yaw)
+    knob 8  - left/right "steering" turn of the two hands         (hand yaw)
     knob 9  - nodding the head up / down                        (head pitch)
     knob 3  - distance between the two hands
     knob 4  - height of the hands above the ground
@@ -46,7 +46,7 @@ import urllib.request
 import numpy as np
 import websockets
 
-from message import MsgControlChange
+from message import MsgControlChange, MsgPose
 
 # Same websocket port the web client connects to (mirrors mouse_control.py /
 # adapter.py), so the client connects here unchanged.
@@ -95,7 +95,7 @@ IR_CLAHE_TILE_GRID = 8
 # client maps a control-change `wheel_idx` straight onto the knob of the same
 # index. Knobs 3 and 4 are what the yellow-robot scene binds (x / y spread),
 # which lines up with hand distance / hand height.
-YAW_WHEEL_IDX = 8     # head rotation about the vertical axis
+YAW_WHEEL_IDX = 8     # wrist-to-wrist "bar" rotation about the vertical axis
 PITCH_WHEEL_IDX = 9   # head nod up / down
 HAND_DIST_WHEEL_IDX = 3
 HAND_HEIGHT_WHEEL_IDX = 4
@@ -103,9 +103,10 @@ HAND_HEIGHT_WHEEL_IDX = 4
 # Input ranges used to normalize each raw measurement into [0, 1]. Tune these
 # from the debug display: the on-screen bars show the normalized value, the
 # numbers next to them show the raw measurement feeding the normalization.
-YAW_RANGE_DEG = 60.0      # +/- this maps to [0, 1], facing the camera -> 0.5;
-                          # tighter than a body turn since the head only
-                          # rotates so far before the shoulders follow
+YAW_RANGE_DEG = 60.0      # +/- this maps to [0, 1], facing the camera -> 0.5.
+                          # Carried over from the old head-yaw range; hands
+                          # can likely sweep further -- retune from the debug
+                          # display if the knob pegs before a comfortable turn.
 PITCH_RANGE_DEG = 40.0    # +/- this maps to [0, 1], level gaze -> 0.5; about
                           # as far as a comfortable nod actually goes
 HAND_DIST_MIN_M = 0.25    # wrist-to-wrist with hands pressed together (the
@@ -115,8 +116,12 @@ HAND_DIST_MAX_M = 1.3     # a comfortable outstretched span -> 1, kept under a
 HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
 
 # Exponential-moving-average factor for smoothing the (jittery) per-frame
-# values. Higher = snappier but noisier, lower = smoother but laggier.
-SMOOTHING_ALPHA = 0.35
+# values -- each broadcast value is lerp(prev, new, SMOOTHING_ALPHA). Higher
+# = snappier but noisier, lower = smoother but laggier. 0.35 converges to a
+# step change in ~3 frames (~100ms @ UPDATE_HZ), which reads as snappy more
+# than smoothed; halved again (twice as much smoothing) for an even subtler
+# feel given IR tracking is noisier than RGB to begin with.
+SMOOTHING_ALPHA = 0.075
 
 # MediaPipe Pose landmark indices we use (see the Pose model card).
 NOSE = 0
@@ -259,13 +264,17 @@ def compute_controls(pts):
     """Derive the four raw measurements from a (33, 3) world-landmark array.
 
     Returns a dict of raw values plus their normalized [0, 1] knob values."""
-    # Yaw: head rotation about the vertical axis, from the ear-to-ear line
-    # (so turning just the head steers it, independent of the body). The ear
-    # line lies along x when facing the camera; as the head turns, it acquires
-    # a z component. atan2(z, x) is 0 facing the camera and grows as you turn.
-    ear_vec = pts[L_EAR] - pts[R_EAR]
-    yaw_deg = math.degrees(math.atan2(ear_vec[2], ear_vec[0]))
-    # Fold the +/-180 ambiguity (facing toward vs away) onto a +/-90 range.
+    # Yaw: rotation about the vertical axis, from the horizontal-plane normal
+    # of the wrist-to-wrist line (as if the hands were opposite ends of a
+    # bar/wheel) rather than head orientation -- a deliberate arm gesture is
+    # far steadier than the small, jittery head turns this replaced. The
+    # normal of that line, phase-corrected to be 0 facing the camera (a 90
+    # degree rotation and its correction cancel out), reduces to exactly the
+    # same atan2(z, x) the line itself would give: 0 facing the camera,
+    # growing as the "bar" turns.
+    hand_vec = pts[L_WRIST] - pts[R_WRIST]
+    yaw_deg = math.degrees(math.atan2(hand_vec[2], hand_vec[0]))
+    # Fold the +/-180 ambiguity (hands crossed the other way) onto a +/-90 range.
     if yaw_deg > 90:
         yaw_deg -= 180
     elif yaw_deg < -90:
@@ -322,7 +331,7 @@ def draw_debug(cv2, frame_rgb, norm_landmarks, controls, smoothed):
         draw_skeleton(cv2, bgr, norm_landmarks)
 
     rows = [
-        (f"knob {YAW_WHEEL_IDX} head yaw",
+        (f"knob {YAW_WHEEL_IDX} hand yaw",
          smoothed.get(YAW_WHEEL_IDX),
          f"{controls['yaw_deg']:+5.1f} deg" if controls else ""),
         (f"knob {PITCH_WHEEL_IDX} head pitch",
@@ -417,6 +426,12 @@ async def main_loop(source, debug):
                         smoothed[idx] = (SMOOTHING_ALPHA * controls[idx]
                                          + (1 - SMOOTHING_ALPHA) * prev)
 
+                    # Raw (unsmoothed), sent only on frames a pose is actually
+                    # retrieved -- unlike the knob broadcast below, which
+                    # repeats the last-good value every tick.
+                    pose_msg = MsgPose(last_msg_latency, pts.tolist())
+                    websockets.broadcast(connected, pose_msg.to_json())
+
                 # Broadcast every tick once we have values (like mouse_control)
                 # so a freshly-connected client gets the current pose promptly.
                 for idx, value in smoothed.items():
@@ -473,7 +488,7 @@ async def main():
     try:
         async with websockets.serve(handler, "0.0.0.0", WS_PORT):
             print(f'Serving on ws://0.0.0.0:{WS_PORT} '
-                  f'(head yaw -> knob {YAW_WHEEL_IDX}, '
+                  f'(hand yaw -> knob {YAW_WHEEL_IDX}, '
                   f'head pitch -> knob {PITCH_WHEEL_IDX}, '
                   f'hand dist -> knob {HAND_DIST_WHEEL_IDX}, '
                   f'hand height -> knob {HAND_HEIGHT_WHEEL_IDX})')

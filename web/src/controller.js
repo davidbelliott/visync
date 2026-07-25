@@ -1,5 +1,7 @@
 // Message type for a control change (e.g. a knob or wheel being turned).
 const MSG_TYPE_CONTROL_CHANGE = 8;
+// Message type for a full pose skeleton (see adapter/message.py's MsgPose).
+const MSG_TYPE_POSE = 9;
 
 // Number of knobs exposed by a WebsocketController.
 const NUM_KNOBS = 16;
@@ -88,6 +90,8 @@ export class WebsocketController extends Controller {
                     binding.apply(binding.transform(knob.cur_val));
                 });
             }
+        } else if (msg.msg_type == MSG_TYPE_POSE) {
+            this.context.handle_pose(msg.landmarks);
         }
     }
 }

@@ -1,8 +1,8 @@
 """Xbox 360 Kinect -> web control-change adapter.
 
-Grabs RGB frames from an Xbox 360 Kinect (via libfreenect) or a regular
-webcam, runs MediaPipe Pose on them, and broadcasts four normalized
-control-change knobs derived from the tracked body:
+Grabs frames from an Xbox 360 Kinect (via libfreenect) or a regular webcam,
+runs MediaPipe Pose on them, and broadcasts four normalized control-change
+knobs derived from the tracked body:
 
     knob 8  - left/right rotation of the head                   (head yaw)
     knob 9  - nodding the head up / down                        (head pitch)
@@ -28,7 +28,9 @@ Hardware / install notes (macOS):
     Python). The .task model file is downloaded automatically on first run.
 
 Run:
-    python kinect_control.py                 # use the Kinect, show debug window
+    python kinect_control.py                 # use the Kinect's IR camera
+                                              # (works in the dark), debug window
+    python kinect_control.py --kinect-rgb    # use the Kinect's RGB camera instead
     python kinect_control.py --webcam        # use the default webcam instead
     python kinect_control.py --no-debug      # headless, no OpenCV window
 """
@@ -60,6 +62,34 @@ MODEL_PATH = pathlib.Path(__file__).parent / "pose_landmarker_full.task"
 # How often we grab a frame, run pose estimation and broadcast, in Hz. Pose
 # inference is the real limiter; this just caps the loop.
 UPDATE_HZ = 30
+
+# Pose detector confidence thresholds. MediaPipe's own default (0.5) rejects
+# essentially everything on IR footage: the model was trained on RGB photos,
+# so its confidence on grainy, dot-patterned IR video runs much lower even
+# for a clear, correctly-posed subject. Lowered so IR mode has a chance to
+# report anything at all -- raise back toward 0.5 if it proves too
+# permissive (jittery/false detections) once tested on hardware.
+POSE_DETECTION_CONFIDENCE = 0.3
+POSE_PRESENCE_CONFIDENCE = 0.3
+POSE_TRACKING_CONFIDENCE = 0.3
+
+# Gaussian blur kernel (odd, pixels) applied to IR frames before pose
+# estimation, to smooth over the Kinect's projected IR dot pattern -- a
+# dense, high-frequency texture the RGB-trained model has never seen, which
+# likely swamps the silhouette-level features it actually keys on. 0 disables it.
+IR_BLUR_KERNEL = 5
+
+# CLAHE (adaptive histogram equalization) applied to IR frames after
+# blurring, to lift brightness/contrast. The Kinect's IR illuminator falls
+# off with distance (inverse-square), so a subject standing several meters
+# back -- typical for this rig, vs. ~1m in hand-held testing -- returns a
+# much dimmer, lower-contrast signal. CLAHE works on local tiles rather than
+# the whole frame, so it copes with a subject and background sitting at very
+# different distances/brightnesses. clip_limit bounds how far any single
+# tile's histogram gets stretched (higher = more contrast but noisier);
+# tile_grid_size is the tile count per side. 0 clip_limit disables it.
+IR_CLAHE_CLIP_LIMIT = 3.0
+IR_CLAHE_TILE_GRID = 8
 
 # Knob indices each derived control drives. The WebsocketController on the
 # client maps a control-change `wheel_idx` straight onto the knob of the same
@@ -134,24 +164,59 @@ def clamp01(v):
 
 
 # ---------------------------------------------------------------------------
-# Frame sources. Each yields an RGB (H, W, 3) uint8 frame, or None if no frame
-# is available this tick.
+# Frame sources. Each yields an (H, W, 3) uint8 frame (RGB, or IR replicated
+# across 3 channels), or None if no frame is available this tick.
 # ---------------------------------------------------------------------------
 
 class KinectSource:
-    """RGB frames from an Xbox 360 Kinect via libfreenect's sync API."""
+    """IR (default) or RGB frames from an Xbox 360 Kinect via libfreenect's
+    sync API.
 
-    def __init__(self):
+    Defaults to the IR camera: the Kinect's structured-light depth sensor
+    actively projects an IR dot pattern, so the IR feed stays lit -- and
+    MediaPipe Pose keeps a frame to track -- in a fully dark room, unlike the
+    RGB camera. Pose accuracy on real IR footage (grainy, dot-patterned,
+    out-of-distribution for a model trained on RGB photos) hasn't been
+    validated on hardware; pass use_ir=False (--kinect-rgb) to fall back to
+    RGB for comparison.
+    """
+
+    def __init__(self, use_ir=True):
         import freenect  # imported lazily so --webcam works without it
         self._freenect = freenect
+        self.use_ir = use_ir
+        self._clahe = None
+        if self.use_ir and IR_CLAHE_CLIP_LIMIT > 0:
+            import cv2  # lazily, like freenect above
+            self._clahe = cv2.createCLAHE(
+                clipLimit=IR_CLAHE_CLIP_LIMIT,
+                tileGridSize=(IR_CLAHE_TILE_GRID, IR_CLAHE_TILE_GRID))
         # Probe once so a missing/unplugged Kinect fails loudly at startup.
-        frame, _ = freenect.sync_get_video()
-        if frame is None:
+        if self.read() is None:
             raise RuntimeError("Kinect returned no video frame")
 
     def read(self):
-        frame, _timestamp = self._freenect.sync_get_video()
-        # freenect already returns RGB uint8 (H, W, 3).
+        fmt = self._freenect.VIDEO_IR_8BIT if self.use_ir else self._freenect.VIDEO_RGB
+        frame, _timestamp = self._freenect.sync_get_video(format=fmt)
+        if frame is None:
+            return None
+        if self.use_ir:
+            # Stay in single-channel space for the preprocessing below;
+            # freenect may hand back (H, W) or (H, W, 1).
+            if frame.ndim == 3:
+                frame = frame[:, :, 0]
+            if IR_BLUR_KERNEL > 0:
+                import cv2  # lazily, like freenect above
+                frame = cv2.GaussianBlur(frame, (IR_BLUR_KERNEL, IR_BLUR_KERNEL), 0)
+            if self._clahe is not None:
+                # Boosts brightness/contrast; run after the blur so it's
+                # stretching the smoothed silhouette signal, not amplifying
+                # the raw dot-pattern speckle.
+                frame = self._clahe.apply(frame)
+            # MediaPipe's Image wrapper (and the RGB path WebcamSource
+            # shares with it) expects an (H, W, 3) array; replicate the
+            # single channel.
+            frame = np.repeat(frame[:, :, None], 3, axis=2)
         return frame
 
     def close(self):
@@ -312,6 +377,9 @@ def make_landmarker():
         base_options=mp_python.BaseOptions(model_asset_path=str(MODEL_PATH)),
         running_mode=vision.RunningMode.VIDEO,
         num_poses=1,
+        min_pose_detection_confidence=POSE_DETECTION_CONFIDENCE,
+        min_pose_presence_confidence=POSE_PRESENCE_CONFIDENCE,
+        min_tracking_confidence=POSE_TRACKING_CONFIDENCE,
     )
     return mp, vision.PoseLandmarker.create_from_options(options)
 
@@ -371,14 +439,14 @@ async def main_loop(source, debug):
             cv2.destroyAllWindows()
 
 
-def make_source(use_webcam, webcam_index):
+def make_source(use_webcam, webcam_index, kinect_use_ir=True):
     if use_webcam:
         import cv2
         print(f"Using webcam {webcam_index}")
         return WebcamSource(webcam_index, cv2)
     try:
-        print("Using Xbox 360 Kinect (libfreenect)")
-        return KinectSource()
+        print(f"Using Xbox 360 Kinect (libfreenect, {'IR' if kinect_use_ir else 'RGB'} camera)")
+        return KinectSource(use_ir=kinect_use_ir)
     except Exception as e:
         import cv2
         print(f"Kinect unavailable ({e}); falling back to webcam {webcam_index}")
@@ -392,11 +460,16 @@ async def main():
                         help='use the default webcam instead of the Kinect')
     parser.add_argument('--webcam-index', type=int, default=0,
                         help='OpenCV webcam index (default 0)')
+    parser.add_argument('--kinect-rgb', action='store_true',
+                        help='use the Kinect RGB camera instead of IR '
+                             '(IR is the default so tracking keeps working '
+                             'in the dark; RGB is here for comparison)')
     parser.add_argument('--no-debug', action='store_true',
                         help='do not open the OpenCV debug window')
     args = parser.parse_args()
 
-    source = make_source(args.webcam, args.webcam_index)
+    source = make_source(args.webcam, args.webcam_index,
+                         kinect_use_ir=not args.kinect_rgb)
     try:
         async with websockets.serve(handler, "0.0.0.0", WS_PORT):
             print(f'Serving on ws://0.0.0.0:{WS_PORT} '

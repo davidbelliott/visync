@@ -8,6 +8,7 @@ import time
 import serial_asyncio
 import pathlib
 import websockets
+import rtmidi
 from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
 import random
@@ -222,35 +223,52 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
 
 
 class RtMidiInputHandler:
-    def __init__(self, websocket):
-        self.websocket = websocket
+    def __init__(self):
+        self.playing = True
 
     def __call__(self, event, data=None):
         t_callback = time.time()
         message, deltatime = event
         ws_msg = self.translate_midi_msg(message)
         if ws_msg:
-            self.websocket.send(ws_msg.to_json())
+            websockets.broadcast(connected, ws_msg.to_json())
 
 
     def translate_midi_msg(self, midi_msg):
+        # rtmidi hands us one fully-assembled message per call (unlike
+        # SerialMidiHandler, which reassembles bytes off the wire itself), so
+        # this mirrors SerialMidiHandler.handle_midi_byte's status-byte
+        # dispatch without the byte-buffering.
+        status = midi_msg[0]
         ws_msg = None
-        if (midi_msg[0] & 0xF0 == NOTE_ON) and midi_msg[2] != 0:
-            channel = (midi_msg[0] & 0xF) + 1
-            note_number = midi_msg[1]
-            note_vel = midi_msg[2]
+
+        if status == midiconstants.TIMING_CLOCK:
+            clock_tracker.ping()
+            if clock_tracker.sync and self.playing:
+                ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                if LOG_SYNC:
+                    print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                    print(f'beat: {clock_tracker.cur_sync_idx // 24}')
+        elif status == midiconstants.SONG_STOP:
+            self.playing = False
+        elif status == midiconstants.SONG_START:
+            self.playing = True
+            clock_tracker.reset_sync()
+        elif status == midiconstants.SONG_CONTINUE:
+            self.playing = True
+        elif status & 0xF0 == midiconstants.NOTE_ON and midi_msg[2] != 0:
+            channel = (status & 0xF) + 1
+            note_number, note_vel = midi_msg[1], midi_msg[2]
+            ws_msg = translate_note_to_msg(channel, note_number, note_vel, last_msg_latency)
+        elif status & 0xF0 == midiconstants.NOTE_OFF or (
+                status & 0xF0 == midiconstants.NOTE_ON and midi_msg[2] == 0):
+            channel = (status & 0xF) + 1
             if channel == 15:   # Analog Rytm auto channel
-                channel = note_number
-                note_number = note_vel
-        elif midi_msg[0] & 0xF0 == NOTE_OFF:
-            if channel == 15:
                 if USE_STROBE:
                     strobe_off()
-        elif midi_msg[0] & 0xF0 == CONTROL_CHANGE:
+        elif status & 0xF0 == midiconstants.CONTROL_CHANGE:
             control_idx = midi_msg[1]
             control_val = midi_msg[2]
-            # This channel is used for graphics scene switching
-            #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
             ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
 
         if ws_msg != None and LOG_MSGS:
@@ -384,14 +402,19 @@ class SerialMidiHandler:
 
 
 async def main_loop_rtmidi(rtmidi_device):
+    # main() already serves the websocket; this task just wires up the MIDI
+    # callback and broadcasts to the module-level `connected` set, same as
+    # main_loop_serial/main_loop_fake.
     try:
         midiin = rtmidi.MidiIn()
-        midiin, _ = open_midiinput(args.rtmidi)
-        async with websockets.serve(handler, "0.0.0.0", WS_PORT):
-            midi_handler = RtMidiInputHandler(websocket)
-            midiin.set_callback(midi_handler)
-            while True:
-                time.sleep(1)
+        midiin, _ = open_midiinput(rtmidi_device)
+        # rtmidi drops MIDI Clock (and sysex/active-sensing) by default; the
+        # sync path above needs Clock through to build MsgSync.
+        midiin.ignore_types(timing=False)
+        midi_handler = RtMidiInputHandler()
+        midiin.set_callback(midi_handler)
+        while True:
+            await asyncio.sleep(1)
     finally:
         midiin.close_port()
         del midiin

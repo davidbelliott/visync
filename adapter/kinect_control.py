@@ -5,7 +5,7 @@ webcam, runs MediaPipe Pose on them, and broadcasts four normalized
 control-change knobs derived from the tracked body:
 
     knob 8  - left/right rotation of the head                   (head yaw)
-    knob 9  - bending forward / back                            (torso pitch)
+    knob 9  - nodding the head up / down                        (head pitch)
     knob 3  - distance between the two hands
     knob 4  - height of the hands above the ground
 
@@ -66,7 +66,7 @@ UPDATE_HZ = 30
 # index. Knobs 3 and 4 are what the yellow-robot scene binds (x / y spread),
 # which lines up with hand distance / hand height.
 YAW_WHEEL_IDX = 8     # head rotation about the vertical axis
-PITCH_WHEEL_IDX = 9   # bending forward / back
+PITCH_WHEEL_IDX = 9   # head nod up / down
 HAND_DIST_WHEEL_IDX = 3
 HAND_HEIGHT_WHEEL_IDX = 4
 
@@ -76,8 +76,12 @@ HAND_HEIGHT_WHEEL_IDX = 4
 YAW_RANGE_DEG = 60.0      # +/- this maps to [0, 1], facing the camera -> 0.5;
                           # tighter than a body turn since the head only
                           # rotates so far before the shoulders follow
-PITCH_RANGE_DEG = 45.0    # +/- this maps to [0, 1], upright -> 0.5
-HAND_DIST_MAX_M = 1.6     # hands together -> 0, full span -> 1
+PITCH_RANGE_DEG = 40.0    # +/- this maps to [0, 1], level gaze -> 0.5; about
+                          # as far as a comfortable nod actually goes
+HAND_DIST_MIN_M = 0.25    # wrist-to-wrist with hands pressed together (the
+                          # wrists never quite touch, plus pose noise) -> 0
+HAND_DIST_MAX_M = 1.3     # a comfortable outstretched span -> 1, kept under a
+                          # full wingspan so the knob reliably pegs
 HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
 
 # Exponential-moving-average factor for smoothing the (jittery) per-frame
@@ -85,6 +89,7 @@ HAND_HEIGHT_MAX_M = 2.0   # hands at the floor -> 0, reaching up -> 1
 SMOOTHING_ALPHA = 0.35
 
 # MediaPipe Pose landmark indices we use (see the Pose model card).
+NOSE = 0
 L_EAR, R_EAR = 7, 8
 L_SHOULDER, R_SHOULDER = 11, 12
 L_WRIST, R_WRIST = 15, 16
@@ -189,9 +194,6 @@ def compute_controls(pts):
     """Derive the four raw measurements from a (33, 3) world-landmark array.
 
     Returns a dict of raw values plus their normalized [0, 1] knob values."""
-    shoulder_mid = (pts[L_SHOULDER] + pts[R_SHOULDER]) / 2
-    hip_mid = (pts[L_HIP] + pts[R_HIP]) / 2
-
     # Yaw: head rotation about the vertical axis, from the ear-to-ear line
     # (so turning just the head steers it, independent of the body). The ear
     # line lies along x when facing the camera; as the head turns, it acquires
@@ -204,10 +206,13 @@ def compute_controls(pts):
     elif yaw_deg < -90:
         yaw_deg += 180
 
-    # Pitch: bending forward / back. The torso vector points up (negative y)
-    # when upright; leaning tilts it in z. Positive z (toward camera) = forward.
-    torso = shoulder_mid - hip_mid
-    pitch_deg = math.degrees(math.atan2(torso[2], -torso[1]))
+    # Pitch: head nod up / down, from the ear-midpoint -> nose vector. A level
+    # gaze has no vertical component; y points down, so nodding down tips the
+    # vector to positive y. Positive = nodding down/forward, matching the
+    # direction the old torso-lean pitch had.
+    head_forward = pts[NOSE] - (pts[L_EAR] + pts[R_EAR]) / 2
+    pitch_deg = math.degrees(math.atan2(
+        head_forward[1], math.hypot(head_forward[0], head_forward[2])))
 
     # Distance between the hands, in metres (3D wrist-to-wrist).
     hand_dist_m = float(np.linalg.norm(pts[L_WRIST] - pts[R_WRIST]))
@@ -225,7 +230,8 @@ def compute_controls(pts):
         'hand_height_m': hand_height_m,
         YAW_WHEEL_IDX: clamp01(0.5 + yaw_deg / (2 * YAW_RANGE_DEG)),
         PITCH_WHEEL_IDX: clamp01(0.5 + pitch_deg / (2 * PITCH_RANGE_DEG)),
-        HAND_DIST_WHEEL_IDX: clamp01(hand_dist_m / HAND_DIST_MAX_M),
+        HAND_DIST_WHEEL_IDX: clamp01((hand_dist_m - HAND_DIST_MIN_M)
+                                     / (HAND_DIST_MAX_M - HAND_DIST_MIN_M)),
         HAND_HEIGHT_WHEEL_IDX: clamp01(hand_height_m / HAND_HEIGHT_MAX_M),
     }
 
@@ -254,7 +260,7 @@ def draw_debug(cv2, frame_rgb, norm_landmarks, controls, smoothed):
         (f"knob {YAW_WHEEL_IDX} head yaw",
          smoothed.get(YAW_WHEEL_IDX),
          f"{controls['yaw_deg']:+5.1f} deg" if controls else ""),
-        (f"knob {PITCH_WHEEL_IDX} pitch",
+        (f"knob {PITCH_WHEEL_IDX} head pitch",
          smoothed.get(PITCH_WHEEL_IDX),
          f"{controls['pitch_deg']:+5.1f} deg" if controls else ""),
         (f"knob {HAND_DIST_WHEEL_IDX} hand dist",
@@ -395,7 +401,7 @@ async def main():
         async with websockets.serve(handler, "0.0.0.0", WS_PORT):
             print(f'Serving on ws://0.0.0.0:{WS_PORT} '
                   f'(head yaw -> knob {YAW_WHEEL_IDX}, '
-                  f'pitch -> knob {PITCH_WHEEL_IDX}, '
+                  f'head pitch -> knob {PITCH_WHEEL_IDX}, '
                   f'hand dist -> knob {HAND_DIST_WHEEL_IDX}, '
                   f'hand height -> knob {HAND_HEIGHT_WHEEL_IDX})')
             await main_loop(source, debug=not args.no_debug)

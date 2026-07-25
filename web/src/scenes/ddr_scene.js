@@ -145,7 +145,11 @@ class DDRRobot extends THREE.Object3D {
 
     get_arms_clap_offset(side, t) {
         // t: normalized time since half-note beat that clap happens on (0 - 1)
-        t = t % 1;
+        // Phase-shifted half a cycle: the hands-together pose below falls at
+        // t=0.5, but t=0 is when clap_clock restarts (beats 2 and 4, see
+        // handle_sync's `beat % 2 == 0`), so shifting by 0.5 puts the actual
+        // clap on those beats instead of one beat late.
+        t = (t + 0.5) % 1;
         let x = (2 * Math.abs(t) - 1) ** 8;
         const y = 1 + Math.cos(2 * Math.PI * t);
         x *= 1.75 * (side * 2 - 1);
@@ -254,7 +258,7 @@ class DDRArrow extends THREE.LineSegments {
 
 export class DDRScene extends Scene {
     constructor(context) {
-        super(context, 'ddrrobot', 1, 180);
+        super(context, 'ddrrobot', 1);
         const width = window.innerWidth;
         const height = window.innerHeight;
         const aspect = width / height;

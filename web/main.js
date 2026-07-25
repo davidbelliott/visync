@@ -469,10 +469,10 @@ class GraphicsContext {
             [21, new VectorFieldScene(this)],
             //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
             //[21, new TextScene(this)],
-            [22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
+            //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
+            [22, new CellularAutomataScene(this)],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
-            [25, new CellularAutomataScene(this)],
         ]);
 
         // Scene selection is driven by controller knobs 14 (foreground) and

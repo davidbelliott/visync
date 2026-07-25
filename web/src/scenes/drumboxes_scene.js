@@ -157,11 +157,11 @@ class PaddleGroup {
 
             if (this.in_position) {
                 // Look at channel associated with the upcoming impact
-                if (this.impacts[i][1] == 1 || this.impacts[i][1] == 3) {
+                if (this.impacts[i][1] == 1) {
                     top_paddle_pos = Math.min(top_paddle_pos, this.paddle_pos(
                         this.impacts[i][0] / this.top_paddle_pound_time,
                         target_drum_z)[0]);
-                } else if (this.impacts[i][1] == 2) {
+                } else if (this.impacts[i][1] > 1 && this.impacts[i][1] < 5) {
                     side_paddle_pos = Math.min(side_paddle_pos, this.side_paddle_pos(
                         this.impacts[i][0] / this.side_paddle_pound_time));
                 }

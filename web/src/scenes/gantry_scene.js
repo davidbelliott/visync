@@ -433,7 +433,7 @@ export class GantryScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 1) {
+        if (channel == 1 || channel == 5) {
             this.gantries[this.pounding_gantry_idx].start_pound(t, true);
         }
     }

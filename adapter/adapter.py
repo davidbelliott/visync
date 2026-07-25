@@ -223,15 +223,32 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
 
 
 class RtMidiInputHandler:
-    def __init__(self):
+    def __init__(self, loop, cycle=0):
         self.playing = True
+        # rtmidi invokes __call__ from its own MIDI input thread, not the
+        # asyncio loop; broadcasting (which writes to transports) must be
+        # marshaled back via call_soon_threadsafe, same as main_loop_audio.
+        self.loop = loop
+        self.scene_cycler = SceneCycler(cycle) if cycle != 0 else None
+
+    def broadcast(self, ws_msg):
+        self.loop.call_soon_threadsafe(websockets.broadcast, connected, ws_msg.to_json())
 
     def __call__(self, event, data=None):
         t_callback = time.time()
         message, deltatime = event
         ws_msg = self.translate_midi_msg(message)
         if ws_msg:
-            websockets.broadcast(connected, ws_msg.to_json())
+            self.broadcast(ws_msg)
+
+        if self.scene_cycler:
+            cycle_msgs = self.scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
+            if cycle_msgs:
+                for msg in cycle_msgs:
+                    self.broadcast(msg)
+            advance_msg = self.scene_cycler.check_advance(clock_tracker.cur_sync_idx)
+            if advance_msg:
+                self.broadcast(advance_msg)
 
 
     def translate_midi_msg(self, midi_msg):
@@ -401,7 +418,7 @@ class SerialMidiHandler:
 
 
 
-async def main_loop_rtmidi(rtmidi_device):
+async def main_loop_rtmidi(rtmidi_device, cycle=0):
     # main() already serves the websocket; this task just wires up the MIDI
     # callback and broadcasts to the module-level `connected` set, same as
     # main_loop_serial/main_loop_fake.
@@ -411,7 +428,7 @@ async def main_loop_rtmidi(rtmidi_device):
         # rtmidi drops MIDI Clock (and sysex/active-sensing) by default; the
         # sync path above needs Clock through to build MsgSync.
         midiin.ignore_types(timing=False)
-        midi_handler = RtMidiInputHandler()
+        midi_handler = RtMidiInputHandler(asyncio.get_running_loop(), cycle=cycle)
         midiin.set_callback(midi_handler)
         while True:
             await asyncio.sleep(1)
@@ -564,7 +581,7 @@ async def main():
                 asyncio.TaskGroup() as tg:
             queue = asyncio.Queue()
             if args.rtmidi:
-                t1 = tg.create_task(main_loop_rtmidi(args.rtmidi))
+                t1 = tg.create_task(main_loop_rtmidi(args.rtmidi, cycle=args.cycle))
             elif args.device:
                 t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
             elif args.audio is not None:

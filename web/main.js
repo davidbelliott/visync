@@ -68,6 +68,7 @@ const MSG_TYPE_PROMOTION_GRANT = 5;
 const MSG_TYPE_ACK = 6;
 const MSG_TYPE_PITCH_BEND = 7;
 const MSG_TYPE_CONTROL_CHANGE = 8;
+const MSG_TYPE_AUDIO_INFO = 10;
 
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
@@ -149,6 +150,8 @@ function connect() {
             context.advance_state(msg.steps);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);
+        } else if (type == MSG_TYPE_AUDIO_INFO) {
+            context.handle_audio_info(msg.avg, msg.peak, msg.spectrum, msg.samplerate);
         }
         const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
         socket.send(JSON.stringify(resp));
@@ -804,6 +807,20 @@ class GraphicsContext {
                 return;
             }
             this.scenes.get(idx).handle_pose(skeletons);
+        });
+    }
+
+    // avg/peak: mean and peak absolute input amplitude since the last message,
+    // in [0, 1]. spectrum: raw FFT magnitude bins, linearly spaced in frequency;
+    // samplerate (Hz) fixes the axis (last bin = samplerate/2). See
+    // adapter/audio_info.py. Sent by adapter.py's -a/--audio mode.
+    handle_audio_info(avg, peak, spectrum, samplerate) {
+        // Same reasoning as handle_beat: only on-screen scenes need it.
+        this.shown_scenes.forEach((idx) => {
+            if (idx === undefined) {
+                return;
+            }
+            this.scenes.get(idx).handle_audio_info(avg, peak, spectrum, samplerate);
         });
     }
 

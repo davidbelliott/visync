@@ -18,6 +18,7 @@ class Msg:
         CONTROL_CHANGE = 8
         PROGRAM_CHANGE = 8
         POSE = 9
+        AUDIO_INFO = 10
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -83,6 +84,24 @@ class MsgPromotion(Msg):
     def __init__(self, secret):
         super().__init__(Msg.Type.PROMOTION, 0)
         self.secret = secret
+
+
+class MsgAudioInfo(Msg):
+    # A snapshot of the audio input, broadcast at a fixed rate by adapter.py's
+    # -a/--audio mode. `avg` and `peak` are the mean and maximum absolute sample
+    # amplitude over the interval since the previous MsgAudioInfo, in [0, 1] for
+    # float32 audio. `spectrum` is the raw FFT magnitude of the most recent
+    # analysis window: one amplitude per rfft bin (FFT_SIZE//2 + 1 of them),
+    # linearly spaced in frequency and amplitude-normalized so a full-scale sine
+    # reads ~1.0 in its bin. `samplerate` (Hz) fixes the frequency axis: bin k is
+    # at k * (samplerate / 2) / (len(spectrum) - 1) Hz, i.e. the last bin is the
+    # Nyquist frequency samplerate / 2. See adapter/audio_info.py.
+    def __init__(self, last_transmit_latency, avg, peak, spectrum, samplerate):
+        super().__init__(Msg.Type.AUDIO_INFO, last_transmit_latency)
+        self.avg = avg
+        self.peak = peak
+        self.spectrum = spectrum
+        self.samplerate = samplerate
 
 
 class MsgPose(Msg):

@@ -13,7 +13,6 @@ from rtmidi.midiutil import open_midiinput
 from rtmidi import midiconstants
 import random
 from message import *
-from beatdetect import PredictiveBeatDetector
 import sys
 
 USE_STROBE = False
@@ -37,6 +36,11 @@ MIDI_CC_MAX = 127.0
 FAKE_KNOB_COUNT = 16
 FAKE_KNOB_PERIOD_BEATS = 16
 FAKE_KNOB_UPDATE_HZ = 60
+
+# Rate at which -a/--audio broadcasts MsgAudioInfo. Each message summarizes the
+# input since the previous one, so this sets both the broadcast rate and the
+# amplitude-averaging window; 60 Hz matches the frontend frame rate.
+AUDIO_INFO_HZ = 60
 
 if USE_LEDS:
     from blink import led_update_loop, led_handle_msgs
@@ -227,7 +231,7 @@ class RtMidiInputHandler:
         self.playing = True
         # rtmidi invokes __call__ from its own MIDI input thread, not the
         # asyncio loop; broadcasting (which writes to transports) must be
-        # marshaled back via call_soon_threadsafe, same as main_loop_audio.
+        # marshaled back via call_soon_threadsafe
         self.loop = loop
         self.scene_cycler = SceneCycler(cycle) if cycle != 0 else None
 
@@ -521,7 +525,41 @@ async def main_loop_fake(bpm, cycle=0):
         await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
-async def main_loop_FAKE_KNOB_MOVEMENT(bpm):
+async def main_loop_audio(device):
+    """Open the given (index, name) audio input device and broadcast a
+    MsgAudioInfo at AUDIO_INFO_HZ carrying the interval's average/peak amplitude
+    and the raw FFT magnitude spectrum. The sounddevice callback runs on its own
+    audio thread and only accumulates; the FFT and the broadcast happen here on
+    the asyncio loop thread, so the realtime audio thread never stalls."""
+    import sounddevice as sd
+    from audio_info import AudioAnalyzer
+
+    device_idx, device_name = device
+    analyzer = AudioAnalyzer()
+    # samplerate defaults to the device's own rate; bin k of the spectrum is
+    # then k * samplerate / FFT_SIZE Hz.
+    stream = sd.InputStream(device=device_idx, channels=1, dtype='float32',
+                            callback=analyzer.callback)
+    print(f"Listening to [{device_idx}] {device_name} @ {stream.samplerate:.0f} Hz "
+          f"-> MsgAudioInfo at {AUDIO_INFO_HZ} Hz")
+
+    period = 1.0 / AUDIO_INFO_HZ
+    samplerate = stream.samplerate
+    stream.start()
+    try:
+        next_tick = time.monotonic()
+        while True:
+            avg, peak, spectrum = analyzer.take_snapshot()
+            msg = MsgAudioInfo(last_msg_latency, avg, peak, spectrum, samplerate)
+            websockets.broadcast(connected, msg.to_json())
+            next_tick += period
+            await asyncio.sleep(max(0.0, next_tick - time.monotonic()))
+    finally:
+        stream.stop()
+        stream.close()
+
+
+async def main_loop_fake_knob_movement(bpm):
     """Continuously broadcast fake control-change messages for 16 phase-offset
     sinusoids, independent of the sync clock, for smooth knob motion."""
     beat_s = 60.0 / bpm
@@ -538,24 +576,17 @@ async def main_loop_FAKE_KNOB_MOVEMENT(bpm):
         await asyncio.sleep(1.0 / FAKE_KNOB_UPDATE_HZ)
 
 
-async def main_loop_audio(device):
-    loop = asyncio.get_running_loop()
-    def on_beat(channel, latency_s):
-        loop.call_soon_threadsafe(websockets.broadcast, connected, MsgBeat(latency_s, channel).to_json())
-    def on_sync(sync_rate_hz, sync_idx):
-        loop.call_soon_threadsafe(websockets.broadcast, connected, MsgSync(0, sync_rate_hz, sync_idx).to_json())
-    detector = PredictiveBeatDetector(on_beat=on_beat, on_sync=on_sync)
-    await asyncio.to_thread(detector.run_mic, device)
-
-
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
     parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
     parser.add_argument('-d', '--device', type=str, help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
     parser.add_argument('-r', '--rtmidi', type=str, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     parser.add_argument('-c', '--cycle', type=int, default=0, help='Periodically cycle scenes every N bars. Default is 0 (do not cycle).')
-    parser.add_argument('-a', '--audio', type=int, metavar='DEVICE',
-                        help='Use audio beat detection with given device index')
+    parser.add_argument('-a', '--audio', type=str, metavar='PATTERN',
+                        help='Open the audio input device whose name contains '
+                             'PATTERN (case-insensitive; must match exactly one) '
+                             'and broadcast MsgAudioInfo. Use --list-devices to '
+                             'see names.')
     parser.add_argument('--list-devices', action='store_true',
                         help='List audio input devices and exit')
     args = parser.parse_args()
@@ -574,6 +605,21 @@ async def main():
         print('Error: must specify exactly one of --fake, --device, --rtmidi, or --audio')
         exit(1)
 
+    # Resolve the audio device up front so a bad --audio pattern fails cleanly
+    # here rather than tearing down the server/TaskGroup with a SystemExit.
+    audio_device = None
+    if args.audio is not None:
+        try:
+            from audio_info import resolve_audio_device, AudioDeviceError
+        except ImportError as e:
+            print(f"Error: --audio needs numpy and sounddevice installed ({e})")
+            return
+        try:
+            audio_device = resolve_audio_device(args.audio)
+        except AudioDeviceError as e:
+            print(f"Error: {e}")
+            return
+
     # Restart-on-error loop (only exits on KeyboardInterrupt)
     while True:
         #try:
@@ -585,11 +631,11 @@ async def main():
             elif args.device:
                 t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
             elif args.audio is not None:
-                t1 = tg.create_task(main_loop_audio(args.audio))
+                t1 = tg.create_task(main_loop_audio(audio_device))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
                 if FAKE_KNOB_MOVEMENT:
-                    t_knobs = tg.create_task(main_loop_FAKE_KNOB_MOVEMENT(args.fake))
+                    t_knobs = tg.create_task(main_loop_fake_knob_movement(args.fake))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())

@@ -130,6 +130,14 @@ export class Scene extends THREE.Scene {
     handle_pose(skeletons) {
     }
 
+    // avg/peak: mean and peak absolute input amplitude since the last audio
+    // message, in [0, 1]. spectrum: raw FFT magnitude bins, linearly spaced in
+    // frequency; samplerate (Hz) fixes the axis (last bin = samplerate/2). See
+    // adapter/audio_info.py. Sent by adapter.py's -a/--audio mode; no-op by
+    // default, scenes override to react to live audio.
+    handle_audio_info(avg, peak, spectrum, samplerate) {
+    }
+
     state_transition(old_state_idx, new_state_idx) {
 
     }

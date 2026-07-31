@@ -1,16 +1,17 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
+import {
+    CH_ROT_Y,
+    CH_EXPAND_X,
+    CH_EXPAND_Y,
+    CH_EXPAND_Z,
+    CH_EXPAND_W,
+    knob_to_snap,
+} from '../controller_map.js';
 import {
     lerp_scalar,
     ease,
-    update_persp_camera_aspect,
-    update_orth_camera_aspect,
-    rand_int,
     clamp,
-    arr_eq,
-    create_instanced_cube,
-    ShaderLoader,
     BeatClock,
 } from '../util.js';
 import { Tesseract } from '../highdim.js';
@@ -18,7 +19,7 @@ import { Tesseract } from '../highdim.js';
 
 export class IntroScene extends Scene {
     constructor(context) {
-        super(context, 'tesseract', 8);
+        super(context, 'tesseract');
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -37,19 +38,16 @@ export class IntroScene extends Scene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.clear();
-        this.clock = new THREE.Clock(true);
         this.sync_clock = new BeatClock(this);
+        // Beat-relative clock for the (currently disabled) per-beat scale
+        // bounce in anim_frame; restarted every 4 beats by handle_sync.
         this.beat_clock = new BeatClock(this);
-        this.dim_change_clock = new BeatClock(this);
 
         this.base_group = new THREE.Group();
         this.tesseract = new Tesseract(10.0, this.cam_orth);
-
         this.base_group.add(this.tesseract);
 
-        const cube = create_instanced_cube([3, 3, 3], 0x00ff00);
-        //this.base_group.add(cube);
-
+        // Fixed 4D orientation: an isometric-ish projection of the tesseract.
         this.tesseract.rot_yz = isom_angle;
         this.tesseract.rot_xz = Math.PI / 4;
         this.tesseract.rot_xw = Math.PI / 4;
@@ -59,90 +57,43 @@ export class IntroScene extends Scene {
         this.start_rot = 0;
         this.end_rot = 0;
         this.cur_rot = this.start_rot;
-        this.rot_dir = 1;
 
         // Knob 8 selects one of 8 quarter-pi (45 deg) Y orientations; the
         // scene interpolates from the current angle towards the chosen step.
         this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
             knob_to_snap(8));
 
-        this.cur_dim = 1;
-        this.dim_change_direction = 0;
-
-        this.elapsed_beats = 0.0;
-        this.do_rotation = false;
-
-        this.scales = new Array(4).fill(0);
+        // Per-axis scale of the tesseract: one knob per 4D axis, each mapping
+        // its normalized 0..1 value directly to that axis's scale (0 collapses
+        // the axis, 1 is full size). Default to a full, uncollapsed tesseract.
+        this.scales = new Array(4).fill(1);
+        this.bind('apc', CH_EXPAND_X, (v) => { this.scales[0] = v; });
+        this.bind('apc', CH_EXPAND_Y, (v) => { this.scales[1] = v; });
+        this.bind('apc', CH_EXPAND_Z, (v) => { this.scales[2] = v; });
+        this.bind('apc', CH_EXPAND_W, (v) => { this.scales[3] = v; });
     }
 
     anim_frame(dt) {
         const beats_per_lerp = 2;
 
-        // Handle rotation (driven by the knob-8 binding registered in the ctor).
-        {
-            const t_sync = this.sync_clock.getElapsedBeats();
-            const frac = ease(clamp(t_sync / beats_per_lerp, 0, 1));
-            this.cur_rot = lerp_scalar(this.start_rot, this.end_rot, frac);
-            console.log(this.cur_rot);
-            if (this.cur_dim == 4) {
-                this.tesseract.rot_xw = Math.PI / 4 + Math.PI * this.cur_rot / 2;
-            } else {
-                this.tesseract.rot_xw = Math.PI / 4;
-            }
-            this.tesseract.rotation.y = Math.PI * this.cur_rot / 4;
-        }
+        // Y rotation eases toward the knob-8 target (see set_rot_y_target).
+        const t_sync = this.sync_clock.getElapsedBeats();
+        const rot_frac = ease(clamp(t_sync / beats_per_lerp, 0, 1));
+        this.cur_rot = lerp_scalar(this.start_rot, this.end_rot, rot_frac);
+        this.tesseract.rotation.y = Math.PI * this.cur_rot / 4;
 
-    
-        const t = this.beat_clock.getElapsedBeats();
-        const bounce_beats = 4;
-        const state_change_beats = 8;
-
-        //const frac = 1 - clamp(beats_since_last_beat / recoil_beats, 0, 1);
-        let frac = clamp(16 * t / bounce_beats * Math.exp(-5 * t / bounce_beats) * (1 - t / bounce_beats), 0, 1);
-        frac = Math.sin(t * Math.PI / bounce_beats);
-        //frac = 1 - Math.abs(2 * (t / bounce_beats) - 1);
-
-        //this.tesseract.rot_xw += 0.01;
-        //this.tesseract.rot_xz += 0.01;
-        //this.tesseract.rot_xz += 0.01;
-        /*let arr = [];
-        frac *= 4;
-        for (let i = 0; i < 4; i++) {
-            const this_val = clamp(frac, 0, 1);
-            arr.push(this_val);
-            frac -= this_val;
-        }*/
-        let state_change_frac = clamp(this.dim_change_clock.getElapsedBeats(this.get_local_bpm()) / state_change_beats, 0, 1);
-        const scaling_idx = this.cur_dim - 1 - this.dim_change_direction;
-
-        this.scales[this.cur_dim - 1] = frac;
-        /*if (this.dim_change_direction == -1) {
-            // Going down from higher dim
-            this.scales[this.cur_dim - 1] *= 1;
-            this.scales[this.cur_dim] = Math.min(this.scales[this.cur_dim],
-                1 - state_change_frac);
-            for (let i = this.cur_dim + 1; i < this.scales.length; i++) {
-                this.scales[i] = 0;
-            }
-            for (let i = 0; i < this.cur_dim - 1; i++) {
-                this.scales[i] = 1;
-            }
-        } else if (this.dim_change_direction == 1) {
-            // Going up from lower dim
-            this.scales[this.cur_dim - 1] *= state_change_frac;
-            this.scales[this.cur_dim - 2] = Math.max(this.scales[this.cur_dim - 2],
-                state_change_frac);
-
-            for (let i = this.cur_dim; i < this.scales.length; i++) {
-                this.scales[i] = 0;
-            }
-            for (let i = 0; i < this.cur_dim - 2; i++) {
-                this.scales[i] = 1;
-            }
-        }*/
-        for (let i = 0; i < this.cur_dim - 1; i++) {
-            this.scales[i] = 1;
-        }
+        // Per-axis scale is driven directly by the CH_EXPAND_* knobs bound in
+        // the constructor. `scales` holds the four axis scales as set by those
+        // knobs; we just push them into the geometry each frame.
+        //
+        // Kept for future beat-interactivity: a per-beat "bounce" that pulses
+        // one axis's scale over `bounce_beats`, driven by beat_clock (restarted
+        // every 4 beats in handle_sync). Re-enable by uncommenting and choosing
+        // which axis it should modulate.
+        // const t = this.beat_clock.getElapsedBeats();
+        // const bounce_beats = 4;
+        // const bounce = Math.sin(t * Math.PI / bounce_beats);
+        // this.scales[axis] = bounce;
 
         this.tesseract.scale_vec.set(...this.scales);
         this.tesseract.update_geom(this.camera);
@@ -167,24 +118,6 @@ export class IntroScene extends Scene {
     }
 
     handle_beat(t, channel) {
-    }
-
-
-    state_transition(old_state_idx, new_state_idx) {
-        this.do_rotation = (new_state_idx % 2 == 1);
-        const new_dims = Math.floor(this.cur_state_idx / 2) + 1
-        if (new_dims != this.cur_dim) {
-            this.dim_change_clock.start();
-        }
-        this.cur_dim = new_dims;
-        if (old_state_idx < new_state_idx) {
-            this.dim_change_direction = 1;
-        } else if (old_state_idx > new_state_idx) {
-            this.dim_change_direction = -1;
-        } else {
-            this.dim_change_direction = 0;
-        }
-        //this.do_rotation = false;
     }
 
 }

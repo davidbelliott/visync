@@ -656,7 +656,7 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
+        const div_ratio = 1;//Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
         //const div_ratio = window.devicePixelRatio;
         this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);

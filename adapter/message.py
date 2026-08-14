@@ -88,19 +88,25 @@ class MsgPromotion(Msg):
 
 class MsgAudioInfo(Msg):
     # A snapshot of the audio input, broadcast at a fixed rate by adapter.py's
-    # -a/--audio mode. `avg` and `peak` are the mean and maximum absolute sample
-    # amplitude over the interval since the previous MsgAudioInfo, in [0, 1] for
-    # float32 audio. `spectrum` is the raw FFT magnitude of the most recent
-    # analysis window: one amplitude per rfft bin (FFT_SIZE//2 + 1 of them),
-    # linearly spaced in frequency and amplitude-normalized so a full-scale sine
-    # reads ~1.0 in its bin. `samplerate` (Hz) fixes the frequency axis: bin k is
-    # at k * (samplerate / 2) / (len(spectrum) - 1) Hz, i.e. the last bin is the
-    # Nyquist frequency samplerate / 2. See adapter/audio_info.py.
-    def __init__(self, last_transmit_latency, avg, peak, spectrum, samplerate):
+    # -a/--audio mode. Every level here is in dBFS (0 dB = full scale, floored
+    # at audio_info.DB_FLOOR): the log conversion happens adapter-side so the
+    # values are quantized in the domain they're displayed in, which keeps the
+    # resolution uniform instead of starving the quiet bins.
+    #
+    # `avg` and `peak` are the mean and maximum absolute sample amplitude over
+    # the interval since the previous MsgAudioInfo. `spectrum` is the FFT
+    # magnitude of the most recent analysis window, one value per rfft bin up to
+    # audio_info.SPECTRUM_MAX_HZ, linearly spaced in frequency and normalized so
+    # a full-scale sine reads ~0 dB in its bin; `spectrum_smoothed` is the same
+    # thing time-averaged (on linear amplitude, before conversion). `samplerate`
+    # (Hz) fixes the frequency axis: bin k is at k * samplerate / FFT_SIZE Hz.
+    def __init__(self, last_transmit_latency, avg, peak, spectrum,
+                 spectrum_smoothed, samplerate):
         super().__init__(Msg.Type.AUDIO_INFO, last_transmit_latency)
         self.avg = avg
         self.peak = peak
         self.spectrum = spectrum
+        self.spectrum_smoothed = spectrum_smoothed
         self.samplerate = samplerate
 
 

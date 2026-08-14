@@ -19,27 +19,38 @@ const HALF_PI = Math.PI / 2;
 // the frame. World units: orthographic frustum_size 20 => y in [-10, 10], and x
 // roughly [-14, 14] over the dial grid. Amplitude 0..1 (0 = silence, 1 = the
 // full-scale maximum a float32 device can capture) maps to baseline..full-scale
-// height; the same vertical scale is shared by the amp bar and the spectrum
-// line so their heights are directly comparable.
-const AUDIO_BASELINE_Y = -9.5;      // world y of zero amplitude
-const AUDIO_FULL_SCALE_H = 18.0;     // world height of amplitude 1.0
+// height on a logarithmic (dB) scale (see amp_to_y); the same vertical scale is
+// shared by the amp bar and the spectrum line so their heights are comparable.
+const AUDIO_BASELINE_Y = -9.5;      // world y of the dB floor (AUDIO_DB_MIN)
+const AUDIO_FULL_SCALE_H = 18.0;     // world height of amplitude 1.0 (0 dB)
 const AUDIO_Z = 0.1;                // sit in front of the dials
+
+// Vertical axis range, in dBFS. The adapter already sends levels in dB (see
+// adapter/audio_info.py), so this is a straight linear remap: AUDIO_DB_MAX
+// (0 dB, full scale) at full height, AUDIO_DB_MIN and anything below it on the
+// baseline.
+const AUDIO_DB_MIN = -90;
+const AUDIO_DB_MAX = 0;
 
 // Left-side amplitude bar: full-scale outline frame, average fill, peak tick.
 const AMP_BAR_X = -13.5;
 const AMP_BAR_W = 0.8;
 
-// Spectrum polyline: the N bands span this x-range, left to right, low to high.
+// Spectrum polyline: the fft bins span this x-range, one point per bin, evenly
+// spaced by bin index (so x is linear in frequency), low to high.
 const SPECTRUM_X0 = -12.5;
 const SPECTRUM_WIDTH = 26.0;
 
-// Log-frequency x axis for the spectrum. The edges snap to the "nice" log ticks
-// (1,2,...,9 x 10^k) just outside the data range: left = the tick at/below the
-// lowest bin's frequency, right = the tick at/above Nyquist. Dim vertical marks
-// sit at every such log tick (derived per-message from the samplerate).
-const LOG_TICK_H = 0.5;             // world height of the log tick marks
+// Which of the two spectrum traces to draw; independent, either or both (or
+// neither). The averaged one (adapter/audio_info.py's SPECTRUM_SMOOTH_TAU_S,
+// computed on linear amplitude before the dB conversion) settles the low-level
+// bins onto the true noise floor; the raw one shows transients as they land.
+// When both are on, the averaged trace draws behind the raw one.
+const SHOW_RAW_SPECTRUM = true;
+const SHOW_SMOOTHED_SPECTRUM = false;
 
-const SPECTRUM_COLOR = 0xffffff;    // spectrum line
+const SPECTRUM_COLOR = 0x555555;    // instantaneous spectrum line
+const SMOOTH_COLOR = 0xff8800;      // time-averaged spectrum line
 const AVG_COLOR = 0xffffff;         // average fill
 const PEAK_COLOR = 0xffffff;        // peak tick
 const AUDIO_REF_COLOR = 0x555555;   // dim baseline + full-scale frame + ticks
@@ -49,31 +60,6 @@ function segment_geometry(x0, y0, x1, y1) {
     return new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y1, 0),
     ]);
-}
-
-// Nearest "nice" log tick (m x 10^k, m in 1..9) at or below / at or above f.
-function tick_below(f) {
-    const base = Math.pow(10, Math.floor(Math.log10(f)));
-    return Math.floor(f / base) * base;
-}
-function tick_above(f) {
-    const base = Math.pow(10, Math.floor(Math.log10(f)));
-    return Math.ceil(f / base - 1e-9) * base;   // m=10 -> 10^(k+1), still a tick
-}
-
-// Ascending list of log ticks (m x 10^k, m in 1..9) within [f_lo, f_hi].
-function log_tick_freqs(f_lo, f_hi) {
-    const ticks = [];
-    for (let k = Math.floor(Math.log10(f_lo)); k <= Math.ceil(Math.log10(f_hi)); k++) {
-        const base = Math.pow(10, k);
-        for (let m = 1; m <= 9; m++) {
-            const f = m * base;
-            if (f >= f_lo - 1e-6 && f <= f_hi + 1e-6) {
-                ticks.push(f);
-            }
-        }
-    }
-    return ticks;
 }
 
 // Outline circle as a 1px-wide line loop (WebGL lines are always single-pixel).
@@ -126,9 +112,11 @@ class Dial {
 }
 
 // Live audio readout for MsgAudioInfo. Its group is anchored at the baseline so
-// children work in local coords where y=0 is silence and y=AUDIO_FULL_SCALE_H is
-// full scale. Left: an amplitude bar (dim full-scale frame, orange average fill,
-// magenta peak tick). Right: a cyan 1px polyline through the spectrum bands.
+// children work in local coords where y=0 is the dB floor (AUDIO_DB_MIN) and
+// y=AUDIO_FULL_SCALE_H is full scale (0 dB); amplitudes map to y logarithmically
+// (see amp_to_y_db). Left: an amplitude bar (dim full-scale frame, average fill,
+// peak tick). Right: two 1px polylines of the fft spectrum, one point per bin --
+// white for the instantaneous magnitude, orange for its time average.
 class AudioDisplay {
     constructor() {
         this.group = new THREE.Group();
@@ -164,126 +152,99 @@ class AudioDisplay {
         this.group.add(new THREE.Line(
             this.peak_geom, new THREE.LineBasicMaterial({ color: PEAK_COLOR })));
 
-        this.ref_mat = ref_mat;
-
-        // Log-frequency axis, configured from the first message's samplerate +
-        // bin count: log_fmin/log_fmax are the natural logs of the axis edge
-        // frequencies (the log ticks just outside the data range).
-        this.samplerate = 0;
-        this.bin_count = 0;
-        this.log_fmin = 0;
-        this.log_fmax = 0;
-        this.configured = false;
-        this.tick_lines = null;     // THREE.LineSegments of the log tick marks
-
-        // Spectrum polyline is built lazily on the first message, once the bin
-        // count and samplerate are known; positions are then rewritten in place.
+        // Enabled spectrum polylines are built lazily on the first message, once
+        // the bin count is known; positions are rewritten in place each update.
         this.spectrum_mat = new THREE.LineBasicMaterial({ color: SPECTRUM_COLOR });
+        this.smooth_mat = new THREE.LineBasicMaterial({ color: SMOOTH_COLOR });
         this.spectrum_line = null;
-        this.spectrum_pos = null;   // Float32Array backing the line's positions
+        this.smooth_line = null;
+        this.spectrum_pos = null;   // Float32Array backing the raw line
+        this.smooth_pos = null;     // Float32Array backing the averaged line
+        this.bin_count = 0;         // 0 until the lines are built
     }
 
-    // World x for a frequency on the log axis (log_fmin..log_fmax edges -> the
-    // spectrum's left..right edge). Requires configure_axis() to have run.
-    freq_to_x(freq) {
-        return SPECTRUM_X0 +
-            (Math.log(freq) - this.log_fmin) / (this.log_fmax - this.log_fmin) * SPECTRUM_WIDTH;
-    }
-
-    // Set the axis edges from the samplerate + bin count and (re)draw the log
-    // ticks. Edges snap to the log ticks just outside the data: left = tick at/
-    // below the lowest bin, right = tick at/above Nyquist. Rebuilds the spectrum
-    // line so its x mapping matches. No-op if samplerate and bin count are same.
-    configure_axis(samplerate, n) {
-        if (!samplerate || (samplerate === this.samplerate && n === this.bin_count)) {
-            return;
-        }
-        this.samplerate = samplerate;
-        this.bin_count = n;
-        const nyquist = samplerate / 2;
-        const bin_hz = nyquist / (n - 1);        // bin 1 is the lowest data freq
-        const f_lo = tick_below(bin_hz);
-        const f_hi = tick_above(nyquist);
-        this.log_fmin = Math.log(f_lo);
-        this.log_fmax = Math.log(f_hi);
-        this.configured = true;
-
-        if (this.tick_lines) {
-            this.group.remove(this.tick_lines);
-            this.tick_lines.geometry.dispose();
-        }
-        const pts = [];
-        for (const f of log_tick_freqs(f_lo, f_hi)) {
-            const x = this.freq_to_x(f);
-            pts.push(new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, LOG_TICK_H, 0));
-        }
-        this.tick_lines = new THREE.LineSegments(
-            new THREE.BufferGeometry().setFromPoints(pts), this.ref_mat);
-        this.group.add(this.tick_lines);
-
-        // Force the spectrum line to rebuild against the new frequency mapping.
-        if (this.spectrum_line) {
-            this.group.remove(this.spectrum_line);
-            this.spectrum_line.geometry.dispose();
-            this.spectrum_line = null;
-        }
-    }
-
-    // n is the raw fft bin count. We plot bins 1..n-1 (skipping DC) placed by
-    // their actual frequency on the log axis, where bin i is at
-    // i * Nyquist / (n - 1) Hz. Rebuilds only when the point count changes.
-    ensure_spectrum(n) {
-        if (!this.configured) {
-            return;   // axis not configured yet (no samplerate seen)
-        }
-        const num_points = n - 1;
-        if (num_points < 1 || (this.spectrum_line && this.spectrum_pos.length === num_points * 3)) {
-            return;
-        }
-        if (this.spectrum_line) {
-            this.group.remove(this.spectrum_line);
-            this.spectrum_line.geometry.dispose();
-        }
-        const bin_hz = (this.samplerate / 2) / (n - 1);
-        this.spectrum_pos = new Float32Array(num_points * 3);
-        for (let j = 0; j < num_points; j++) {
-            const bin = j + 1;   // point j shows fft bin j+1; y filled per update
-            this.spectrum_pos[j * 3] = this.freq_to_x(bin * bin_hz);
+    // Build one spectrum polyline of n points: a Float32Array of positions with
+    // x fixed by bin index (low -> high, left -> right) and y filled per update,
+    // plus the THREE.Line drawing it. Returns [line, positions].
+    build_line(n, material, z) {
+        const pos = new Float32Array(n * 3);
+        for (let j = 0; j < n; j++) {
+            pos[j * 3] = SPECTRUM_X0 + (j / (n - 1)) * SPECTRUM_WIDTH;
         }
         const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.BufferAttribute(this.spectrum_pos, 3));
-        this.spectrum_line = new THREE.Line(geom, this.spectrum_mat);
-        this.group.add(this.spectrum_line);
+        geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        const line = new THREE.Line(geom, material);
+        line.position.z = z;
+        this.group.add(line);
+        return [line, pos];
     }
 
-    // avg/peak in [0, 1] (clamped to full scale); spectrum is the raw fft
-    // magnitude per bin, on the same 0..1-per-full-scale vertical scale (may
-    // exceed 1); samplerate (Hz) fixes the frequency axis.
-    set(avg, peak, spectrum, samplerate) {
-        this.configure_axis(samplerate, spectrum.length);
+    // n is the fft bin count: one point per bin. Rebuilds only when the bin
+    // count changes -- this runs per message, so it must not reallocate on
+    // every frame. Either trace can be disabled, so both may end up null.
+    ensure_spectrum(n) {
+        if (n < 2 || this.bin_count === n) {
+            return;
+        }
+        for (const line of [this.smooth_line, this.spectrum_line]) {
+            if (line) {
+                this.group.remove(line);
+                line.geometry.dispose();
+            }
+        }
+        this.spectrum_line = this.smooth_line = null;
+        this.spectrum_pos = this.smooth_pos = null;
+        this.bin_count = n;
 
-        this.avg_fill.scale.y = Math.max(1e-4, clamp01(avg) * AUDIO_FULL_SCALE_H);
+        // Averaged trace first, set back in z so the raw one draws over it.
+        if (SHOW_SMOOTHED_SPECTRUM) {
+            [this.smooth_line, this.smooth_pos] =
+                this.build_line(n, this.smooth_mat, -0.01);
+        }
+        if (SHOW_RAW_SPECTRUM) {
+            [this.spectrum_line, this.spectrum_pos] =
+                this.build_line(n, this.spectrum_mat, 0);
+        }
+    }
 
-        const peak_y = clamp01(peak) * AUDIO_FULL_SCALE_H;
+    // All arguments are dBFS (the adapter does the log conversion). avg/peak are
+    // the interval's mean and peak level; spectrum and smoothed are one value
+    // per fft bin, the latter already time-averaged adapter-side.
+    set(avg, peak, spectrum, smoothed) {
+        this.avg_fill.scale.y = Math.max(1e-4, db_to_y(avg));
+
+        const peak_y = db_to_y(peak);
         const pp = this.peak_geom.attributes.position.array;
         pp[1] = peak_y;
         pp[4] = peak_y;
         this.peak_geom.attributes.position.needsUpdate = true;
 
         this.ensure_spectrum(spectrum.length);
-        if (!this.spectrum_line) {
-            return;   // axis not configured yet, or fewer than 2 bins to draw
+        // Each trace is independent: fill only the ones that are enabled.
+        if (this.spectrum_line) {
+            for (let j = 0; j < spectrum.length; j++) {
+                this.spectrum_pos[j * 3 + 1] = db_to_y(spectrum[j]);
+            }
+            this.spectrum_line.geometry.attributes.position.needsUpdate = true;
         }
-        const num_points = this.spectrum_pos.length / 3;
-        for (let j = 0; j < num_points; j++) {
-            this.spectrum_pos[j * 3 + 1] = spectrum[j + 1] * AUDIO_FULL_SCALE_H;
+        if (this.smooth_line) {
+            for (let j = 0; j < smoothed.length; j++) {
+                this.smooth_pos[j * 3 + 1] = db_to_y(smoothed[j]);
+            }
+            this.smooth_line.geometry.attributes.position.needsUpdate = true;
         }
-        this.spectrum_line.geometry.attributes.position.needsUpdate = true;
     }
 }
 
 function clamp01(v) {
     return Math.max(0, Math.min(1, v));
+}
+
+// dBFS -> world y: AUDIO_DB_MIN (and below) on the baseline, AUDIO_DB_MAX
+// (0 dB, full scale) at full height. A straight remap -- the log conversion
+// already happened adapter-side (adapter/audio_info.py's amp_to_db).
+function db_to_y(db) {
+    return clamp01((db - AUDIO_DB_MIN) / (AUDIO_DB_MAX - AUDIO_DB_MIN)) * AUDIO_FULL_SCALE_H;
 }
 
 // Debug scene: a grid of 16 round dials showing the live (normalized) values of
@@ -316,11 +277,11 @@ export class DebugScene extends Scene {
         this.add(this.audio.group);
     }
 
-    // avg/peak: mean and peak absolute input amplitude in [0, 1]; spectrum: raw
-    // FFT magnitude bins, low->high frequency; samplerate (Hz) fixes the axis.
-    // See adapter/audio_info.py.
-    handle_audio_info(avg, peak, spectrum, samplerate) {
-        this.audio.set(avg, peak, spectrum, samplerate);
+    // All levels in dBFS (see adapter/audio_info.py): avg/peak for the interval,
+    // spectrum/smoothed one value per fft bin, low->high frequency, plotted one
+    // point per bin.
+    handle_audio_info(avg, peak, spectrum, smoothed, samplerate) {
+        this.audio.set(avg, peak, spectrum, smoothed);
     }
 
     anim_frame(dt) {

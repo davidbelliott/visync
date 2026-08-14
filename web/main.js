@@ -151,7 +151,8 @@ function connect() {
         } else if (type == MSG_TYPE_GOTO_SCENE) {
             context.change_scene(msg.scene, msg.bg);
         } else if (type == MSG_TYPE_AUDIO_INFO) {
-            context.handle_audio_info(msg.avg, msg.peak, msg.spectrum, msg.samplerate);
+            context.handle_audio_info(msg.avg, msg.peak, msg.spectrum,
+                msg.spectrum_smoothed, msg.samplerate);
         }
         const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
         socket.send(JSON.stringify(resp));
@@ -810,17 +811,19 @@ class GraphicsContext {
         });
     }
 
-    // avg/peak: mean and peak absolute input amplitude since the last message,
-    // in [0, 1]. spectrum: raw FFT magnitude bins, linearly spaced in frequency;
-    // samplerate (Hz) fixes the axis (last bin = samplerate/2). See
-    // adapter/audio_info.py. Sent by adapter.py's -a/--audio mode.
-    handle_audio_info(avg, peak, spectrum, samplerate) {
+    // All levels are dBFS, converted adapter-side (see adapter/audio_info.py).
+    // avg/peak: mean and peak input level since the last message. spectrum: FFT
+    // magnitude bins, linearly spaced in frequency; smoothed: the same,
+    // time-averaged. samplerate (Hz) fixes the frequency axis (bin k is at
+    // k * samplerate / FFT_SIZE Hz). Sent by adapter.py's -a/--audio mode.
+    handle_audio_info(avg, peak, spectrum, smoothed, samplerate) {
         // Same reasoning as handle_beat: only on-screen scenes need it.
         this.shown_scenes.forEach((idx) => {
             if (idx === undefined) {
                 return;
             }
-            this.scenes.get(idx).handle_audio_info(avg, peak, spectrum, samplerate);
+            this.scenes.get(idx).handle_audio_info(
+                avg, peak, spectrum, smoothed, samplerate);
         });
     }
 

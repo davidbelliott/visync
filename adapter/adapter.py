@@ -40,7 +40,7 @@ FAKE_KNOB_UPDATE_HZ = 60
 # Rate at which -a/--audio broadcasts MsgAudioInfo. Each message summarizes the
 # input since the previous one, so this sets both the broadcast rate and the
 # amplitude-averaging window; 60 Hz matches the frontend frame rate.
-AUDIO_INFO_HZ = 60
+AUDIO_INFO_HZ = 120
 
 if USE_LEDS:
     from blink import led_update_loop, led_handle_msgs
@@ -525,32 +525,61 @@ async def main_loop_fake(bpm, cycle=0):
         await asyncio.sleep(max(0, next_tick_time - time.time()))
 
 
-async def main_loop_audio(device):
+async def main_loop_audio(device, infer_beat=False):
     """Open the given (index, name) audio input device and broadcast a
     MsgAudioInfo at AUDIO_INFO_HZ carrying the interval's average/peak amplitude
     and the raw FFT magnitude spectrum. The sounddevice callback runs on its own
     audio thread and only accumulates; the FFT and the broadcast happen here on
-    the asyncio loop thread, so the realtime audio thread never stalls."""
+    the asyncio loop thread, so the realtime audio thread never stalls.
+
+    With infer_beat, the same spectrum also drives a BeatDetector, broadcasting
+    a MsgBeat whenever one of audio_info.BEAT_BANDS jumps above its threshold."""
     import sounddevice as sd
-    from audio_info import AudioAnalyzer
+    from audio_info import AudioAnalyzer, BeatDetector, amp_to_db
 
     device_idx, device_name = device
-    analyzer = AudioAnalyzer()
-    # samplerate defaults to the device's own rate; bin k of the spectrum is
-    # then k * samplerate / FFT_SIZE Hz.
-    stream = sd.InputStream(device=device_idx, channels=1, dtype='float32',
+    # Run at the device's own default rate, passed explicitly so the analyzer
+    # (which needs it to know where SPECTRUM_MAX_HZ falls) and the stream agree.
+    # Bin k of the spectrum is then k * samplerate / FFT_SIZE Hz.
+    samplerate = float(sd.query_devices(device_idx)['default_samplerate'])
+    analyzer = AudioAnalyzer(samplerate)
+    # latency='low' requests the device's low-latency buffering instead of
+    # PortAudio's default 'high' (the likely culprit behind laggy interfaces).
+    stream = sd.InputStream(device=device_idx, samplerate=samplerate, channels=1,
+                            dtype='float32', latency='low',
                             callback=analyzer.callback)
-    print(f"Listening to [{device_idx}] {device_name} @ {stream.samplerate:.0f} Hz "
+    print(f"Listening to [{device_idx}] {device_name} @ {samplerate:.0f} Hz "
           f"-> MsgAudioInfo at {AUDIO_INFO_HZ} Hz")
 
+    detector = None
+    if infer_beat:
+        detector = BeatDetector(samplerate, analyzer.n_bins)
+        print("Inferring beats from audio (edit BEAT_BANDS in audio_info.py to tune):")
+        for name, channel, lo, hi in detector.band_ranges():
+            band = next(b for b in detector.bands if b.name == name)
+            print(f"  {name:6s} -> beat channel {channel:2d}  "
+                  f"{band.f_lo_hz:5.0f}-{band.f_hi_hz:5.0f} Hz (bins {lo}-{hi}), "
+                  f"threshold {band.threshold}x")
+
     period = 1.0 / AUDIO_INFO_HZ
-    samplerate = stream.samplerate
     stream.start()
     try:
         next_tick = time.monotonic()
         while True:
-            avg, peak, spectrum = analyzer.take_snapshot()
-            msg = MsgAudioInfo(last_msg_latency, avg, peak, spectrum, samplerate)
+            now = time.monotonic()
+            # Levels come back linear; the beat detector wants true power, and
+            # amp_to_db() converts for the wire (see audio_info.DB_FLOOR).
+            avg, peak, spectrum, smoothed = analyzer.take_snapshot(now)
+            if detector is not None:
+                # Beats first: they're time-critical, the audio info is not.
+                for band, energy, ratio in detector.update(spectrum, now):
+                    websockets.broadcast(
+                        connected,
+                        MsgBeat(last_msg_latency, band.channel, True).to_json())
+                    print(f"beat {band.name:6s} ch{band.channel:<2d} "
+                          f"{ratio:5.2f}x avg (energy {energy:.2e})")
+            msg = MsgAudioInfo(last_msg_latency, amp_to_db(avg), amp_to_db(peak),
+                               amp_to_db(spectrum), amp_to_db(smoothed), samplerate)
             websockets.broadcast(connected, msg.to_json())
             next_tick += period
             await asyncio.sleep(max(0.0, next_tick - time.monotonic()))
@@ -587,6 +616,9 @@ async def main():
                              'PATTERN (case-insensitive; must match exactly one) '
                              'and broadcast MsgAudioInfo. Use --list-devices to '
                              'see names.')
+    parser.add_argument('-i', '--infer-beat', '--infer_beat', action='store_true',
+                        help='With --audio, also infer beats from the audio and '
+                             'broadcast MsgBeat per audio_info.py BEAT_BANDS')
     parser.add_argument('--list-devices', action='store_true',
                         help='List audio input devices and exit')
     args = parser.parse_args()
@@ -603,6 +635,10 @@ async def main():
     args_count = sum(x is not None for x in [args.fake, args.device, args.rtmidi, args.audio])
     if args_count != 1:
         print('Error: must specify exactly one of --fake, --device, --rtmidi, or --audio')
+        exit(1)
+
+    if args.infer_beat and args.audio is None:
+        print('Error: --infer-beat only applies to --audio')
         exit(1)
 
     # Resolve the audio device up front so a bad --audio pattern fails cleanly
@@ -631,7 +667,7 @@ async def main():
             elif args.device:
                 t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
             elif args.audio is not None:
-                t1 = tg.create_task(main_loop_audio(audio_device))
+                t1 = tg.create_task(main_loop_audio(audio_device, args.infer_beat))
             else:
                 t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
                 if FAKE_KNOB_MOVEMENT:

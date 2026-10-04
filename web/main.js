@@ -444,9 +444,17 @@ class GraphicsContext {
 
         // Controllers providing live input (knobs/wheels) over WebSockets.
         // Created before scenes so scenes can bind to controller knobs.
+        //
+        // Both are transports onto the SAME 16 knobs, so they share one Knob
+        // map: knob values reach us either from a controller adapter on its
+        // own port (apc40_control.py, debug_control.py, kinect_control.py) or
+        // over the relay, which carries the control changes adapter.py
+        // forwards from MIDI hardware and generates for FAKE_KNOB_MOVEMENT.
+        // Scenes bind to "apc" and are driven by whichever one moved.
+        const apc = new WebsocketController(this, "ws://localhost:8766");
         this.controllers = new Map([
-            ["apc", new WebsocketController(this, "ws://localhost:8766")],
-            ["midi", new WebsocketController(this, relay_url())],
+            ["apc", apc],
+            ["midi", new WebsocketController(this, relay_url(), apc.knobs)],
         ]);
 
         // Create scenes
@@ -486,7 +494,6 @@ class GraphicsContext {
         // 15 (background). Each knob's normalized [0, 1] value maps across the
         // available scenes, applied whenever the knob changes (see bind_to).
         {
-            const apc = this.controllers.get("apc");
             const to_scene_idx = (norm) => Math.min(this.scenes.size - 1,
                 Math.floor(norm * this.scenes.size));
             apc.knobs.get(14).bind_to(new Binding(apc.knobs.get(14),
@@ -660,7 +667,7 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        const div_ratio = 1;//Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
+        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
         //const div_ratio = window.devicePixelRatio;
         this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);
@@ -778,9 +785,9 @@ class GraphicsContext {
             scene.handle_sync_raw(sync_rate_hz, beat);
         });*/
         // Update overlay with sync rate hz (convert to bpm)
-        const bpm = Math.round(sync_rate_hz * 60 / 24);
+        const bpm = sync_rate_hz * 60 / 24;
         const bpm_elem = document.getElementById("bpm");
-        bpm_elem.innerHTML = String(bpm).padEnd(3);
+        bpm_elem.innerHTML = String(bpm.toFixed(1)).padEnd(3);
     }
 
     update_mode_hud() {

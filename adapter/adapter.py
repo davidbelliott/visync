@@ -4,7 +4,10 @@ from collections import deque
 from enum import Enum
 import json
 import math
+import os
+import termios
 import time
+import tty
 import serial_asyncio
 import pathlib
 import websockets
@@ -17,9 +20,9 @@ import sys
 
 USE_STROBE = False
 USE_LEDS = False
-FAKE_KNOB_MOVEMENT = False
 BEAT_RESET_TIMEOUT_S = 1
-WS_PORT = 8765
+WS_BEAT_PORT = 8765
+
 MIN_BPM_SAMPLES = 4 * 24
 NUM_BPM_SAMPLES = 16 * 24
 
@@ -30,12 +33,50 @@ LOG_SYNC = False
 # before sending so the client deals only in normalized knob values.
 MIDI_CC_MAX = 127.0
 
-# Fake control-change knobs: 16 sinusoids with a period of 4 bars (16 beats),
+# Fake control-change knobs: sinusoids with a period of 4 bars (16 beats),
 # each phase-shifted by one beat. Sent at a fixed high rate (independent of the
 # sync clock) to give the impression of continuous movement.
-FAKE_KNOB_COUNT = 16
+FAKE_KNOB_MOVEMENT = True
+FAKE_KNOB_COUNT = 14
 FAKE_KNOB_PERIOD_BEATS = 16
 FAKE_KNOB_UPDATE_HZ = 60
+
+# Interactive tempo control for --fake (see main_loop_tempo_keys). Up/down step
+# the set tempo by TEMPO_STEP_BPM; left/right scale it by TEMPO_NUDGE_FACTOR
+# while held, to drag the visuals forward or back against the music.
+TEMPO_STEP_BPM = 0.1
+TEMPO_NUDGE_FACTOR = 1.15
+TEMPO_MIN_BPM = 20.0
+TEMPO_MAX_BPM = 300.0
+# A terminal reports no key-release event, so "held" is inferred from the
+# terminal's own key auto-repeat: the nudge stays on until this long passes
+# with no further repeat. It has to comfortably exceed the initial repeat delay
+# (~0.5 s with macOS defaults) or a held arrow would stutter; the cost is that
+# a single tap nudges for about this long.
+TEMPO_NUDGE_RELEASE_S = 0.6
+# Tap tempo: the space bar taps quarter notes. Every tap realigns the clock's
+# beat grid to the tap, and once TEMPO_TAP_MIN taps have landed in one series
+# their average spacing also sets the tempo - so a single tap just shifts the
+# grid, while tapping along resets both. A gap longer than TEMPO_TAP_TIMEOUT_S
+# ends the series, so the next set of taps is averaged on its own rather than
+# against whatever was tapped a minute ago; 2 s is a quarter note at 30 bpm,
+# below the tempo range anything here runs at.
+TEMPO_TAP_MIN = 4
+TEMPO_TAP_TIMEOUT_S = 2.0
+# Taps kept for the estimate: enough to average out an unsteady hand, few
+# enough to follow a tempo being deliberately tapped faster or slower.
+TEMPO_TAP_WINDOW = 8
+# What argparse stores for `--fake` with no bpm: there's no tempo yet and the
+# clock stays silent until taps establish one. Not a usable bpm itself, so it
+# can't be confused with one.
+FAKE_TAP_TEMPO = 0.0
+# Status-line redraw rate, in Hz. Only paces the display; tempo changes take
+# effect on the next sync tick regardless.
+TEMPO_STATUS_HZ = 20
+# Largest scheduling backlog the fake clock will try to catch up on, in
+# seconds. Past this (laptop slept, tempo yanked up) it restarts the schedule
+# from now instead of spinning out a burst of overdue syncs.
+FAKE_MAX_CATCHUP_S = 0.25
 
 # Rate at which -a/--audio broadcasts MsgAudioInfo. Each message summarizes the
 # input since the previous one, so this sets both the broadcast rate and the
@@ -308,10 +349,16 @@ adapter_secret = None
 # Last message's roundtrip latency divided by two, in seconds
 last_msg_latency = 0.0
 
+def log_line(text):
+    """Print a line without smearing the --fake status line, which lives on the
+    terminal's current line and is only ever rewritten in place."""
+    print(f'\r\x1b[K{text}')
+
+
 async def handler(websocket):
     global last_msg_latency
     connected.add(websocket)
-    print("Client connected")
+    log_line("Client connected")
     try:
         async for message in websocket:
             msg = json.loads(message)
@@ -320,7 +367,7 @@ async def handler(websocket):
     finally:
         # Unregister client
         connected.remove(websocket)
-        print("Client disconnected")
+        log_line("Client disconnected")
 
 
 class SerialMidiHandler:
@@ -466,17 +513,199 @@ async def main_loop_serial(serial_device, msg_queue, cycle=0):
                 websockets.broadcast(connected, advance_msg.to_json())
 
 
-async def main_loop_fake(bpm, cycle=0):
+class TempoControl:
+    """The tempo main_loop_fake is currently running at, steerable from the
+    terminal by main_loop_tempo_keys.
+
+    `set_bpm` is the tempo the arrow keys nudge around and is what persists;
+    `bpm()` is what the clock should actually run at right now, which differs
+    from it only while a left/right nudge is live. Nudging changes the rate
+    rather than jumping the clock, so a moment at 1.15x slides the visuals a
+    fraction of a beat ahead of the music and they stay there once it lapses -
+    which is the point: it's how you drag a drifting fake clock back onto the
+    band. Space-bar taps are the coarse version of the same job: they move the
+    grid outright instead of easing it over.
+
+    `set_bpm` is None until a tempo exists at all, which is the state `--fake`
+    with no bpm starts in; `ready` is set once one does, and main_loop_fake
+    waits on it before broadcasting any sync."""
+
+    def __init__(self, bpm=None):
+        self.set_bpm = bpm
+        self.nudge_dir = 0          # -1 (slower), 0 (none) or +1 (faster)
+        self.nudge_expiry_s = 0.0   # monotonic time the nudge lapses at
+        self._taps = deque(maxlen=TEMPO_TAP_WINDOW)   # monotonic tap times
+        self._tap_grid_t = None     # time.time() of a tap the clock owes a
+                                    # grid realignment to; None if none pending
+        self.ready = asyncio.Event()
+        if bpm is not None:
+            self.ready.set()
+
+    def bpm(self):
+        """The tempo to clock at right now, or None if none is established."""
+        # Lapse an expired nudge here rather than on a timer: every caller
+        # wants the value as of now, and the clock loop asks 24x a beat.
+        if self.nudge_dir and time.monotonic() >= self.nudge_expiry_s:
+            self.nudge_dir = 0
+        if self.set_bpm is None:
+            return None
+        return self.set_bpm * (TEMPO_NUDGE_FACTOR ** self.nudge_dir)
+
+    def step(self, direction):
+        """Move the set tempo by one TEMPO_STEP_BPM step, permanently."""
+        if self.set_bpm is None:
+            return             # nothing to step until taps establish a tempo
+        self.set_bpm = min(TEMPO_MAX_BPM, max(TEMPO_MIN_BPM,
+                                              self.set_bpm + direction * TEMPO_STEP_BPM))
+
+    def nudge(self, direction):
+        """Scale the tempo until TEMPO_NUDGE_RELEASE_S passes with no repeat."""
+        self.nudge_dir = direction
+        self.nudge_expiry_s = time.monotonic() + TEMPO_NUDGE_RELEASE_S
+
+    def _prune_taps(self):
+        """Drop a stale tap series, so what's left is the one being tapped now.
+        Called from everything that reads the series, since all of them want it
+        as of now - the same reason bpm() lapses the nudge itself."""
+        if self._taps and time.monotonic() - self._taps[-1] > TEMPO_TAP_TIMEOUT_S:
+            self._taps.clear()
+
+    def tap(self):
+        """Register a quarter-note tap: realign the grid to it, and re-estimate
+        the tempo once the series is long enough to mean anything."""
+        self._prune_taps()
+        self._taps.append(time.monotonic())
+        # Wall clock, not monotonic: it's what main_loop_fake schedules on.
+        self._tap_grid_t = time.time()
+        if len(self._taps) >= TEMPO_TAP_MIN:
+            spacing_s = (self._taps[-1] - self._taps[0]) / (len(self._taps) - 1)
+            self.set_bpm = min(TEMPO_MAX_BPM, max(TEMPO_MIN_BPM, 60.0 / spacing_s))
+            self.nudge_dir = 0     # a tapped tempo supersedes a live nudge
+            self.ready.set()
+
+    def taps_needed(self):
+        """Taps still wanted before the current series can set a tempo."""
+        self._prune_taps()
+        return max(0, TEMPO_TAP_MIN - len(self._taps))
+
+    def take_tap_grid_time(self):
+        """The time of a tap the grid hasn't been realigned to yet, or None.
+        Consumed by the caller, so each tap moves the grid exactly once."""
+        tap_t, self._tap_grid_t = self._tap_grid_t, None
+        return tap_t
+
+
+# Arrow keys as the terminal sends them: ESC [ A/B/C/D.
+ARROW_ACTIONS = {
+    b'A': ('step', 1),      # up:    set tempo + TEMPO_STEP_BPM
+    b'B': ('step', -1),     # down:  set tempo - TEMPO_STEP_BPM
+    b'C': ('nudge', 1),     # right: faster while held
+    b'D': ('nudge', -1),    # left:  slower while held
+}
+
+
+def draw_tempo_status(tempo):
+    """Rewrite the single-line tempo readout in place (\\r + erase-to-end), so
+    the terminal shows live tempo without scrolling."""
+    # Read the effective bpm first: it's what lapses a finished nudge, and the
+    # arrow shown below should agree with the number next to it.
+    bpm = tempo.bpm()
+    if bpm is None:
+        needed = tempo.taps_needed()
+        body = f'no tempo yet - tap space {needed} more time{"" if needed == 1 else "s"}'
+    else:
+        arrow = {-1: '<<', 0: '  ', 1: '>>'}[tempo.nudge_dir]
+        body = f'{bpm:6.1f} bpm {arrow}   set {tempo.set_bpm:.1f}'
+    # Kept short deliberately: a line that wraps can't be rewritten in place,
+    # since \r only returns to the start of the last screen line. The key hints
+    # go out once at startup instead (see main_loop_tempo_keys).
+    sys.stdout.write(f'\r\x1b[K  {body}')
+    sys.stdout.flush()
+
+
+async def main_loop_tempo_keys(tempo):
+    """Steer `tempo` from the space bar and arrow keys, keeping the status line
+    redrawn.
+
+    Does nothing unless stdin is a terminal: under visync.service or a pipe
+    there are no keys to read and the status line would just flood the log."""
+    if not sys.stdin.isatty():
+        return
+
+    log_line(f'tempo keys: space taps quarter notes, up/down step '
+             f'+-{TEMPO_STEP_BPM} bpm, hold left/right to nudge')
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    loop = asyncio.get_running_loop()
+    pending = bytearray()
+
+    def on_readable():
+        pending.extend(os.read(fd, 64))
+        while pending:
+            if pending[0] == ord(' '):
+                del pending[0]
+                tempo.tap()
+            elif pending[0] != 0x1b:        # not a key we handle; drop it
+                del pending[0]
+            elif len(pending) < 3:
+                break                       # rest of the sequence not here yet
+            elif pending[1] != ord('['):
+                del pending[0]              # ESC pressed, or a sequence we
+            else:                           # don't handle
+                action = ARROW_ACTIONS.get(bytes(pending[2:3]))
+                del pending[:3]
+                if action:
+                    getattr(tempo, action[0])(action[1])
+
+    # cbreak rather than raw mode: it turns off line buffering and echo but
+    # leaves ISIG alone, so ctrl-C still stops the adapter.
+    tty.setcbreak(fd)
+    loop.add_reader(fd, on_readable)
+    try:
+        while True:
+            draw_tempo_status(tempo)
+            await asyncio.sleep(1.0 / TEMPO_STATUS_HZ)
+    finally:
+        loop.remove_reader(fd)
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        print()
+
+
+async def main_loop_fake(tempo, cycle=0):
     global last_msg_latency
     sync_idx = 0
     beat_idx = 0
-    sync_rate_hz = (bpm * 24) / 60
     state_advancing = True
     cur_advance_step = 1
     cur_advance_state = 0
     scene_cycler = SceneCycler(cycle) if cycle != 0 else None
-    start_time = time.time()
+
+    # With `--fake` and no bpm there is nothing to clock yet: stay off the wire
+    # entirely until tap tempo establishes one, rather than broadcasting sync
+    # at a guessed rate the frontend would start animating to.
+    await tempo.ready.wait()
+    tempo.take_tap_grid_time()   # the taps that set the tempo are behind us
+    next_tick_time = time.time()
+
     while True:
+        # A space-bar tap moves the beat grid onto it: start the schedule again
+        # from the tap and round sync_idx up to the next quarter note, so the
+        # tick about to go out is a downbeat. Rounding up rather than to the
+        # nearest keeps sync_idx monotonic, which is what the frontend assumes
+        # (it only checks whether floor(sync_idx / 24) changed). The grid lands
+        # within one sync period of the tap - the loop notices it on waking,
+        # not mid-sleep - which at any sane tempo is under 25 ms.
+        tap_t = tempo.take_tap_grid_time()
+        if tap_t is not None:
+            sync_idx = -(-sync_idx // 24) * 24
+            next_tick_time = tap_t
+
+        # Re-read the tempo every tick and advance the schedule by one tick's
+        # period, rather than deriving tick times from a fixed origin: a tempo
+        # change then takes effect from here on without the clock jumping to
+        # wherever the new rate says tick `sync_idx` should have landed.
+        sync_rate_hz = (tempo.bpm() * 24) / 60
         sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
         websockets.broadcast(connected, sync_msg.to_json())
 
@@ -521,8 +750,12 @@ async def main_loop_fake(bpm, cycle=0):
                 beat_msg = MsgBeat(last_msg_latency, beat)
                 websockets.broadcast(connected, beat_msg.to_json())
         sync_idx += 1
-        next_tick_time = start_time + sync_idx / sync_rate_hz
-        await asyncio.sleep(max(0, next_tick_time - time.time()))
+        next_tick_time += 1 / sync_rate_hz
+        now = time.time()
+        # Don't try to make up an unbounded backlog (sleep/suspend, a big tempo
+        # jump) by firing overdue syncs back to back.
+        next_tick_time = max(next_tick_time, now - FAKE_MAX_CATCHUP_S)
+        await asyncio.sleep(max(0, next_tick_time - now))
 
 
 async def main_loop_audio(device, infer_beat=False):
@@ -588,10 +821,12 @@ async def main_loop_audio(device, infer_beat=False):
         stream.close()
 
 
-async def main_loop_fake_knob_movement(bpm):
+async def main_loop_fake_knob_movement(tempo):
     """Continuously broadcast fake control-change messages for 16 phase-offset
     sinusoids, independent of the sync clock, for smooth knob motion."""
-    beat_s = 60.0 / bpm
+    # The periods are in beats, so they need a tempo to exist first.
+    await tempo.ready.wait()
+    beat_s = 60.0 / tempo.set_bpm
     start_time = time.time()
     period_s = [(0.5 + random.random()) * FAKE_KNOB_PERIOD_BEATS * beat_s for i in range(FAKE_KNOB_COUNT)]
     while True:
@@ -607,7 +842,16 @@ async def main_loop_fake_knob_movement(bpm):
 
 async def main():
     parser = argparse.ArgumentParser(description="Rave MIDI -> web adapter")
-    parser.add_argument('-f', '--fake', type=float, help='fake MIDI events with given BPM')
+    parser.add_argument('-f', '--fake', type=float, nargs='?',
+                        const=FAKE_TAP_TEMPO, metavar='BPM',
+                        help='fake MIDI events at the given BPM, or with no BPM '
+                             f'wait for {TEMPO_TAP_MIN} space-bar taps to set one '
+                             'before sending any sync. When run from a terminal, '
+                             'shows a live tempo readout: space taps quarter '
+                             'notes (realigning the beat grid, and retapping the '
+                             f'tempo), up/down step by {TEMPO_STEP_BPM} bpm, and '
+                             'holding left/right nudges the tempo to slide the '
+                             'visuals back or forward against the music')
     parser.add_argument('-d', '--device', type=str, help='Receive MIDI messages on specified tty (default /dev/ttyserial0)')
     parser.add_argument('-r', '--rtmidi', type=str, help='Use rtmidi with specified MIDI device (string e.g. Volt)')
     parser.add_argument('-c', '--cycle', type=int, default=0, help='Periodically cycle scenes every N bars. Default is 0 (do not cycle).')
@@ -616,9 +860,6 @@ async def main():
                              'PATTERN (case-insensitive; must match exactly one) '
                              'and broadcast MsgAudioInfo. Use --list-devices to '
                              'see names.')
-    parser.add_argument('-i', '--infer-beat', '--infer_beat', action='store_true',
-                        help='With --audio, also infer beats from the audio and '
-                             'broadcast MsgBeat per audio_info.py BEAT_BANDS')
     parser.add_argument('--list-devices', action='store_true',
                         help='List audio input devices and exit')
     args = parser.parse_args()
@@ -637,8 +878,8 @@ async def main():
         print('Error: must specify exactly one of --fake, --device, --rtmidi, or --audio')
         exit(1)
 
-    if args.infer_beat and args.audio is None:
-        print('Error: --infer-beat only applies to --audio')
+    if args.fake == FAKE_TAP_TEMPO and not sys.stdin.isatty():
+        print('Error: --fake with no BPM needs a terminal to tap the tempo in')
         exit(1)
 
     # Resolve the audio device up front so a bad --audio pattern fails cleanly
@@ -659,19 +900,27 @@ async def main():
     # Restart-on-error loop (only exits on KeyboardInterrupt)
     while True:
         #try:
-        async with websockets.serve(handler, "0.0.0.0", WS_PORT), \
+        async with websockets.serve(handler, "0.0.0.0", WS_BEAT_PORT), \
                 asyncio.TaskGroup() as tg:
             queue = asyncio.Queue()
+
+            have_midi_beat = False
             if args.rtmidi:
                 t1 = tg.create_task(main_loop_rtmidi(args.rtmidi, cycle=args.cycle))
+                have_midi_beat = True
             elif args.device:
                 t1 = tg.create_task(main_loop_serial(args.device, queue, cycle=args.cycle))
-            elif args.audio is not None:
-                t1 = tg.create_task(main_loop_audio(audio_device, args.infer_beat))
-            else:
-                t1 = tg.create_task(main_loop_fake(args.fake, cycle=args.cycle))
+                have_midi_beat = True
+            elif args.fake is not None:
+                tempo = TempoControl(None if args.fake == FAKE_TAP_TEMPO else args.fake)
+                t1 = tg.create_task(main_loop_fake(tempo, cycle=args.cycle))
+                t_tempo = tg.create_task(main_loop_tempo_keys(tempo))
                 if FAKE_KNOB_MOVEMENT:
-                    t_knobs = tg.create_task(main_loop_fake_knob_movement(args.fake))
+                    t_knobs = tg.create_task(main_loop_fake_knob_movement(tempo))
+                have_midi_beat = True
+
+            if args.audio is not None:
+                t1 = tg.create_task(main_loop_audio(audio_device, not have_midi_beat))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())

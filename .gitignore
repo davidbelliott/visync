@@ -3,4 +3,8 @@ dist
 secret.txt
 __pycache__
 venv
-context.txt
+*.DS_Store
+*.png
+*.jpeg
+*.jpg
+*.mov

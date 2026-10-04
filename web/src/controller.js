@@ -33,9 +33,13 @@ export class Binding {
 // Abstract interface for some sort of controller (MIDI device, Kinect, etc).
 // A controller exposes a set of named Knobs and reacts to incoming events.
 export class Controller {
-    constructor(context) {
+    // `shared_knobs` adopts another controller's Knob map instead of owning
+    // one, so several controllers can be different transports onto the same
+    // knobs and a scene's bindings fire whichever transport moved (see the
+    // controller setup in main.js).
+    constructor(context, shared_knobs = null) {
         this.context = context;
-        this.knobs = new Map();
+        this.knobs = shared_knobs ?? new Map();
     }
 
     add_knob(name, default_val=0.0) {
@@ -52,12 +56,14 @@ export class Controller {
 
 // A Controller that receives its events over a WebSocket connection.
 export class WebsocketController extends Controller {
-    constructor(context, url) {
-        super(context);
+    constructor(context, url, shared_knobs = null) {
+        super(context, shared_knobs);
         this.url = url;
-        for (let i = 0; i < NUM_KNOBS; i++) {
-            // Knob values arrive already normalized to [0, 1] from the adapter.
-            this.add_knob(i);
+        if (!shared_knobs) {
+            for (let i = 0; i < NUM_KNOBS; i++) {
+                // Knob values arrive already normalized to [0, 1] from the adapter.
+                this.add_knob(i);
+            }
         }
         this.connect();
     }

@@ -9,6 +9,7 @@ import {
     lerp_scalar,
     ease,
     clamp,
+    rand_int,
     create_instanced_cube_templates,
     BeatClock
 } from '../util.js';
@@ -63,8 +64,23 @@ const CUBE_SCALES = [
     new THREE.Vector3(0.5, 0.5, 5.0)
 ];
 
+// Beat channels that flash a visor: the Analog Rytm's closed (9) and open (10)
+// hi-hat tracks, as in the ice cream / bg surfaces scenes.
+const HIHAT_CHANNELS = [9, 10];
+// Beats a hi-hat visor flash takes to dither back out from solid white.
+const VISOR_FLASH_BEATS = 1;
+// Only robots at least this opaque (wireframe opacity, see
+// EDGE_WIREFRAME_OPACITY) are picked to flash, so hits land where they show.
+const VISOR_FLASH_MIN_OPACITY = 0.3;
+// Ambient light intensity for the visor fills, the scene's only lit geometry.
+// The Lambert fill reflects intensity / pi, and the dither chunk (output x2,
+// threshold 1 on luma = 1.73 x grey) needs grey >= 0.58 to render every pixel,
+// so 2.0 (grey 0.64) makes a full flash solid white.
+const VISOR_LIGHT_INTENSITY = 2.0;
+
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
+const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
 const WHITE = new THREE.Color('white');
 
 
@@ -141,7 +157,8 @@ export class SpinningRobotsScene extends Scene {
         this.compute_robot_pose(0, 0);
 
         // All body cubes of all robots draw from one wireframe collection.
-        const [cube_wire_template] = create_instanced_cube_templates(1, 1, 1);
+        const [cube_wire_template, cube_fill_template] =
+            create_instanced_cube_templates(1, 1, 1);
         this.inst_cubes = new InstancedGeometryCollection(
             this.base_group, cube_wire_template, 'Lines',
             num_robots * CubeParts.MAX);
@@ -157,6 +174,24 @@ export class SpinningRobotsScene extends Scene {
                     this.robot_alphas[r]);
             }
         }
+
+        // Visor fills: one solid box per robot over its eyes, shown (non-zero
+        // scale) only while a hi-hat flash is fading. visor_flash holds each
+        // robot's remaining flash in [0, 1], 1 = just hit.
+        this.visor_fills = new InstancedGeometryCollection(
+            this.base_group, cube_fill_template, 'Triangles', num_robots);
+        for (let r = 0; r < num_robots; r++) {
+            this.visor_fills.create_geom(tmp, WHITE, ZERO_SCALE);
+        }
+        this.visor_flash = new Float32Array(num_robots);
+        this.visor_color = new THREE.Color();
+        this.flashable_robots = [];
+        for (let r = 0; r < num_robots; r++) {
+            if (this.robot_alphas[r] >= VISOR_FLASH_MIN_OPACITY) {
+                this.flashable_robots.push(r);
+            }
+        }
+        this.base_group.add(new THREE.AmbientLight('white', VISOR_LIGHT_INTENSITY));
 
         // Shoes: the STL's edges instanced as lines, wireframe-only like the
         // body cubes. Stays null until the mesh loads; instance index =
@@ -229,6 +264,7 @@ export class SpinningRobotsScene extends Scene {
 
         // Spread can change live (MIDI knobs), so grid positions are laid
         // out every frame.
+        const visor_decay = dt * beats_per_sec / VISOR_FLASH_BEATS;
         const tmp = this.tmp_vec;
         for (let r = 0; r < this.grid_coords.length; r++) {
             const gc = this.grid_coords[r];
@@ -239,6 +275,20 @@ export class SpinningRobotsScene extends Scene {
                 const p = this.pose[k];
                 tmp.set(p.x + gx, p.y, p.z + gz);
                 this.inst_cubes.set_pos(base + k, tmp);
+            }
+
+            // A flashing visor tracks the eyes and dithers from solid white
+            // to black, then hides (zero scale) once the flash is spent.
+            if (this.visor_flash[r] > 0) {
+                const flash = Math.max(0, this.visor_flash[r] - visor_decay);
+                this.visor_flash[r] = flash;
+                const eyes = this.pose[CubeParts.EYES];
+                tmp.set(eyes.x + gx, eyes.y, eyes.z + gz);
+                this.visor_fills.set_pos(r, tmp);
+                this.visor_fills.set_scale(r,
+                    flash > 0 ? CUBE_SCALES[CubeParts.EYES] : ZERO_SCALE);
+                this.visor_color.setScalar(ease(flash) * this.robot_alphas[r]);
+                this.visor_fills.set_color(r, this.visor_color);
             }
 
             // Spinners spin about x and slowly cycle hue with their angle.
@@ -337,5 +387,11 @@ export class SpinningRobotsScene extends Scene {
     }
 
     handle_beat(t, channel) {
+        if (HIHAT_CHANNELS.includes(channel)) {
+            setTimeout(() => {
+                const pick = rand_int(0, this.flashable_robots.length);
+                this.visor_flash[this.flashable_robots[pick]] = 1;
+            }, this.get_beat_delay(t) * 1000);
+        }
     }
 }

@@ -13,7 +13,7 @@ export class DrumKitScene extends Scene {
         // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
         // Applied whenever the knob value changes (see Knob.bind_to).
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         this.camera = this.cam_persp;
         this.camera.position.set(0, 0, 20);

@@ -245,7 +245,7 @@ export class GantryScene extends Scene {
 
         // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
         // interpolates from the current angle towards the chosen step.
-        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
             knob_to_snap(4));
 
         this.start_zoom = 1;

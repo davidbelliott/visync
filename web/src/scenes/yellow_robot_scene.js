@@ -65,17 +65,17 @@ export class YellowRobotScene extends Scene {
 
         // MIDI knob 3 -> x spacing (0..8), knob 4 -> y spacing (0..8).
         // Applied whenever a knob value changes, updating the grid spacing live.
-        this.bind('apc', CH_EXPAND_X, (v) => { this.robot.spread_x = v; },
+        this.bind(CH_EXPAND_X, (v) => { this.robot.spread_x = v; },
             (norm) => norm * 8);
-        this.bind('apc', CH_EXPAND_Y, (v) => { this.robot.spread_y = v; },
+        this.bind(CH_EXPAND_Y, (v) => { this.robot.spread_y = v; },
             (norm) => norm * 8);
 
         // Rotation knobs drive the two rotation-axis targets. Each knob's
         // 0..1 range sweeps a full turn, snapped to the nearest 45 deg.
         // set_target_axis ignores no-op repeats and only restarts an axis when
         // its snapped target actually changes.
-        this.bind('apc', CH_ROT_Y, (v) => this.set_target_axis(1, v), snap_to_45);
-        this.bind('apc', CH_ROT_X, (v) => this.set_target_axis(0, v), snap_to_45);
+        this.bind(CH_ROT_Y, (v) => this.set_target_axis(1, v), snap_to_45);
+        this.bind(CH_ROT_X, (v) => this.set_target_axis(0, v), snap_to_45);
 
         this.cam_persp.position.set(0, 0, 8);
         this.cam_orth.position.set(0, 0, 8);

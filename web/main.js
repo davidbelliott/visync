@@ -53,7 +53,8 @@ import {
     clamp
 } from './src/util.js';
 import { BoxDef } from './src/geom_def.js';
-import { WebsocketController, Binding } from './src/controller.js';
+import { WebsocketController, create_knobs, apply_control_change }
+    from './src/controller.js';
 
 import "./src/normalize.css";
 import "./src/style.css";
@@ -111,6 +112,15 @@ function connect() {
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
+
+        // Knob values are continuous state, not events scheduled against the
+        // beat: they want no latency compensation, no ack, and none of the
+        // overlay churn below - with FAKE_KNOB_MOVEMENT they arrive in the
+        // high hundreds per second. Apply and return before all of that.
+        if (type == MSG_TYPE_CONTROL_CHANGE) {
+            apply_control_change(context.knobs, msg.wheel_idx, msg.value);
+            return;
+        }
 
         // Estimate clock skew
         const t_now = Date.now() / 1000;
@@ -442,20 +452,18 @@ class GraphicsContext {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.container.appendChild(this.renderer.domElement);
 
-        // Controllers providing live input (knobs/wheels) over WebSockets.
-        // Created before scenes so scenes can bind to controller knobs.
-        //
-        // Both are transports onto the SAME 16 knobs, so they share one Knob
-        // map: knob values reach us either from a controller adapter on its
-        // own port (apc40_control.py, debug_control.py, kinect_control.py) or
-        // over the relay, which carries the control changes adapter.py
-        // forwards from MIDI hardware and generates for FAKE_KNOB_MOVEMENT.
-        // Scenes bind to "apc" and are driven by whichever one moved.
-        const apc = new WebsocketController(this, "ws://localhost:8766");
-        this.controllers = new Map([
-            ["apc", apc],
-            ["midi", new WebsocketController(this, relay_url(), apc.knobs)],
-        ]);
+        // The knobs scenes bind to. Values reach them from two places - a
+        // controller adapter on its own port (apc40_control.py,
+        // debug_control.py, kinect_control.py) via the controller below, and
+        // the relay, which carries the control changes adapter.py forwards
+        // from MIDI hardware and generates for FAKE_KNOB_MOVEMENT (handled in
+        // connect(), on the socket already open for sync/beat). Which one a
+        // value came in on says nothing about what it means, so the knobs live
+        // here and both are just transports into them.
+        // Created before scenes so scenes can bind to them.
+        this.knobs = create_knobs();
+        this.controller = new WebsocketController(this, "ws://localhost:8766",
+                                                 this.knobs);
 
         // Create scenes
         this.scenes = new Map([
@@ -490,16 +498,16 @@ class GraphicsContext {
             [25, new PoseScene(this)],
         ]);
 
-        // Scene selection is driven by controller knobs 14 (foreground) and
-        // 15 (background). Each knob's normalized [0, 1] value maps across the
+        // Scene selection is driven by knobs 14 (foreground) and 15
+        // (background). Each knob's normalized [0, 1] value maps across the
         // available scenes, applied whenever the knob changes (see bind_to).
         {
             const to_scene_idx = (norm) => Math.min(this.scenes.size - 1,
                 Math.floor(norm * this.scenes.size));
-            apc.knobs.get(14).bind_to(new Binding(apc.knobs.get(14),
-                (idx) => this.change_scene(idx, false), to_scene_idx));
-            apc.knobs.get(15).bind_to(new Binding(apc.knobs.get(15),
-                (idx) => this.change_scene(idx, true), to_scene_idx));
+            this.knobs.get(14).bind_to(
+                (idx) => this.change_scene(idx, false), to_scene_idx);
+            this.knobs.get(15).bind_to(
+                (idx) => this.change_scene(idx, true), to_scene_idx);
         }
 
         // Fixed NUM_SLOTS render layers: shown_scenes[slot] is the scene

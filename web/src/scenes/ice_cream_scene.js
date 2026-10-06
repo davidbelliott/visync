@@ -24,7 +24,7 @@ export class IceCreamScene extends Scene {
 
         // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

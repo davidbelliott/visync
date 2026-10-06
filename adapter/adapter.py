@@ -873,9 +873,9 @@ async def main():
             print(f"  [{i}] {dev['name']}  ({', '.join(dirs)})")
         return
 
-    args_count = sum(x is not None for x in [args.fake, args.device, args.rtmidi, args.audio])
-    if args_count != 1:
-        print('Error: must specify exactly one of --fake, --device, --rtmidi, or --audio')
+    args_count = sum(x is not None for x in [args.fake, args.device, args.rtmidi])
+    if args_count != 1 and args.audio != None:
+        print('Error: must specify exactly one of --fake, --device, or --rtmidi')
         exit(1)
 
     if args.fake == FAKE_TAP_TEMPO and not sys.stdin.isatty():

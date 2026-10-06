@@ -27,7 +27,7 @@ export function knob_to_snap(steps) {
     return (norm) => Math.round(norm * steps);
 }
 
-// Binding `transform` mapping a knob's normalized 0..1 value to a signed
+// A bind_to `transform` mapping a knob's normalized 0..1 value to a signed
 // multiplier in [-2, 2]: the midpoint (0.5) stops a continuous rotation and the
 // extremes spin it at full speed in either direction (-2 * nom_rate .. +2 * nom_rate).
 export function knob_to_rate(norm) {

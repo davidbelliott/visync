@@ -66,8 +66,8 @@ export class SpinningRobotsScene extends Scene {
         // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
         this.pitch_rate = 1;
         this.yaw_rate = 1;
-        this.bind('apc', CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
-        this.bind('apc', CH_ROT_Y, (v) => { this.yaw_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.yaw_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -90,9 +90,9 @@ export class SpinningRobotsScene extends Scene {
         // the yellow robot grid; starts at the scene's original spacing.
         this.spread_x = 8;
         this.spread_y = 8;
-        this.bind('apc', CH_EXPAND_X, (v) => { this.spread_x = v; },
+        this.bind(CH_EXPAND_X, (v) => { this.spread_x = v; },
             (norm) => norm * 8);
-        this.bind('apc', CH_EXPAND_Y, (v) => { this.spread_y = v; },
+        this.bind(CH_EXPAND_Y, (v) => { this.spread_y = v; },
             (norm) => norm * 8);
 
         // Per-robot statics, in the same (i, j) row-major order as the

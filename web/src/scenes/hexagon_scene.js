@@ -165,7 +165,7 @@ export class HexagonScene extends Scene {
         // Knob 8 sets the continuous Y spin rate/direction in [-cur_rate,
         // +cur_rate]; the CubeAssembly children read this.rot_rate each frame.
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

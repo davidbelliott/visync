@@ -17,8 +17,8 @@ export class VectorFieldScene extends Scene {
         this.pitch = Math.atan(1 / Math.sqrt(3));
         this.rot_rate = 1;
         this.pitch_rate = 0;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
-        this.bind('apc', CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
         this.controls.update();
 
         this.camera.zoom = 2;

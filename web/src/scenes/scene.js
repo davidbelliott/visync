@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
-import { Binding } from '../controller.js';
 import {
     lerp_scalar,
     ease,
@@ -39,13 +38,11 @@ export class Scene extends THREE.Scene {
         this.prev_sync_idx = 0;
     }
 
-    // Bind a knob from one of the context's controllers to a scene property.
-    // `apply` receives the transformed (default: normalized 0..1) value, and is
-    // invoked whenever the knob's value changes (see Knob.bind_to).
-    bind(controller_name, knob_idx, apply, transform) {
-        const controller = this.context.controllers.get(controller_name);
-        const knob = controller.knobs.get(knob_idx);
-        knob.bind_to(new Binding(knob, apply, transform));
+    // Bind one of the context's knobs to a scene property. `apply` receives
+    // the transformed (default: normalized 0..1) value, and is invoked whenever
+    // the knob's value changes (see Knob.bind_to).
+    bind(knob_idx, apply, transform) {
+        this.context.knobs.get(knob_idx).bind_to(apply, transform);
     }
 
     anim_frame(dt) {

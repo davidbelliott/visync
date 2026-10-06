@@ -270,7 +270,7 @@ export class DebugScene extends Scene {
 
             // One knob -> one dial here, but bind() supports many bindings per
             // knob for one-knob -> many-properties mappings.
-            this.bind('apc', i, (v) => dial.set(v));
+            this.bind(i, (v) => dial.set(v));
         }
 
         this.audio = new AudioDisplay();

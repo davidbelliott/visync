@@ -87,7 +87,7 @@ export class SpectrumScene extends Scene {
         // Knob 8 sets the continuous Y spin rate/direction (per frame, when
         // rotating_y is active).
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;

@@ -185,8 +185,8 @@ export class CellularAutomataScene extends Scene {
         this.pitch = 0;
         this.rot_rate = 1;
         this.pitch_rate = 0;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
-        this.bind('apc', CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
 
         // Paces generations at GENS_PER_BEAT.
         this.gen_clock = new BeatClock(this);

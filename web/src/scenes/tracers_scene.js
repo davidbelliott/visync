@@ -32,7 +32,7 @@ export class TracersScene extends Scene {
 
         // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);

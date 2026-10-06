@@ -172,7 +172,7 @@ export class TessellateScene extends Scene {
         this.rot_z = 0;
         // Knob 8 sets the spin rate/direction in [-cur_rate, +cur_rate].
         this.rot_rate = 1;
-        this.bind('apc', CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
+        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 

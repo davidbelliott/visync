@@ -212,7 +212,7 @@ export class FastCubeScene extends Scene {
 
         // Knob 8 selects one of 16 eighth-pi (22.5 deg) Y orientations; the
         // scene interpolates from the current angle towards the chosen step.
-        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
             knob_to_snap(16));
 
 

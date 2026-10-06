@@ -60,17 +60,17 @@ export class IntroScene extends Scene {
 
         // Knob 8 selects one of 8 quarter-pi (45 deg) Y orientations; the
         // scene interpolates from the current angle towards the chosen step.
-        this.bind('apc', CH_ROT_Y, (step) => this.set_rot_y_target(step),
+        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
             knob_to_snap(8));
 
         // Per-axis scale of the tesseract: one knob per 4D axis, each mapping
         // its normalized 0..1 value directly to that axis's scale (0 collapses
         // the axis, 1 is full size). Default to a full, uncollapsed tesseract.
         this.scales = new Array(4).fill(1);
-        this.bind('apc', CH_EXPAND_X, (v) => { this.scales[0] = v; });
-        this.bind('apc', CH_EXPAND_Y, (v) => { this.scales[1] = v; });
-        this.bind('apc', CH_EXPAND_Z, (v) => { this.scales[2] = v; });
-        this.bind('apc', CH_EXPAND_W, (v) => { this.scales[3] = v; });
+        this.bind(CH_EXPAND_X, (v) => { this.scales[0] = v; });
+        this.bind(CH_EXPAND_Y, (v) => { this.scales[1] = v; });
+        this.bind(CH_EXPAND_Z, (v) => { this.scales[2] = v; });
+        this.bind(CH_EXPAND_W, (v) => { this.scales[3] = v; });
     }
 
     anim_frame(dt) {

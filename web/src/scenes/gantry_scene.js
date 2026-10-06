@@ -13,9 +13,12 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
+import { SteppedRotation } from '../stepped_rotation.js';
+import { CH_ROT_Y } from '../controller_map.js';
 
 const CUBE_WAVE_SPEED = 1.5;
+// Nominal Y rotation rate in rad/s; knob_to_rate scales it to [-2, 2] x this.
+const NOM_ROT_RATE = 0.15;
 const NUM_CUBES_PER_SIDE = 26;
 
 class Excitation extends THREE.Object3D {
@@ -205,7 +208,6 @@ export class GantryScene extends Scene {
             -this.frustum_size / 2, -1000, 1000);
         this.clear();
         this.clock = new THREE.Clock(true);
-        this.rot_clock = new BeatClock(this);
         this.zoom_clock = new BeatClock(this);
         this.beat_idx = 0;
 
@@ -239,14 +241,17 @@ export class GantryScene extends Scene {
         }
         this.cur_excitation = 0;
 
-        this.target_rot_y = 0;      // integer multiples of PI / 16
-        this.start_rot_y = 0;       // integer multiples of PI / 16
-        this.rotation_movement_beats = 8;
+        // Free Y rotation: knob 8 sets the signed rate (centred = stopped).
+        // yaw is the angle in rad on top of the PI/4 iso offset, shown in
+        // eased 45 deg steps of the continuously integrated knob rate.
+        this.yaw = new SteppedRotation(NOM_ROT_RATE);
+        this.yaw.bind(this, CH_ROT_Y);
 
-        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
-        // interpolates from the current angle towards the chosen step.
-        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
-            knob_to_snap(4));
+        // Cube colour blends between these with yaw: color_a when the grid
+        // sits at 0/180 deg, color_b at 90/270 deg.
+        this.color_a = new THREE.Color("magenta");
+        this.color_b = new THREE.Color("blue");
+        this.cur_color = new THREE.Color();
 
         this.start_zoom = 1;
         this.target_zoom = 1;
@@ -307,32 +312,17 @@ export class GantryScene extends Scene {
 
     }
 
-    // Point the Y rotation at a new discrete step (knob-driven). Recording
-    // start_rot_y at the current interpolated angle and restarting rot_clock
-    // together makes the scene ease cleanly from wherever it is to the step.
-    set_rot_y_target(target) {
-        if (target === this.target_rot_y) {
-            return;
-        }
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
-        this.start_rot_y = lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac);
-        this.target_rot_y = target;
-        this.rot_clock.start();
-    }
-
     anim_frame(dt) {
         const cube_moves_per_beat = 4;
 
 
         this.cubes_group.position.z += this.drift_vel * dt;
 
-        // Y rotation (driven by the knob-8 binding registered in the ctor).
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
-        this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
-        const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
-        const end_color = new THREE.Color((this.target_rot_y % 2 == 0 ? "magenta" : "blue"));
-        const cur_color = new THREE.Color();
-        cur_color.lerpColors(start_color, end_color, rot_frac);
+        // Y rotation (rate from the knob-8 binding registered in the ctor).
+        const yaw = this.yaw.update(dt);
+        this.base_group.rotation.y = Math.PI / 4 + yaw;
+        const cur_color = this.cur_color.lerpColors(this.color_a, this.color_b,
+            (1 - Math.cos(2 * yaw)) / 2);
 
         // Zoom
         const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));

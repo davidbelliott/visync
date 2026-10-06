@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
+import { CH_ROT_Y } from '../controller_map.js';
+import { SteppedRotation } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -104,6 +105,9 @@ class TunnelMovementBackground {
 
 const FILL_COLOR = "black";
 const FILL_OPACITY = 0.5;
+// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
+// A 45 deg step roughly every 5 s at 1x, matching the gantry scene.
+const NOM_ROT_RATE = 0.15;
 
 export class FastCubeScene extends Scene {
     constructor(context) {
@@ -127,7 +131,6 @@ export class FastCubeScene extends Scene {
 
         this.clear();
         this.clock = new BeatClock(this);
-        this.sync_clock = new BeatClock(this);
         this.half_beat_clock = new BeatClock(this);
         this.full_beat_clock = new BeatClock(this);
 
@@ -205,15 +208,9 @@ export class FastCubeScene extends Scene {
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
         this.base_group.rotation.x = -isom_angle;
 
-        this.start_rot = 0;
-        this.end_rot = 0;
-        this.rot_dir = 1;
-        this.base_group.rotation.y = this.start_rot * Math.PI / 8;
-
-        // Knob 8 selects one of 16 eighth-pi (22.5 deg) Y orientations; the
-        // scene interpolates from the current angle towards the chosen step.
-        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
-            knob_to_snap(16));
+        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps.
+        this.yaw = new SteppedRotation(NOM_ROT_RATE);
+        this.yaw.bind(this, CH_ROT_Y);
 
 
         this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/texture.frag');
@@ -268,29 +265,9 @@ export class FastCubeScene extends Scene {
         return position_options[pos_idx] * 0.8;
     }
 
-    // Point the Y rotation at a new discrete step (knob-driven). Recording
-    // start_rot at the current angle and restarting sync_clock together makes
-    // the scene interpolate cleanly from wherever it is to the chosen step.
-    set_rot_y_target(target) {
-        if (target === this.end_rot) {
-            return;
-        }
-        const beats_per_lerp = 1.0;
-        const t = this.sync_clock.getElapsedBeats();
-        const frac = clamp((t - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
-        this.start_rot = this.start_rot + frac * (this.end_rot - this.start_rot);
-        this.end_rot = target;
-        this.sync_clock.start();
-    }
-
     anim_frame(dt) {
         this.cur_frame++;
-        const beats_per_lerp = 1.0;
-        const t = this.sync_clock.getElapsedBeats();
-        const frac = clamp((t - (1 - beats_per_lerp)) / beats_per_lerp, 0, 1);
-        this.base_group.rotation.y = Math.PI / 8 * (this.start_rot +
-            lerp_scalar(0, 1, frac) * (this.end_rot - this.start_rot));
-
+        this.base_group.rotation.y = this.yaw.update(dt);
 
         let half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         let full_beat_time = this.full_beat_clock.getElapsedBeats() / 4.0;

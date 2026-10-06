@@ -13,23 +13,26 @@ export const CH_EXPAND_Y = 4;
 export const CH_EXPAND_Z = 5;
 export const CH_EXPAND_W = 6;
 
-// Rotation of a scene's top-level group/scene/camera.
-//   - Discretized scenes: knob 8 -> Y target, knob 9 -> X target (snapped).
-//   - Continuous scenes:  knob 8 -> signed rotation rate.
+// Rotation of a scene's top-level group/scene/camera: knob 8 -> signed Y
+// rotation rate, knob 9 -> signed X (pitch) rate. Continuous scenes integrate
+// it directly; stepped scenes show it in eased 45 deg steps (SteppedRotation).
 export const CH_ROT_Y = 8;
 export const CH_ROT_X = 9;
-
-// Returns a binding `transform` that snaps a knob's normalized 0..1 value to
-// one of (steps + 1) evenly spaced integer indices (0, 1, ..., steps). Scenes
-// that rotate in discrete steps use this to pick which step a knob selects, and
-// interpolate towards it.
-export function knob_to_snap(steps) {
-    return (norm) => Math.round(norm * steps);
-}
 
 // A bind_to `transform` mapping a knob's normalized 0..1 value to a signed
 // multiplier in [-2, 2]: the midpoint (0.5) stops a continuous rotation and the
 // extremes spin it at full speed in either direction (-2 * nom_rate .. +2 * nom_rate).
 export function knob_to_rate(norm) {
     return norm * 4 - 2;
+}
+
+// A bind_to `transform` mapping a knob's normalized 0..1 value to [0, max]
+// with a dead zone at the bottom: the lowest `zero_zone` of the travel returns
+// a literal 0 (not a float that merely rounds near it), so a sweep rests at
+// exactly zero for a while, and the rest of the travel maps linearly to
+// (0, max], continuous at the zone's edge. The default ~1/8 of the travel
+// (16 of 128 MIDI steps) is easy to find by hand.
+export function knob_with_zero_zone(max, zero_zone=0.12) {
+    return (norm) => norm <= zero_zone ? 0 :
+        (norm - zero_zone) / (1 - zero_zone) * max;
 }

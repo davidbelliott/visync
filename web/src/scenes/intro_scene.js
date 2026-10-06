@@ -6,15 +6,15 @@ import {
     CH_EXPAND_Y,
     CH_EXPAND_Z,
     CH_EXPAND_W,
-    knob_to_snap,
+    knob_with_zero_zone,
 } from '../controller_map.js';
-import {
-    lerp_scalar,
-    ease,
-    clamp,
-    BeatClock,
-} from '../util.js';
+import { BeatClock } from '../util.js';
+import { SteppedRotation } from '../stepped_rotation.js';
 import { Tesseract } from '../highdim.js';
+
+// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
+// A 45 deg step roughly every 5 s at 1x, matching the gantry scene.
+const NOM_ROT_RATE = 0.15;
 
 
 export class IntroScene extends Scene {
@@ -38,7 +38,6 @@ export class IntroScene extends Scene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.clear();
-        this.sync_clock = new BeatClock(this);
         // Beat-relative clock for the (currently disabled) per-beat scale
         // bounce in anim_frame; restarted every 4 beats by handle_sync.
         this.beat_clock = new BeatClock(this);
@@ -54,33 +53,24 @@ export class IntroScene extends Scene {
 
         this.add(this.base_group);
 
-        this.start_rot = 0;
-        this.end_rot = 0;
-        this.cur_rot = this.start_rot;
+        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps.
+        this.yaw = new SteppedRotation(NOM_ROT_RATE);
+        this.yaw.bind(this, CH_ROT_Y);
 
-        // Knob 8 selects one of 8 quarter-pi (45 deg) Y orientations; the
-        // scene interpolates from the current angle towards the chosen step.
-        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
-            knob_to_snap(8));
-
-        // Per-axis scale of the tesseract: one knob per 4D axis, each mapping
-        // its normalized 0..1 value directly to that axis's scale (0 collapses
-        // the axis, 1 is full size). Default to a full, uncollapsed tesseract.
+        // Per-axis scale of the tesseract: one knob per 4D axis, mapping to
+        // that axis's scale in [0, 1] (1 is full size). The bottom of each
+        // knob's travel is exactly 0, fully flattening that axis. Default to a
+        // full, uncollapsed tesseract.
         this.scales = new Array(4).fill(1);
-        this.bind(CH_EXPAND_X, (v) => { this.scales[0] = v; });
-        this.bind(CH_EXPAND_Y, (v) => { this.scales[1] = v; });
-        this.bind(CH_EXPAND_Z, (v) => { this.scales[2] = v; });
-        this.bind(CH_EXPAND_W, (v) => { this.scales[3] = v; });
+        const scale_knob = knob_with_zero_zone(1);
+        this.bind(CH_EXPAND_X, (v) => { this.scales[0] = v; }, scale_knob);
+        this.bind(CH_EXPAND_Y, (v) => { this.scales[1] = v; }, scale_knob);
+        this.bind(CH_EXPAND_Z, (v) => { this.scales[2] = v; }, scale_knob);
+        this.bind(CH_EXPAND_W, (v) => { this.scales[3] = v; }, scale_knob);
     }
 
     anim_frame(dt) {
-        const beats_per_lerp = 2;
-
-        // Y rotation eases toward the knob-8 target (see set_rot_y_target).
-        const t_sync = this.sync_clock.getElapsedBeats();
-        const rot_frac = ease(clamp(t_sync / beats_per_lerp, 0, 1));
-        this.cur_rot = lerp_scalar(this.start_rot, this.end_rot, rot_frac);
-        this.tesseract.rotation.y = Math.PI * this.cur_rot / 4;
+        this.tesseract.rotation.y = this.yaw.update(dt);
 
         // Per-axis scale is driven directly by the CH_EXPAND_* knobs bound in
         // the constructor. `scales` holds the four axis scales as set by those
@@ -97,18 +87,6 @@ export class IntroScene extends Scene {
 
         this.tesseract.scale_vec.set(...this.scales);
         this.tesseract.update_geom(this.camera);
-    }
-
-    // Point the Y rotation at a new discrete step (knob-driven). Recording
-    // start_rot at the current angle and restarting sync_clock together makes
-    // the scene interpolate cleanly from wherever it is to the chosen step.
-    set_rot_y_target(target) {
-        if (target === this.end_rot) {
-            return;
-        }
-        this.start_rot = this.cur_rot;
-        this.end_rot = target;
-        this.sync_clock.start();
     }
 
     handle_sync(t, bpm, beat) {

@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
 import {
-    CH_EXPAND_X, CH_EXPAND_Y, CH_ROT_X, CH_ROT_Y, knob_to_rate
+    CH_EXPAND_X, CH_EXPAND_Y, CH_ROT_X, CH_ROT_Y, knob_with_zero_zone
 } from '../controller_map.js';
+import { SteppedRotation } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -19,6 +20,14 @@ import { InstancedGeometryCollection } from '../instanced_geom.js';
 // (clamped to 0, so the far corners fade out completely).
 // 0.15 keeps the mid-edge robots just visible against the black background.
 const EDGE_WIREFRAME_OPACITY = 0.15;
+
+// Robot grid spacing in scene units at full knob travel (the scene's original
+// spacing: robots ~5 units wide sit just clear of each other).
+const MAX_SPREAD = 8;
+
+// Nominal grid yaw / camera pitch rate in rad/s; knobs 8/9 scale it to
+// [-2, 2] x this. The scene's original drift speed (a 45 deg step every ~8 s).
+const NOM_ROT_RATE = 0.1;
 
 // Robot-local geometry (y up, robot faces +z), in scene units. The torso
 // center sits BODY_BASE_Y above the robot origin; arms and shoes hang off the
@@ -63,11 +72,13 @@ export class SpinningRobotsScene extends Scene {
     constructor(context) {
         super(context);
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.pitch_rate = 1;
-        this.yaw_rate = 1;
-        this.bind(CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
-        this.bind(CH_ROT_Y, (v) => { this.yaw_rate = v; }, knob_to_rate);
+        // Knob 8 sets the grid's yaw rate, knob 9 the camera's pitch rate
+        // (negated to match the knob's direction); both shown in eased 45 deg
+        // steps.
+        this.yaw = new SteppedRotation(NOM_ROT_RATE);
+        this.yaw.bind(this, CH_ROT_Y);
+        this.pitch = new SteppedRotation(NOM_ROT_RATE);
+        this.pitch.bind(this, CH_ROT_X, -1);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -87,13 +98,15 @@ export class SpinningRobotsScene extends Scene {
         this.robots_per_side = 12;
 
         // Grid spacing along x / z, driven live by MIDI knobs 3 and 4 like
-        // the yellow robot grid; starts at the scene's original spacing.
-        this.spread_x = 8;
-        this.spread_y = 8;
+        // the yellow robot grid; starts at the scene's original spacing. The
+        // bottom of each knob's travel is exactly 0, collapsing that axis so
+        // the robots overlap perfectly.
+        this.spread_x = MAX_SPREAD;
+        this.spread_y = MAX_SPREAD;
         this.bind(CH_EXPAND_X, (v) => { this.spread_x = v; },
-            (norm) => norm * 8);
+            knob_with_zero_zone(MAX_SPREAD));
         this.bind(CH_EXPAND_Y, (v) => { this.spread_y = v; },
-            (norm) => norm * 8);
+            knob_with_zero_zone(MAX_SPREAD));
 
         // Per-robot statics, in the same (i, j) row-major order as the
         // instance layout below.
@@ -195,9 +208,8 @@ export class SpinningRobotsScene extends Scene {
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        // Knob 8 scales the continuous spin rate to [-0.1, +0.1] rad/s.
-        this.base_group.rotation.y += 0.1 * dt * this.yaw_rate;
-        this.camera.rotation.x += 0.1 * dt * this.pitch_rate;
+        this.base_group.rotation.y = this.yaw.update(dt);
+        this.camera.rotation.x = this.pitch.update(dt);
 
         const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         const throw_time = this.throw_clock.getElapsedBeats();

@@ -14,9 +14,13 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { CH_ROT_Y, knob_to_snap } from '../controller_map.js';
+import { SteppedRotation } from '../stepped_rotation.js';
+import { CH_ROT_Y } from '../controller_map.js';
 
 const CUBE_WAVE_SPEED = 1.5;
+// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
+// Matches the gantry scene: a 45 deg step roughly every 5 s at 1x.
+const NOM_ROT_RATE = 0.15;
 const NUM_CUBES_PER_SIDE = 10;
 
 class Excitation extends THREE.Object3D {
@@ -266,7 +270,6 @@ export class BuildingScene extends Scene {
             -this.frustum_size / 2, -1000, 1000);
         this.clear();
         this.clock = new THREE.Clock(true);
-        this.rot_clock = new BeatClock(this);
         this.zoom_clock = new BeatClock(this);
         this.beat_idx = 0;
 
@@ -292,14 +295,10 @@ export class BuildingScene extends Scene {
         this.target_zoom = 1;
         this.zoom_movement_beats = 1;
 
-        this.target_rot_y = 0;      // integer multiples of PI / 16
-        this.start_rot_y = 0;       // integer multiples of PI / 16
-        this.rotation_movement_beats = 8;
-
-        // Knob 8 selects one of 4 quarter-turn Y orientations; the scene
-        // interpolates from the current angle towards the chosen step.
-        this.bind(CH_ROT_Y, (step) => this.set_rot_y_target(step),
-            knob_to_snap(4));
+        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps on top
+        // of the PI/4 iso offset.
+        this.yaw = new SteppedRotation(NOM_ROT_RATE);
+        this.yaw.bind(this, CH_ROT_Y);
 
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
             (NUM_CUBES_PER_SIDE - 1) * this.cube_base_spacing;
@@ -415,13 +414,7 @@ export class BuildingScene extends Scene {
         }
 
 
-        // Y rotation (driven by the knob-8 binding registered in the ctor).
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
-        this.base_group.rotation.y = Math.PI * (1 / 4 + lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac) / 2);
-        const start_color = new THREE.Color((this.start_rot_y % 2 == 0 ? "magenta" : "blue"));
-        const end_color = new THREE.Color((this.target_rot_y % 2 == 0 ? "magenta" : "blue"));
-        const cur_color = new THREE.Color();
-        cur_color.lerpColors(start_color, end_color, rot_frac);
+        this.base_group.rotation.y = Math.PI / 4 + this.yaw.update(dt);
 
         this.cubes_group.position.y -= this.drift_vel * dt;
 
@@ -441,19 +434,6 @@ export class BuildingScene extends Scene {
         /*for (const s of this.sparks) {
             s.anim_frame(dt, this.cam_orth);
         }*/
-    }
-
-    // Point the Y rotation at a new discrete step (knob-driven). Recording
-    // start_rot_y at the current interpolated angle and restarting rot_clock
-    // together makes the scene ease cleanly from wherever it is to the step.
-    set_rot_y_target(target) {
-        if (target === this.target_rot_y) {
-            return;
-        }
-        const rot_frac = ease(Math.min(1, this.rot_clock.getElapsedBeats() / this.rotation_movement_beats));
-        this.start_rot_y = lerp_scalar(this.start_rot_y, this.target_rot_y, rot_frac);
-        this.target_rot_y = target;
-        this.rot_clock.start();
     }
 
     handle_sync(t, bpm, beat) {

@@ -6,7 +6,14 @@
         <title>BAZNOQ.VIZ</title>
     </head>
     <body>
-        <div id="header" style="display: inline-block"><span class="emph">ASPHALT GOMIDAS</span> | fg: <span id=fg-name>          </span> | bg: <span id=bg-name>          </span> | bpm: <span id=bpm>-  </span> | lat: <span id=latency>-   </span> ms | mode: <span id=mode>imm</span> | <span class="secondary" id="lastmsg">SYNC 0 0 </span></div>
+        <!-- performer, relay state, bpm, latency, beat mode, then the scene
+             list (draw order, background first). Every span is filled from
+             main.js. The scene list stays last because it's the one field with
+             no bounded width, so nothing after it gets pushed around as slots
+             change. The performer is replaced by MsgPerformer. #conn is one
+             block character, animated per frame by update_conn_indicator; it
+             starts on a spinner frame. -->
+             <div id="header" style="display: inline-block"><span class="emph">&gt; </span><span class="emph" id="performer">VISYNC</span> <span class="muted" id="conn">&#x2598;</span>    <span class="muted"># <span id="bpm">-</span>bpm / <span id="latency">-</span>ms / <span id="mode">imm</span> / <span id="scenes"></span></span></div>
         <div id="debug-overlay">
         </div>
         <div id="full-overlay" style="display: none">

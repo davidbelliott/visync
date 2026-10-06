@@ -19,6 +19,7 @@ class Msg:
         PROGRAM_CHANGE = 8
         POSE = 9
         AUDIO_INFO = 10
+        PERFORMER = 11
 
     def __init__(self, msg_type, last_transmit_latency):
         self.latency = last_transmit_latency
@@ -108,6 +109,15 @@ class MsgAudioInfo(Msg):
         self.spectrum = spectrum
         self.spectrum_smoothed = spectrum_smoothed
         self.samplerate = samplerate
+
+
+class MsgPerformer(Msg):
+    # Name of the act currently playing, shown in the frontend HUD. Broadcast
+    # when it changes, and again to each client as it connects so a browser
+    # opened mid-set shows the right name instead of a stale one.
+    def __init__(self, last_transmit_latency, name):
+        super().__init__(Msg.Type.PERFORMER, last_transmit_latency)
+        self.name = name
 
 
 class MsgPose(Msg):

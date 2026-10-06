@@ -5,9 +5,7 @@ from enum import Enum
 import json
 import math
 import os
-import termios
 import time
-import tty
 import serial_asyncio
 import pathlib
 import websockets
@@ -41,7 +39,7 @@ FAKE_KNOB_COUNT = 14
 FAKE_KNOB_PERIOD_BEATS = 16
 FAKE_KNOB_UPDATE_HZ = 60
 
-# Interactive tempo control for --fake (see main_loop_tempo_keys). Up/down step
+# Interactive tempo control for --fake (see console_ui.py). Up/down step
 # the set tempo by TEMPO_STEP_BPM; left/right scale it by TEMPO_NUDGE_FACTOR
 # while held, to drag the visuals forward or back against the music.
 TEMPO_STEP_BPM = 0.1
@@ -63,6 +61,11 @@ TEMPO_NUDGE_RELEASE_S = 0.6
 # below the tempo range anything here runs at.
 TEMPO_TAP_MIN = 4
 TEMPO_TAP_TIMEOUT_S = 2.0
+# Taps closer together than this are treated as key bounce or a fumbled
+# double-tap and ignored. Without it four fast taps estimate an absurd tempo and
+# peg at TEMPO_MAX_BPM, which is a nasty thing to do to a set; no quarter note
+# anyone means to tap is this short (it's 400 bpm).
+TEMPO_TAP_MIN_SPACING_S = 0.15
 # Taps kept for the estimate: enough to average out an unsteady hand, few
 # enough to follow a tempo being deliberately tapped faster or slower.
 TEMPO_TAP_WINDOW = 8
@@ -193,7 +196,7 @@ def strobe_on():
         strobe.set_channel(0, 255)
         strobe.set_channel(1, 255)
     except Exception as e:
-        print(f'Error setting strobe on: {e}')
+        log_line(f'Error setting strobe on: {e}')
 
 
 def strobe_off():
@@ -201,7 +204,7 @@ def strobe_off():
         strobe.set_channel(0, 0)
         strobe.set_channel(1, 0)
     except Exception as e:
-        print(f'Error setting strobe on: {e}')
+        log_line(f'Error setting strobe on: {e}')
 
 
 
@@ -222,7 +225,7 @@ for bar in range(0, NUM_BARS):
 
 
 def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
-    print(f'{channel}:{note_number}:{note_vel}')
+    log_line(f'{channel}:{note_number}:{note_vel}')
     if note_vel == 0:
         return None
 
@@ -233,14 +236,14 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         if clock_tracker.sync:
             ws_msg = MsgSync(last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
             if LOG_SYNC:
-                print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
-                print(f'beat: {clock_tracker.cur_sync_idx // 24}')
+                log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
     elif channel == 15:
         # Analog Rytm auto channel
         if note_number >= 12 and note_number < 36:
             ws_msg = MsgGotoScene(last_transmit_latency, note_number - 12, note_vel < 100)
         elif note_number >= 36:
-            print(f'advancing {-1 if note_number % 2 == 0 else 1}')
+            log_line(f'advancing {-1 if note_number % 2 == 0 else 1}')
             ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1 if note_number % 2 == 0 else 1)
         else:
             ws_msg = MsgBeat(last_transmit_latency, note_number + 1, True)
@@ -277,7 +280,7 @@ class RtMidiInputHandler:
         self.scene_cycler = SceneCycler(cycle) if cycle != 0 else None
 
     def broadcast(self, ws_msg):
-        self.loop.call_soon_threadsafe(websockets.broadcast, connected, ws_msg.to_json())
+        self.loop.call_soon_threadsafe(broadcast, ws_msg)
 
     def __call__(self, event, data=None):
         t_callback = time.time()
@@ -309,8 +312,8 @@ class RtMidiInputHandler:
             if clock_tracker.sync and self.playing:
                 ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 if LOG_SYNC:
-                    print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
-                    print(f'beat: {clock_tracker.cur_sync_idx // 24}')
+                    log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                    log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
         elif status == midiconstants.SONG_STOP:
             self.playing = False
         elif status == midiconstants.SONG_START:
@@ -334,7 +337,7 @@ class RtMidiInputHandler:
             ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
 
         if ws_msg != None and LOG_MSGS:
-            print(ws_msg)
+            log_line(str(ws_msg))
 
         return ws_msg
 
@@ -349,16 +352,54 @@ adapter_secret = None
 # Last message's roundtrip latency divided by two, in seconds
 last_msg_latency = 0.0
 
+# The curses console, when one is running (see console_ui.py). None under
+# visync.service or a pipe, where every call below falls back to plain prints.
+console = None
+
+# Name of the act currently playing, broadcast on change and to each new client.
+cur_performer = ''
+
+
+def broadcast(msg):
+    """Send `msg` to every connected client, and log it in the console. Every
+    outgoing message goes through here so the console's event log is complete."""
+    websockets.broadcast(connected, msg.to_json())
+    if console is not None:
+        console.log_msg(msg)
+
+
 def log_line(text):
-    """Print a line without smearing the --fake status line, which lives on the
-    terminal's current line and is only ever rewritten in place."""
-    print(f'\r\x1b[K{text}')
+    """Report something that isn't a message: into the console's log when one
+    is running, otherwise to stdout."""
+    if console is not None:
+        console.log_note(text)
+    else:
+        print(text)
+
+
+def update_client_count():
+    if console is not None:
+        console.client_count = len(connected)
+
+
+def set_performer(name):
+    """Change the act shown in the frontend HUD and tell every client."""
+    global cur_performer
+    cur_performer = name
+    if console is not None:
+        console.performer = name
+    broadcast(MsgPerformer(last_msg_latency, name))
 
 
 async def handler(websocket):
     global last_msg_latency
     connected.add(websocket)
+    update_client_count()
     log_line("Client connected")
+    # The performer only goes out when it changes, so a browser opened mid-set
+    # would show nothing. Send the current one to this client alone.
+    if cur_performer:
+        await websocket.send(MsgPerformer(last_msg_latency, cur_performer).to_json())
     try:
         async for message in websocket:
             msg = json.loads(message)
@@ -367,6 +408,7 @@ async def handler(websocket):
     finally:
         # Unregister client
         connected.remove(websocket)
+        update_client_count()
         log_line("Client disconnected")
 
 
@@ -386,8 +428,8 @@ class SerialMidiHandler:
                     #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
                     ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                     if LOG_SYNC:
-                        print(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
-                        print(f'beat: {clock_tracker.cur_sync_idx // 24}')
+                        log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
+                        log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
                 self.bytes = []
             elif b == midiconstants.SONG_STOP:
                 # Single-byte message
@@ -415,7 +457,7 @@ class SerialMidiHandler:
             elif b & 0xF0 == 0xA0:
                 self.bytes = [b]
             else:
-                print(f'unknown status byte: {b}')
+                log_line(f'unknown status byte: {b}')
                 pass
         else:
             # This is not the first byte
@@ -436,7 +478,7 @@ class SerialMidiHandler:
             elif self.bytes[0] & 0xF0 == midiconstants.CONTROL_CHANGE:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
-                    print(f"control change: {self.bytes[1:]}")
+                    log_line(f"control change: {self.bytes[1:]}")
                     control_idx, control_val = self.bytes[1:]
                     # This channel is used for graphics scene switching
                     ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
@@ -453,7 +495,7 @@ class SerialMidiHandler:
                 self.bytes.append(b)
                 channel = (self.bytes[0] & 0xF) + 1
                 value = self.bytes[1]
-                print(f'program change: {channel} {value}')
+                log_line(f'program change: {channel} {value}')
                 clock_tracker.cur_sync_idx = -1
                 ws_msg = MsgProgramChange(last_msg_latency, channel, value)
                 self.bytes = []
@@ -497,25 +539,25 @@ async def main_loop_serial(serial_device, msg_queue, cycle=0):
         ws_msg = handler.handle_midi_byte(byte)
 
         if ws_msg and ws_msg.msg_type != Msg.Type.SYNC and LOG_MSGS:
-            print(ws_msg)
+            log_line(str(ws_msg))
 
         if ws_msg:
-            websockets.broadcast(connected, ws_msg.to_json())
+            broadcast(ws_msg)
             msg_queue.put_nowait(ws_msg)
 
         if scene_cycler:
             cycle_msgs = scene_cycler.check_cycle(clock_tracker.cur_sync_idx)
             if cycle_msgs:
                 for msg in cycle_msgs:
-                    websockets.broadcast(connected, msg.to_json())
+                    broadcast(msg)
             advance_msg = scene_cycler.check_advance(clock_tracker.cur_sync_idx)
             if advance_msg:
-                websockets.broadcast(connected, advance_msg.to_json())
+                broadcast(advance_msg)
 
 
 class TempoControl:
     """The tempo main_loop_fake is currently running at, steerable from the
-    terminal by main_loop_tempo_keys.
+    terminal by the console (console_ui.py).
 
     `set_bpm` is the tempo the arrow keys nudge around and is what persists;
     `bpm()` is what the clock should actually run at right now, which differs
@@ -574,7 +616,10 @@ class TempoControl:
         """Register a quarter-note tap: realign the grid to it, and re-estimate
         the tempo once the series is long enough to mean anything."""
         self._prune_taps()
-        self._taps.append(time.monotonic())
+        now = time.monotonic()
+        if self._taps and now - self._taps[-1] < TEMPO_TAP_MIN_SPACING_S:
+            return
+        self._taps.append(now)
         # Wall clock, not monotonic: it's what main_loop_fake schedules on.
         self._tap_grid_t = time.time()
         if len(self._taps) >= TEMPO_TAP_MIN:
@@ -595,81 +640,28 @@ class TempoControl:
         return tap_t
 
 
-# Arrow keys as the terminal sends them: ESC [ A/B/C/D.
-ARROW_ACTIONS = {
-    b'A': ('step', 1),      # up:    set tempo + TEMPO_STEP_BPM
-    b'B': ('step', -1),     # down:  set tempo - TEMPO_STEP_BPM
-    b'C': ('nudge', 1),     # right: faster while held
-    b'D': ('nudge', -1),    # left:  slower while held
-}
-
-
-def draw_tempo_status(tempo):
-    """Rewrite the single-line tempo readout in place (\\r + erase-to-end), so
-    the terminal shows live tempo without scrolling."""
-    # Read the effective bpm first: it's what lapses a finished nudge, and the
-    # arrow shown below should agree with the number next to it.
-    bpm = tempo.bpm()
-    if bpm is None:
-        needed = tempo.taps_needed()
-        body = f'no tempo yet - tap space {needed} more time{"" if needed == 1 else "s"}'
-    else:
-        arrow = {-1: '<<', 0: '  ', 1: '>>'}[tempo.nudge_dir]
-        body = f'{bpm:6.1f} bpm {arrow}   set {tempo.set_bpm:.1f}'
-    # Kept short deliberately: a line that wraps can't be rewritten in place,
-    # since \r only returns to the start of the last screen line. The key hints
-    # go out once at startup instead (see main_loop_tempo_keys).
-    sys.stdout.write(f'\r\x1b[K  {body}')
-    sys.stdout.flush()
-
-
-async def main_loop_tempo_keys(tempo):
-    """Steer `tempo` from the space bar and arrow keys, keeping the status line
-    redrawn.
+async def main_loop_console(tempo):
+    """Run the curses console (console_ui.py): tempo readout, scrolling event
+    log of everything broadcast, and tab-to-set-performer.
 
     Does nothing unless stdin is a terminal: under visync.service or a pipe
-    there are no keys to read and the status line would just flood the log."""
+    there are no keys to read and the redraws would just flood the log, so the
+    adapter stays on plain prints via log_line."""
+    global console
     if not sys.stdin.isatty():
         return
 
-    log_line(f'tempo keys: space taps quarter notes, up/down step '
-             f'+-{TEMPO_STEP_BPM} bpm, hold left/right to nudge')
-
-    fd = sys.stdin.fileno()
-    old_attrs = termios.tcgetattr(fd)
-    loop = asyncio.get_running_loop()
-    pending = bytearray()
-
-    def on_readable():
-        pending.extend(os.read(fd, 64))
-        while pending:
-            if pending[0] == ord(' '):
-                del pending[0]
-                tempo.tap()
-            elif pending[0] != 0x1b:        # not a key we handle; drop it
-                del pending[0]
-            elif len(pending) < 3:
-                break                       # rest of the sequence not here yet
-            elif pending[1] != ord('['):
-                del pending[0]              # ESC pressed, or a sequence we
-            else:                           # don't handle
-                action = ARROW_ACTIONS.get(bytes(pending[2:3]))
-                del pending[:3]
-                if action:
-                    getattr(tempo, action[0])(action[1])
-
-    # cbreak rather than raw mode: it turns off line buffering and echo but
-    # leaves ISIG alone, so ctrl-C still stops the adapter.
-    tty.setcbreak(fd)
-    loop.add_reader(fd, on_readable)
+    import console_ui
+    hints = 'tab performer   pgup/pgdn scroll   s sync/cc   ctrl-C quit'
+    if tempo is not None:
+        hints = 'space tap   up/down bpm   left/right nudge   ' + hints
+    console = console_ui.Console(tempo=tempo, on_performer=set_performer,
+                                 hints=hints)
+    console.performer = cur_performer
     try:
-        while True:
-            draw_tempo_status(tempo)
-            await asyncio.sleep(1.0 / TEMPO_STATUS_HZ)
+        await console_ui.run(console)
     finally:
-        loop.remove_reader(fd)
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
-        print()
+        console = None
 
 
 async def main_loop_fake(tempo, cycle=0):
@@ -707,16 +699,16 @@ async def main_loop_fake(tempo, cycle=0):
         # wherever the new rate says tick `sync_idx` should have landed.
         sync_rate_hz = (tempo.bpm() * 24) / 60
         sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
-        websockets.broadcast(connected, sync_msg.to_json())
+        broadcast(sync_msg)
 
         if scene_cycler:
             cycle_msgs = scene_cycler.check_cycle(sync_idx)
             if cycle_msgs:
                 for msg in cycle_msgs:
-                    websockets.broadcast(connected, msg.to_json())
+                    broadcast(msg)
             advance_msg = scene_cycler.check_advance(sync_idx)
             if advance_msg:
-                websockets.broadcast(connected, advance_msg.to_json())
+                broadcast(advance_msg)
         new_beat_idx = sync_idx // 6
         if new_beat_idx != beat_idx:
             beat_idx = new_beat_idx
@@ -725,7 +717,7 @@ async def main_loop_fake(tempo, cycle=0):
             '''if new_beat_idx % 16 == 0:
                 # Advance or decrease state
                 adv_msg = MsgAdvanceSceneState(0, cur_advance_step)
-                websockets.broadcast(connected, adv_msg.to_json())
+                broadcast(adv_msg)
                 cur_advance_state += cur_advance_step
                 if (cur_advance_state > 4 or cur_advance_state <= 0):
                     cur_advance_step *= -1'''
@@ -742,13 +734,13 @@ async def main_loop_fake(tempo, cycle=0):
                     bg = last_changed_fg
                     new_scene = 0
                 ch_scene_msg = MsgGotoScene(0, new_scene, bg)
-                websockets.broadcast(connected, ch_scene_msg.to_json())
+                broadcast(ch_scene_msg)
                 last_changed_fg = not bg
                 cur_scenes[1 if bg else 0] = new_scene'''
 
             for beat in cur_beats:
                 beat_msg = MsgBeat(last_msg_latency, beat)
-                websockets.broadcast(connected, beat_msg.to_json())
+                broadcast(beat_msg)
         sync_idx += 1
         next_tick_time += 1 / sync_rate_hz
         now = time.time()
@@ -781,18 +773,18 @@ async def main_loop_audio(device, infer_beat=False):
     stream = sd.InputStream(device=device_idx, samplerate=samplerate, channels=1,
                             dtype='float32', latency='low',
                             callback=analyzer.callback)
-    print(f"Listening to [{device_idx}] {device_name} @ {samplerate:.0f} Hz "
-          f"-> MsgAudioInfo at {AUDIO_INFO_HZ} Hz")
+    log_line(f"Listening to [{device_idx}] {device_name} @ {samplerate:.0f} Hz "
+             f"-> MsgAudioInfo at {AUDIO_INFO_HZ} Hz")
 
     detector = None
     if infer_beat:
         detector = BeatDetector(samplerate, analyzer.n_bins)
-        print("Inferring beats from audio (edit BEAT_BANDS in audio_info.py to tune):")
+        log_line("Inferring beats from audio (edit BEAT_BANDS in audio_info.py to tune):")
         for name, channel, lo, hi in detector.band_ranges():
             band = next(b for b in detector.bands if b.name == name)
-            print(f"  {name:6s} -> beat channel {channel:2d}  "
-                  f"{band.f_lo_hz:5.0f}-{band.f_hi_hz:5.0f} Hz (bins {lo}-{hi}), "
-                  f"threshold {band.threshold}x")
+            log_line(f"  {name:6s} -> beat channel {channel:2d}  "
+                     f"{band.f_lo_hz:5.0f}-{band.f_hi_hz:5.0f} Hz (bins {lo}-{hi}), "
+                     f"threshold {band.threshold}x")
 
     period = 1.0 / AUDIO_INFO_HZ
     stream.start()
@@ -806,14 +798,12 @@ async def main_loop_audio(device, infer_beat=False):
             if detector is not None:
                 # Beats first: they're time-critical, the audio info is not.
                 for band, energy, ratio in detector.update(spectrum, now):
-                    websockets.broadcast(
-                        connected,
-                        MsgBeat(last_msg_latency, band.channel, True).to_json())
-                    print(f"beat {band.name:6s} ch{band.channel:<2d} "
-                          f"{ratio:5.2f}x avg (energy {energy:.2e})")
+                    broadcast(MsgBeat(last_msg_latency, band.channel, True))
+                    log_line(f"beat {band.name:6s} ch{band.channel:<2d} "
+                             f"{ratio:5.2f}x avg (energy {energy:.2e})")
             msg = MsgAudioInfo(last_msg_latency, amp_to_db(avg), amp_to_db(peak),
                                amp_to_db(spectrum), amp_to_db(smoothed), samplerate)
-            websockets.broadcast(connected, msg.to_json())
+            broadcast(msg)
             next_tick += period
             await asyncio.sleep(max(0.0, next_tick - time.monotonic()))
     finally:
@@ -836,7 +826,7 @@ async def main_loop_fake_knob_movement(tempo):
             # Normalized [0, 1] value, left unquantized for smooth motion.
             value = (math.sin(phase) + 1) / 2
             cc_msg = MsgControlChange(last_msg_latency, knob, value)
-            websockets.broadcast(connected, cc_msg.to_json())
+            broadcast(cc_msg)
         await asyncio.sleep(1.0 / FAKE_KNOB_UPDATE_HZ)
 
 
@@ -905,6 +895,7 @@ async def main():
             queue = asyncio.Queue()
 
             have_midi_beat = False
+            tempo = None
             if args.rtmidi:
                 t1 = tg.create_task(main_loop_rtmidi(args.rtmidi, cycle=args.cycle))
                 have_midi_beat = True
@@ -914,13 +905,17 @@ async def main():
             elif args.fake is not None:
                 tempo = TempoControl(None if args.fake == FAKE_TAP_TEMPO else args.fake)
                 t1 = tg.create_task(main_loop_fake(tempo, cycle=args.cycle))
-                t_tempo = tg.create_task(main_loop_tempo_keys(tempo))
                 if FAKE_KNOB_MOVEMENT:
                     t_knobs = tg.create_task(main_loop_fake_knob_movement(tempo))
                 have_midi_beat = True
 
             if args.audio is not None:
                 t1 = tg.create_task(main_loop_audio(audio_device, not have_midi_beat))
+
+            # The console runs in every mode - the event log and the performer
+            # prompt are useful whatever is driving the clock. `tempo` is only
+            # non-None for --fake, which is the only mode whose tempo we own.
+            t_console = tg.create_task(main_loop_console(tempo))
 
             if USE_LEDS:
                 t2 = tg.create_task(led_update_loop())
@@ -935,4 +930,10 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # ctrl-C is how you quit. The console has already restored the terminal
+        # on its way out (console_ui.run's finally), so just leave quietly
+        # instead of printing a traceback over the screen it just cleaned up.
+        pass

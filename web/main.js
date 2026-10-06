@@ -70,6 +70,28 @@ const MSG_TYPE_ACK = 6;
 const MSG_TYPE_PITCH_BEND = 7;
 const MSG_TYPE_CONTROL_CHANGE = 8;
 const MSG_TYPE_AUDIO_INFO = 10;
+// Name of the act currently playing (see adapter/message.py's MsgPerformer).
+const MSG_TYPE_PERFORMER = 11;
+
+// Widths the header's fixed fields are padded to, so the '|' separators hold
+// still as values change (#header is white-space: pre). The scene list sits
+// last in the header and is the only field left unpadded, since the number of
+// slots in play has no useful bound.
+// The connection indicator is one character wide in either state: every glyph
+// below is a single Block Elements codepoint, which the header's monospace
+// stack renders in one cell.
+//
+// Connected: shade blocks stepping solid -> sparse across each quarter note, so
+// the indicator reads as a pulse locked to the kick. Index 0 lands on the beat.
+const HUD_BEAT_GLYPHS = ['\u2588', '\u2593', '\u2592', '\u2591'];
+// Connecting: quadrant blocks in corner order, which reads as one block
+// rotating clockwise.
+const HUD_SPIN_GLYPHS = ['\u2598', '\u259D', '\u2597', '\u2596'];
+// Spinner steps per second. Fast enough to read as motion, slow enough that the
+// corners are distinguishable.
+const HUD_SPIN_HZ = 6;
+// Beat length assumed before any sync has set a tempo, in seconds (120 bpm).
+const HUD_FALLBACK_BEAT_S = 0.5;
 
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
@@ -109,6 +131,9 @@ function relay_url() {
 
 function connect() {
     const socket = new WebSocket(relay_url());
+    socket.addEventListener('open', function() {
+        context.set_connected(true);
+    });
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
@@ -149,7 +174,7 @@ function connect() {
 
         // Update the overlay with latency
         const latency_elem = document.getElementById('latency');
-        const latency_str = `${(est_tot_latency * 1000).toFixed(1)}`.substring(0, 4).padEnd(4);
+        const latency_str = (est_tot_latency * 1000).toFixed(1);
         latency_elem.innerHTML = latency_str;
 
         if (type == MSG_TYPE_SYNC) {
@@ -163,18 +188,15 @@ function connect() {
         } else if (type == MSG_TYPE_AUDIO_INFO) {
             context.handle_audio_info(msg.avg, msg.peak, msg.spectrum,
                 msg.spectrum_smoothed, msg.samplerate);
+        } else if (type == MSG_TYPE_PERFORMER) {
+            context.set_performer(msg.name);
         }
         const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
         socket.send(JSON.stringify(resp));
-
-        // Update the overlay with last msg contents
-        if (type != MSG_TYPE_SYNC) {
-            const last_msg_elem = document.getElementById('lastmsg');
-            last_msg_elem.innerHTML = msg_to_disp_string(msg);
-        }
     });
 
     socket.addEventListener('close', function(e) {
+        context.set_connected(false);
         // Try to reconnect after 1 second
         //console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
         setTimeout(function() {
@@ -187,22 +209,6 @@ function connect() {
         socket.close();
     });
 
-}
-
-
-function msg_to_disp_string(msg) {
-    let msg_txt = '';
-    const str_len = 12;
-    if (msg.msg_type == MSG_TYPE_SYNC) {
-        msg_txt = `SYNC ${msg.sync_idx}`;
-    } else if (msg.msg_type == MSG_TYPE_BEAT) {
-        msg_txt = `BEAT ${msg.channel}`;
-    } else if (msg.msg_type == MSG_TYPE_GOTO_SCENE) {
-        msg_txt = `GOTO ${msg.scene} ${msg.bg}`;
-    } else if (msg.msg_type == MSG_TYPE_ADVANCE_SCENE_STATE) {
-        msg_txt = `ADV ${msg.steps}`;
-    }
-    return msg_txt.substring(0, str_len).padEnd(str_len);
 }
 
 
@@ -256,73 +262,6 @@ function make_wireframe_sphere(radius) {
 
     const ls = new THREE.LineSegments(edges_geom, wireframe_mat);
     return ls
-}
-
-
-class VisOpening extends Scene {
-    constructor(env, pretitle, title, subtitle, start_stage) {
-        super(env);
-        this.camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
-        this.start_stage = start_stage;
-        this.stage = 0;
-        this.html_elements = [];
-        this.html_values = [];
-        this.all_html_elements = ["pretitle", "songtitle", "subtitle"];
-        for (const [i, v] of [pretitle, title, subtitle].entries()) {
-            if (v != "") {
-                this.html_elements.push(this.all_html_elements[i]);
-                this.html_values.push(v);
-            }
-        }
-    }
-
-    activate() {
-        const overlay = document.getElementById("overlay");
-        //overlay.style.display = 'none';
-        for (const [i, id] of this.all_html_elements.entries()) {
-            const elem = document.getElementById(id);
-            elem.style.visibility = 'hidden';
-        }
-        for (const [i, v] of this.html_values.entries()) {
-            const elem = document.getElementById(this.html_elements[i]);
-            elem.innerHTML = v;
-        }
-        this.set_stage(this.start_stage);
-        overlay.style.display = 'hidden';
-    }
-
-    deactivate() {
-        const overlay = document.getElementById("overlay");
-        //overlay.style.display = 'none';
-    }
-
-    anim_frame(dt) {
-    }
-
-    set_stage(stage) {
-        stage = Math.max(0, Math.min(this.html_values.length, stage));
-        for (const i in this.html_values) {
-            const elem = document.getElementById(this.html_elements[i]);
-            if (i < stage) {
-                elem.style.visibility = 'visible';
-            } else {
-                elem.style.visibility = 'hidden';
-            }
-        }
-        this.stage = stage;
-    }
-
-    handle_key(key) {
-        if (key == "ArrowLeft") {
-            let new_stage = this.stage - 1;
-            if (new_stage < 0) {
-                new_stage = this.html_values.length;
-            }
-            this.set_stage(new_stage);
-        } else if (key == "ArrowRight") {
-            this.set_stage((this.stage + 1) % (this.html_values.length + 1));
-        }
-    }
 }
 
 const ongoingTouches = [];
@@ -428,6 +367,12 @@ class GraphicsContext {
         this.last_scheduled_sync_time = null;
         this.next_scheduled_sync_time = null;
 
+        // Header connection indicator (see update_conn_indicator).
+        this.connected = false;
+        this.last_quarter = null;      // last quarter note seen, in sync_idx/24
+        this.last_quarter_t = null;    // when it arrived, seconds
+        this.beat_period_s = HUD_FALLBACK_BEAT_S;
+
         // Set up DOM and renderer
         this.debug_overlay = document.getElementById("debug-overlay");
         this.overlay_indicators = [];
@@ -462,40 +407,39 @@ class GraphicsContext {
         // here and both are just transports into them.
         // Created before scenes so scenes can bind to them.
         this.knobs = create_knobs();
-        this.controller = new WebsocketController(this, "ws://localhost:8766",
-                                                 this.knobs);
+        //this.controller = new WebsocketController(this, "ws://localhost:8766", this.knobs);
 
         // Create scenes
         this.scenes = new Map([
-            [0, new Scene(this)],
-            [1, new GantryScene(this)],
-            [2, new HexagonScene(this)],
-            [3, new SpinningRobotsScene(this)],
-            [4, new CubeLockingScene(this)],
-            [5, new IceCreamScene(this)],
-            [6, new DDRScene(this)],
-            [7, new DrumboxScene(this)],
-            [8, new YellowRobotScene(this)],
-            [9, new ChineseScene(this)],
-            [10, new SurfacesScene(this)],
-            [11, new BackgroundSurfacesScene(this)],
-            [12, new SpectrumScene(this)],
-            [13, new FastCubeScene(this)],
+            [1, new GantryScene(this)], // more interactive
+            [2, new HexagonScene(this)],    // more interactive
+            [3, new SpinningRobotsScene(this)],  // overlap unaesthetic
+            [4, new CubeLockingScene(this)],    // more interactive
+            [5, new IceCreamScene(this)],   // more interactive, models too static
+            [6, new DDRScene(this)],    // more interactive, basically no interactivity
+            [7, new DrumboxScene(this)],    // more interactive, basically no interactivity
+            [8, new YellowRobotScene(this)],    // interactivity needs work, better dance
+            [9, new ChineseScene(this)],    // more interactive, ideally draw random walks live
+            [10, new SurfacesScene(this)],  // boring
+            [11, new BackgroundSurfacesScene(this)],    // boring
+            [12, new SpectrumScene(this)],  // more interactive, get rid of separate 2d and 3d states and have a knob continuously morph
+            [13, new FastCubeScene(this)],  // boring, needs more interactivity
             [14, new TessellateScene(this)],
             [15, new HomeBackgroundScene(this)],
             [16, new IntroScene(this)],
             [17, new TracersScene(this)],
-            [18, new HelixScene(this)],
+            [18, new HelixScene(this)], // boring, should react to spectrum instead and have knobs control stuff more
             [19, new TriangularPrismScene(this)],
             [20, new SphereGridScene(this)],
             [21, new VectorFieldScene(this)],
-            //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
-            //[21, new TextScene(this)],
-            //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
             [22, new CellularAutomataScene(this)],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
             [25, new PoseScene(this)],
+
+            //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
+            //[21, new TextScene(this)],
+            //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
         ]);
 
         // Scene selection is driven by knobs 14 (foreground) and 15
@@ -520,9 +464,9 @@ class GraphicsContext {
 
         // Which slot plain number-key presses target; shift+<numkey>
         // changes this instead of changing a scene (see keydown).
-        this.active_slot = 1;
+        this.active_slot = 0;
 
-        // Show a default scene at startup. The scene-selection bindings above
+        // Show a blank screen at startup. The scene-selection bindings above
         // used to run every frame and did this implicitly from the knobs'
         // default value; now that bindings only fire on a knob change, do it
         // explicitly.
@@ -612,6 +556,7 @@ class GraphicsContext {
 
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
+        this.update_conn_indicator();
         this.shown_scenes.forEach((idx) => {
             if (idx === undefined) {
                 return;
@@ -689,7 +634,9 @@ class GraphicsContext {
     // shown in another slot) and activates the new one; updates the fg/bg
     // HUD labels if this is slot 0 or 1, the only slots with one.
     set_slot(slot, scene_idx) {
-        if (!this.scenes.has(scene_idx) || this.shown_scenes[slot] === scene_idx) {
+        if (scene_idx == 0) {
+            scene_idx = undefined;
+        } else if (!this.scenes.has(scene_idx) || this.shown_scenes[slot] === scene_idx) {
             return;
         }
 
@@ -699,15 +646,83 @@ class GraphicsContext {
         if (old_idx !== undefined && !this.shown_scenes.includes(old_idx)) {
             this.scenes.get(old_idx).deactivate();
         }
-        this.scenes.get(scene_idx).activate();
-
-        const hud_id = slot === 0 ? 'bg-name' : (slot === 1 ? 'fg-name' : null);
-        if (hud_id !== null) {
-            const str_len = 10;
-            const name_pad = this.scenes.get(scene_idx).shortname
-                .substring(0, str_len).padEnd(str_len);
-            document.getElementById(hud_id).innerHTML = name_pad;
+        const new_scene = this.scenes.get(scene_idx);
+        if (new_scene !== undefined && !this.shown_scenes.includes(scene_idx)) {
+            new_scene.activate();
         }
+
+        this.update_scene_hud();
+    }
+
+    // Rewrite the HUD's scene list as <slot>:<shortname> for every occupied
+    // slot, joined with '+'. Slot order is draw order (slot 0 is the
+    // background, higher slots draw over it), so the list reads bottom layer
+    // first - which also avoids the fg/bg labels the header used to carry,
+    // and which were the wrong way round.
+    update_scene_hud() {
+        const shown = [];
+        let active_shown = false;
+        this.shown_scenes.forEach((idx, slot) => {
+            if (slot > this.active_slot && !active_shown) {
+                shown.push(`${this.active_slot}:`);
+                active_shown = true;
+            }
+            if (idx != undefined) {
+                shown.push(`${slot}:${this.scenes.get(idx).shortname}`);
+                if (slot == this.active_slot) {
+                    active_shown = true;
+                }
+            }
+        });
+        document.getElementById('scenes').innerHTML = shown.join('+');
+    }
+
+    // The act currently playing, from MsgPerformer.
+    set_performer(name) {
+        document.getElementById('performer').innerHTML = name;
+    }
+
+    // Relay connection state, from connect()'s socket events. Only the relay is
+    // reported: the controller socket on 8766 has nothing listening whenever no
+    // controller adapter is running, which is most of the time, so showing its
+    // state would leave the header permanently claiming a problem.
+    set_connected(connected) {
+        this.connected = connected;
+        if (!connected) {
+            // Nothing is clocking us any more, so don't let the pulse carry on
+            // from a stale beat if the relay comes back.
+            this.last_quarter = null;
+            this.last_quarter_t = null;
+        }
+        this.update_conn_indicator();
+    }
+
+    // Redraw the header's one-character indicator. Called every frame, because
+    // both states animate: a rotating quadrant while the relay is down, and a
+    // solid-to-sparse pulse across each quarter note while it's up.
+    update_conn_indicator() {
+        const elem = document.getElementById('conn');
+        const now = performance.now() / 1000;
+
+        if (!this.connected) {
+            // Stepped off the wall clock rather than accumulated per frame, so
+            // it turns at the same rate whatever the frame rate is doing.
+            const i = Math.floor(now * HUD_SPIN_HZ) % HUD_SPIN_GLYPHS.length;
+            elem.innerHTML = HUD_SPIN_GLYPHS[i];
+            elem.className = 'muted';
+            return;
+        }
+
+        const last = HUD_BEAT_GLYPHS.length - 1;
+        let i = last;                  // sparsest until a beat has landed
+        if (this.last_quarter_t !== null) {
+            const phase = (now - this.last_quarter_t) / this.beat_period_s;
+            // Clamped, so a stalled clock holds the sparsest glyph instead of
+            // wrapping back to solid as if a beat had arrived.
+            i = Math.min(last, Math.floor(clamp(phase, 0, 1) * HUD_BEAT_GLYPHS.length));
+        }
+        elem.innerHTML = HUD_BEAT_GLYPHS[i];
+        elem.className = 'emph';
     }
 
     // Scene-change messages (MIDI/network MsgGotoScene, and the APC knobs 14
@@ -731,7 +746,7 @@ class GraphicsContext {
     // Physical left-to-right key order for both the digit->bank-position and
     // digit->render-slot mappings below: keys 1-9 give 0-8, 0 gives 9.
     key_digit_to_slot(digit) {
-        return (digit + 9) % 10;
+        return digit;//(digit + 9) % 10;
     }
 
     keydown(e) {
@@ -748,7 +763,7 @@ class GraphicsContext {
             // Shift+digit: switch which slot subsequent digit presses
             // target, without changing any scene.
             this.active_slot = this.key_digit_to_slot(shift_chars.indexOf(e.key));
-            console.log(`active slot: ${this.active_slot}`);
+            this.update_scene_hud();
         } else if (e.code == "Space") {
             this.immediate_mode = !this.immediate_mode;
             this.update_mode_hud();
@@ -778,24 +793,36 @@ class GraphicsContext {
         }
     }
 
-    handle_sync(latency, sync_rate_hz, beat) {
+    // `sync_idx` counts MIDI clocks, 24 per quarter note - not beats, despite
+    // what this parameter used to be called.
+    handle_sync(latency, sync_rate_hz, sync_idx) {
         const syncs_to_skip = 24;
         const delay = this.immediate_mode ? 0 : syncs_to_skip / sync_rate_hz - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
             this.scenes.forEach((scene) => {
-                scene.handle_sync_raw(sync_rate_hz, beat + 1);
+                scene.handle_sync_raw(sync_rate_hz, sync_idx + 1);
             });
         }, delay * 1000);
 
         /*this.scenes.forEach((scene) => {
-            scene.handle_sync_raw(sync_rate_hz, beat);
+            scene.handle_sync_raw(sync_rate_hz, sync_idx);
         });*/
         // Update overlay with sync rate hz (convert to bpm)
         const bpm = sync_rate_hz * 60 / 24;
-        const bpm_elem = document.getElementById("bpm");
-        bpm_elem.innerHTML = String(bpm.toFixed(1)).padEnd(3);
+        document.getElementById("bpm").innerHTML = bpm.toFixed(0);
+
+        // Timestamp each quarter note for the header's pulse indicator. Taken
+        // as the sync arrives rather than when the delayed beat is delivered:
+        // the indicator reports the clock on the wire, which is what you want
+        // when you're checking whether the adapter is still with you.
+        const quarter = Math.floor(sync_idx / 24);
+        if (quarter !== this.last_quarter) {
+            this.last_quarter = quarter;
+            this.last_quarter_t = performance.now() / 1000;
+            this.beat_period_s = 60 / bpm;
+        }
     }
 
     update_mode_hud() {

@@ -8,6 +8,9 @@
     --base-light: white;
     --base-med: lightgray;
     --base-dark: #444;
+    /* Dim grey for the header's connection indicator while the relay is down,
+       so a dropped connection reads as absence rather than as an alarm. */
+    --muted: #777;
 }
 
 *,
@@ -45,6 +48,16 @@ a {
 
 .secondary {
     color: var(--secondary);
+}
+
+/* Connected state of the header indicator: plain white, so the pulse reads as
+   brightness rather than as a status colour. */
+.conn-beat {
+    color: var(--base-light);
+}
+
+.muted {
+    color: var(--muted);
 }
 
 h1 {
@@ -134,7 +147,7 @@ canvas {
     left: 0px;
     width: 100%;
     padding: 5px;
-    text-align: center;
+    text-align: left;
     background-color: black;
     white-space: pre;
 }

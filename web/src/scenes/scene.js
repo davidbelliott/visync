@@ -121,6 +121,9 @@ export class Scene extends THREE.Scene {
         });
     }
 
+    handle_key(key) {
+    }
+
     // skeletons: array of skeletons, one per detected person, each a list
     // of 33 [x, y, z] world-space points in metres (see adapter/message.py's
     // MsgPose). No-op by default; PoseScene overrides it.

@@ -185,6 +185,9 @@ export class IceCreamScene extends Scene {
 
         this.rot = 512 / 4;
         this.elapsed_time = 0.0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

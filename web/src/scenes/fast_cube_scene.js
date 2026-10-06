@@ -230,6 +230,9 @@ export class FastCubeScene extends Scene {
         });
 
         this.add(this.base_group);
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     get_foot_shuffle_offset(side_idx, t) {

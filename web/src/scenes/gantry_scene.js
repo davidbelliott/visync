@@ -208,7 +208,6 @@ export class GantryScene extends Scene {
             -this.frustum_size / 2, -1000, 1000);
         this.clear();
         this.clock = new THREE.Clock(true);
-        this.zoom_clock = new BeatClock(this);
         this.beat_idx = 0;
 
         this.base_group = new THREE.Group();
@@ -253,9 +252,6 @@ export class GantryScene extends Scene {
         this.color_b = new THREE.Color("blue");
         this.cur_color = new THREE.Color();
 
-        this.start_zoom = 1;
-        this.target_zoom = 1;
-        this.zoom_movement_beats = 1;
 
 
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
@@ -310,6 +306,8 @@ export class GantryScene extends Scene {
         this.marker_cube.position.set(0, 6, 0);
         this.cubes_group.add(this.marker_cube);
 
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {
@@ -323,14 +321,6 @@ export class GantryScene extends Scene {
         this.base_group.rotation.y = Math.PI / 4 + yaw;
         const cur_color = this.cur_color.lerpColors(this.color_a, this.color_b,
             (1 - Math.cos(2 * yaw)) / 2);
-
-        // Zoom
-        const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
-        const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
-        if (new_zoom != this.cam_orth.zoom) {
-            this.cam_orth.zoom = new_zoom;
-            this.cam_orth.updateProjectionMatrix();
-        }
 
         const max_offset = this.cube_base_size + this.cube_base_spacing;
         if (this.cubes_group.position.z > max_offset) {
@@ -408,17 +398,6 @@ export class GantryScene extends Scene {
 
             this.gantries[this.moving_gantry_idx].set_cube_target_idx(cube_idx_i, cube_idx_j);
             this.gantries[this.moving_gantry_idx].move_clock.start();
-        }
-        if (beat % 4 == 0) {
-            if (rand_int(0, 8) == 0) {
-                this.start_zoom = this.target_zoom;
-                if (this.target_zoom == 1) {
-                    this.target_zoom = 0.7;
-                } else {
-                    this.target_zoom = 1;
-                }
-                this.zoom_clock.start();
-            }
         }
     }
 

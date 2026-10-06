@@ -227,6 +227,9 @@ export class HexagonScene extends Scene {
         this.rotation_dir = 1;
 
         this.elapsed_beats = 0.0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     create_plane(camera, material) {

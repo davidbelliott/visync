@@ -176,8 +176,8 @@ export class TessellateScene extends Scene {
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 
-
-
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     get_palette_color(t) {

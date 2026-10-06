@@ -270,7 +270,6 @@ export class BuildingScene extends Scene {
             -this.frustum_size / 2, -1000, 1000);
         this.clear();
         this.clock = new THREE.Clock(true);
-        this.zoom_clock = new BeatClock(this);
         this.beat_idx = 0;
 
         this.base_group = new THREE.Group();
@@ -291,9 +290,6 @@ export class BuildingScene extends Scene {
         this.cube_base_spacing = 0.5;
         this.drift_vel = 0.0;
 
-        this.start_zoom = 1;
-        this.target_zoom = 1;
-        this.zoom_movement_beats = 1;
 
         // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps on top
         // of the PI/4 iso offset.
@@ -400,6 +396,8 @@ export class BuildingScene extends Scene {
         this.marker_cube.position.set(0, 6, 0);
         this.cubes_group.add(this.marker_cube);
 
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {
@@ -418,14 +416,6 @@ export class BuildingScene extends Scene {
 
         this.cubes_group.position.y -= this.drift_vel * dt;
 
-        // Zoom
-        const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
-        const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
-        if (new_zoom != this.cam_orth.zoom) {
-            this.cam_orth.zoom = new_zoom;
-            this.cam_orth.updateProjectionMatrix();
-        }
-
         const elapsed_time = this.clock.getElapsedTime();
         /*for (const g of this.gantries) {
             g.anim_frame(dt);
@@ -438,17 +428,6 @@ export class BuildingScene extends Scene {
 
     handle_sync(t, bpm, beat) {
         console.log('sync');
-        if (beat % 4 == 0) {
-            if (rand_int(0, 8) == 0) {
-                this.start_zoom = this.target_zoom;
-                if (this.target_zoom == 1) {
-                    this.target_zoom = 0.7;
-                } else {
-                    this.target_zoom = 1;
-                }
-                this.zoom_clock.start();
-            }
-        }
     }
 
     handle_beat(t, channel) {

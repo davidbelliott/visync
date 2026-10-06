@@ -68,6 +68,9 @@ export class PoseScene extends Scene {
 
         // No pose received yet.
         this.last_pose_time = null;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     // Builds one person's worth of drawable skeleton (lines + joints), all

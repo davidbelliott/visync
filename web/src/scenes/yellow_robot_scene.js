@@ -71,6 +71,9 @@ export class YellowRobotScene extends Scene {
 
         update_orth_camera_aspect(this.cam_orth, aspect, this.frustum_size);
         update_persp_camera_aspect(this.cam_persp, aspect);
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

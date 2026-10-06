@@ -133,6 +133,9 @@ export class BackgroundSurfacesScene extends Scene {
 
         this.add(this.base_group);
         this.evolve_time = 0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     add_mesh(mesh) {

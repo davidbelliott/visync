@@ -249,6 +249,9 @@ export class CubeLockingScene extends Scene {
         this.bind(CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

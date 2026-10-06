@@ -191,6 +191,9 @@ export class SpectrumScene extends Scene {
         this.start_noise_ampl = 5.0;
 
         this.elapsed_beats = 0.0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     get_frequency_data(noise_ampl) {

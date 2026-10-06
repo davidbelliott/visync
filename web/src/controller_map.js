@@ -19,6 +19,10 @@ export const CH_EXPAND_W = 6;
 export const CH_ROT_Y = 8;
 export const CH_ROT_X = 9;
 
+// Camera zoom (see KnobZoom): next to the rotation knobs, so the three view
+// controls sit together on the controller.
+export const CH_ZOOM = 10;
+
 // A bind_to `transform` mapping a knob's normalized 0..1 value to a signed
 // multiplier in [-2, 2]: the midpoint (0.5) stops a continuous rotation and the
 // extremes spin it at full speed in either direction (-2 * nom_rate .. +2 * nom_rate).

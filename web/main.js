@@ -561,7 +561,9 @@ class GraphicsContext {
             if (idx === undefined) {
                 return;
             }
-            this.scenes.get(idx).anim_frame(dt);
+            const scene = this.scenes.get(idx);
+            scene.anim_frame(dt);
+            scene.update_zoom(dt);
         });
     }
 

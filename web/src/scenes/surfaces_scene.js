@@ -74,6 +74,9 @@ export class SurfacesScene extends Scene {
         this.add(this.base_group);
 
         this.rot_vec = new THREE.Vector3(0.01, 0.01, 0.01);
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

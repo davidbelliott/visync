@@ -71,6 +71,9 @@ export class HomeBackgroundScene extends Scene {
         this.bpm_locked_clock.start();
         this.impacts = new Array(NUM_IMPACTS).fill(Number.MAX_VALUE);
         this.impact_idx = 0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

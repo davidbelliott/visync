@@ -366,6 +366,9 @@ export class DDRScene extends Scene {
         this.half_beat_clock = new BeatClock(this);
         this.clap_clock = new BeatClock(this);
         this.measure_clock = new BeatClock(this);
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

@@ -204,6 +204,9 @@ export class SpinningRobotsScene extends Scene {
         this.spinner_quat = new THREE.Quaternion();
         this.spinner_color = new THREE.Color();
         this.tmp_vec = new THREE.Vector3();
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

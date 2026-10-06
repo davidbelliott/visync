@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { Scene } from './scene.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import {
-    lerp_scalar,
-    ease,
     clamp,
     BeatClock
 } from '../util.js';
@@ -324,11 +322,8 @@ export class DrumboxScene extends Scene {
 
         this.color_hue = 0.0;
 
-        // Camera zooming
-        this.zoom_clock = new BeatClock(this);
-        this.start_zoom = this.camera.zoom;
-        this.target_zoom = this.camera.zoom;
-        this.zoom_movement_beats = 1;
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     get_palette_color(t) {
@@ -413,14 +408,6 @@ export class DrumboxScene extends Scene {
                 this.drum_wire.set_color(drum.idx, SCRATCH_COLOR);
             }
         }
-
-        // Update camera zoom
-        const zoom_frac = ease(Math.min(1, this.zoom_clock.getElapsedBeats() / this.zoom_movement_beats));
-        const new_zoom = lerp_scalar(this.start_zoom, this.target_zoom, zoom_frac);
-        if (new_zoom != this.camera.zoom) {
-            this.camera.zoom = new_zoom;
-            this.camera.updateProjectionMatrix();
-        }
     }
 
     activate() {
@@ -447,11 +434,6 @@ export class DrumboxScene extends Scene {
             // itself starts from anim_frame once JUMP_DELAY_BEATS elapse.
             this.jump_clock.start();
             this.jump_pending = true;
-        }
-        if (beat % 8 == 0) {
-            this.target_zoom = Math.random() * 0.5 + 0.85;
-            this.start_zoom = this.camera.zoom;
-            this.zoom_clock.start();
         }
     }
 }

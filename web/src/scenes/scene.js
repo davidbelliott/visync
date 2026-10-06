@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
+import { KnobZoom } from '../knob_zoom.js';
 import {
     lerp_scalar,
     ease,
@@ -36,6 +37,7 @@ export class Scene extends THREE.Scene {
         this.controls = new OrbitControls(this.camera, this.context.renderer.domElement);
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
+        this.knob_zoom = null;      // set by bind_zoom
     }
 
     // Bind one of the context's knobs to a scene property. `apply` receives
@@ -43,6 +45,22 @@ export class Scene extends THREE.Scene {
     // the knob's value changes (see Knob.bind_to).
     bind(knob_idx, apply, transform) {
         this.context.knobs.get(knob_idx).bind_to(apply, transform);
+    }
+
+    // Opt in to the shared zoom knob (CH_ZOOM, see knob_zoom.js). base_zoom
+    // is the camera zoom the scene is composed at (default: the camera's
+    // current zoom, so call this once the camera is set up); the knob scales it.
+    bind_zoom(base_zoom=this.camera.zoom) {
+        this.knob_zoom = new KnobZoom(base_zoom);
+        this.knob_zoom.bind(this);
+    }
+
+    // Called by the frame loop after anim_frame, so scenes need not remember
+    // to; applies to whichever camera the scene currently renders with.
+    update_zoom(dt) {
+        if (this.knob_zoom !== null) {
+            this.knob_zoom.update(dt, this.camera);
+        }
     }
 
     anim_frame(dt) {

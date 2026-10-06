@@ -407,3 +407,51 @@ export class BeatClock extends THREE.Clock {
         return this.elapsed_beats;
     }
 }
+
+// Follows a target value with eased moves: each new target starts a cubic
+// Hermite curve from the current value and velocity that lands exactly on the
+// target, at rest, after move_time seconds. From rest that is an ease-in/
+// ease-out (smoothstep); mid-move retargets (a knob still turning) carry the
+// velocity over, so continuous input never hitches or restarts from rest.
+export class EasedFollower {
+    // move_time: s from the latest target change to settling exactly on it.
+    constructor(value=0, move_time=1.0) {
+        this.move_time = move_time;
+        this.value = value;
+        this.vel = 0;           // value units/s
+        this.target = value;
+        this.from = value;      // current curve's start value and velocity
+        this.from_vel = 0;
+        this.frac = 1;          // progress through the current curve, 0..1
+    }
+
+    set_target(target) {
+        this.from = this.value;
+        this.from_vel = this.vel;
+        this.target = target;
+        this.frac = 0;
+    }
+
+    // Advance by dt seconds; returns the new value.
+    update(dt) {
+        if (this.frac >= 1) {
+            return this.value;
+        }
+        this.frac = Math.min(1, this.frac + dt / this.move_time);
+        if (this.frac === 1) {
+            this.value = this.target;
+            this.vel = 0;
+            return this.value;
+        }
+        // Hermite basis with end velocity 0; the start velocity term is scaled
+        // by move_time to convert value/s into value per unit frac.
+        const s = this.frac, s2 = s * s, s3 = s2 * s;
+        const t = this.move_time;
+        this.value = (2 * s3 - 3 * s2 + 1) * this.from +
+            (s3 - 2 * s2 + s) * t * this.from_vel +
+            (3 * s2 - 2 * s3) * this.target;
+        this.vel = (6 * s2 - 6 * s) / t * (this.from - this.target) +
+            (3 * s2 - 4 * s + 1) * this.from_vel;
+        return this.value;
+    }
+}

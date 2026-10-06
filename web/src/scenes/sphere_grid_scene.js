@@ -188,6 +188,9 @@ export class SphereGridScene extends Scene {
         const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
         this.camera.rotation.x = isom_angle;
         this.elapsed_time = 0;
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
     
     anim_frame(dt) {

@@ -23,6 +23,9 @@ export class VectorFieldScene extends Scene {
 
         this.camera.zoom = 2;
         this.camera.updateProjectionMatrix();
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

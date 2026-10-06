@@ -67,6 +67,9 @@ export class IntroScene extends Scene {
         this.bind(CH_EXPAND_Y, (v) => { this.scales[1] = v; }, scale_knob);
         this.bind(CH_EXPAND_Z, (v) => { this.scales[2] = v; }, scale_knob);
         this.bind(CH_EXPAND_W, (v) => { this.scales[3] = v; }, scale_knob);
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     anim_frame(dt) {

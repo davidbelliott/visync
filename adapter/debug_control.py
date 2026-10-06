@@ -48,6 +48,7 @@ KNOB_NAMES = {
     6: "tesseract scale w",
     8: "rot y (yaw)",
     9: "rot x (pitch)",
+    10: "zoom",
 }
 
 # GUI refresh rate, in Hz. Values are only broadcast when a slider moves, so

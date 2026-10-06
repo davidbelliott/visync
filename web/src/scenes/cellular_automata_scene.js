@@ -194,6 +194,9 @@ export class CellularAutomataScene extends Scene {
 
         // Something on screen before the first beat arrives.
         this.spawn_seed();
+
+        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        this.bind_zoom();
     }
 
     // Switch rule, rebuild the per-state color/scale lookups, and clear the

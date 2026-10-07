@@ -50,22 +50,42 @@ const MIN_TRAVEL_S = 0.2;
 const MAX_HURRY_CELLS_PER_S = 16;
 // Once the beat is established the assignee doesn't stop on its blocks: it is
 // timed to pass over the target exactly at the predicted touchdown, still
-// moving with the velocity of a smooth curve through the previous position
-// and the next predicted target (Catmull-Rom style), and keeps going from
-// there, so a gantry striking successive blocks flows through them while its
-// paddle slams. On a kick the gantry is re-timed if needed so it is over the
+// moving with its own momentum (the direction it approached from, at its
+// average approach speed; gantries know only the current target, not where
+// the knobs will send the next one), and redirects from there when the next
+// target appears, so a gantry striking successive blocks flows through them
+// while its paddle slams. On a kick the gantry is re-timed if needed so it is over the
 // block (within STRIKE_TOLERANCE_S) exactly at touchdown, keeping its onward
 // velocity; if the speed cap can't manage that it skips the strike rather
 // than hit beside the block. With no kick within SLAM_GRACE_S of passing the
 // block, the gantry eases back onto it and waits.
 const STRIKE_TOLERANCE_S = 0.05;
-// Idle gantries never stop: each frame they glide (critically damped,
-// settling in ~IDLE_SMOOTH_S, at most IDLE_MAX_CELLS_PER_S) towards a
-// formation spot that moves continuously with the anticipated action (see
-// update_idle_goals). 12 cells/s keeps pace with a 3-cell step per beat
-// at 175 bpm with room to correct.
-const IDLE_SMOOTH_S = 0.35;
+// A passing gantry can overshoot its target by about its passing speed x
+// OVERSHOOT_S (coasting SLAM_GRACE_S plus a frame, then the ease-back curve
+// carrying on briefly before it turns); neighbours keep clear of that much
+// (see row_span), and the bridge's passing speed is capped so the overshoot
+// fits the room it has.
+const OVERSHOOT_S = 0.25;
+// Touchdowns are predicted from the kicks themselves, not the scene tempo:
+// the phase from every kick's scheduled touchdown (struck or not, so a run of
+// misses can't leave the prediction stale) and the period from the median of
+// the last KICK_HISTORY kick intervals within [MIN_KICK_PERIOD_S,
+// MAX_KICK_PERIOD_S] (outliers like fills or gaps are ignored), falling back
+// to the scene's bpm until there are two.
+const KICK_HISTORY = 6;
+const MIN_KICK_PERIOD_S = 0.2;
+const MAX_KICK_PERIOD_S = 1.5;
+// Idle gantries move with inertia: each frame they glide (critically damped,
+// at most IDLE_MAX_CELLS_PER_S) towards a formation spot that moves with the
+// action (see update_idle_goals), settling in ~IDLE_SMOOTH_S, slow enough
+// that small shifts in the spot are smoothed away. A glide that slow trails
+// a moving spot by its velocity x IDLE_SMOOTH_S, so the spot is led by that
+// much along the action's known velocity (itself smoothed over
+// ACTION_VEL_SMOOTH_S) and the gantries cruise on it rather than behind.
+// 12 cells/s keeps pace with a 3-cell step per beat at 175 bpm.
+const IDLE_SMOOTH_S = 0.8;
 const IDLE_MAX_CELLS_PER_S = 12;
+const ACTION_VEL_SMOOTH_S = 0.3;
 
 // Paddle motion, as a height fraction h (0 = up, 1 = on the block):
 //   - Anticipation: over the ANTICIPATE_S before the predicted next slam (the
@@ -99,12 +119,18 @@ const MIN_POUND_S = 0.06;
 const MAX_GANTRIES = 4;
 const GANTRY_COUNT = 4;
 const ROLL_BEATS = 2;
-// Idle gantries wait close to the action, ready for the next strike: bridges
-// FORMATION_ROWS apart centred on it (2 keeps a clear row between paddles),
-// trolleys over the column the next target is predicted to be in. Centring
-// the formation leaves the middle gantries closest to the action, so they
-// tend to get the strikes while the outer ones cover turns either side.
+// Idle gantries move with the action, ready for the next strike: bridges
+// FORMATION_ROWS apart centred on an anchor that slides steadily from target
+// to target (2 keeps a clear row between paddles), trolleys level with it
+// (see action_point).
+// Centring the formation leaves the middle gantries closest to the action, so
+// they tend to get the strikes while the outer ones cover turns either side.
 const FORMATION_ROWS = 2;
+// An outer gantry that keeps striking (running ahead of the rest) hands over
+// to its inner neighbour when that can be done cleanly (see plan_swap), so a
+// free gantry stays on each side of the action. Swap moves may peak at
+// SWAP_CELLS_PER_S: brisk but not violent.
+const SWAP_CELLS_PER_S = 14;
 // Gantry choice (see choose_assignee) favours gantries that can make the
 // next touchdown without peaking above COMFORT_CELLS_PER_S, so strikes don't
 // need lurching moves; the MAX_HURRY_CELLS_PER_S cap is only a fallback.
@@ -135,21 +161,27 @@ const REBASE_DIST = 1000;
 const MIN_VECTOR_CELLS = 1;
 const MAX_VECTOR_CELLS = 3;
 const DEFAULT_VECTOR_ANGLE = Math.PI / 4;   // rad from +col towards +row
-// The vector is drawn as a white arrow from the last struck block to the
-// block the knobs aim at, VECTOR_Y above the ripple height at each end: 0
-// runs it between the cube centres
-// (cubes are centred on the ripple height; it draws over them), so its origin
-// bounces with the struck block's centre and the whole arrow rides the
-// ripple. Its head is ARROW_HEAD long with sides opening ARROW_HEAD_SPREAD
-// either side of the shaft.
-const VECTOR_Y = 0;
-const ARROW_HEAD = 1.0;
-const ARROW_HEAD_SPREAD = Math.PI / 6;
+
+// Strike trail: white lines joining the centres of recently struck blocks in
+// strike order, each point riding its block's bounce (cubes are centred on
+// the ripple height; the trail draws over them) and fading out on the
+// stamp's eased curve over TRAIL_FADE_BEATS from its strike, so the trail is
+// brightest at the latest hit and dissolves towards the oldest. MAX_TRAIL
+// points cover every strike still visible (more than one per beat over
+// TRAIL_FADE_BEATS, so the oldest fade out rather than being overwritten).
+// With TRAIL_CORNERS each step joins all 8 corresponding corners of the two
+// cubes instead of their centres (tesseract-style extrusion along the path);
+// with TRAIL_CUBES each struck cube's own 12 edges are drawn too, so it stays
+// outlined in white (over its usual colour) for as long as its trail lasts.
+const TRAIL_FADE_BEATS = 8;
+const MAX_TRAIL = 24;
+const TRAIL_CORNERS = false;
+const TRAIL_CUBES = true;
 
 // Pounded cubes turn solid in the wireframe colour, then dissolve through the
 // dither to transparent over STAMP_BEATS, leaving a trail along the vector.
 // MAX_STAMPS live at once (a ring), plenty at one strike per kick.
-const STAMP_BEATS = 2;
+const STAMP_BEATS = 8;
 const MAX_STAMPS = 32;
 
 // Target outlines (white wireframes drawn over everything): a new target's
@@ -245,6 +277,7 @@ class Gantry {
         this.tracking = false;
         this.goal_x = start_pos.x;
         this.goal_z = start_pos.z;
+        this.yield_until = -Infinity;   // scene clock s; making way (plan_swap)
         this.set_visible(false);
     }
 
@@ -426,7 +459,7 @@ export class GantryScene extends Scene {
         super(context, 'gantry');
 
         const aspect = window.innerWidth / window.innerHeight;
-        this.frustum_size = 30;
+        this.frustum_size = 25;
         this.cam_orth = new THREE.OrthographicCamera(
             -this.frustum_size * aspect / 2,
             this.frustum_size * aspect / 2,
@@ -523,7 +556,7 @@ export class GantryScene extends Scene {
         this.scroll_x = new EasedFollower(0, FOLLOW_SECS);
         this.scroll_z = new EasedFollower(0, FOLLOW_SECS);
 
-        // Gantry pool. `active` is ordered upstream -> downstream (by row);
+        // Gantry pool. `active_gantries` is ordered upstream -> downstream (by row);
         // `exiting` ones roll off before parking.
         const width = NUM_CUBES_PER_SIDE * this.pitch;
         this.gantries = [];
@@ -531,47 +564,81 @@ export class GantryScene extends Scene {
             this.gantries.push(new Gantry(this, this.world_group, width,
                 new THREE.Vector3(0, 0, 0)));
         }
-        this.active = [];
+        this.active_gantries = [];
         this.exiting = [];
         this.target_count = GANTRY_COUNT;
         for (let k = 0; k < GANTRY_COUNT; k++) {
             const g = this.gantries[k];
             const row = Math.round((k - (GANTRY_COUNT - 1) / 2) * FORMATION_ROWS);
             g.place_at(0, this.cell_z(row));
-            this.activate(g);
-            this.active.push(g);
+            this.activate_gantry(g);
+            this.active_gantries.push(g);
         }
         this.vector_angle = DEFAULT_VECTOR_ANGLE;   // knob 4, bound below
         this.vector_cells = MAX_VECTOR_CELLS;       // knob 3, bound below
         // Global target and last struck block, as [row, col] (struck null
         // until the first strike); `assignee` is the gantry heading for the
         // target (null while none can reach it yet).
-        this.target = [Math.round(this.row_of(this.active[0])), 0];
+        this.target = [Math.round(this.row_of(this.active_gantries[0])), 0];
         this.struck = null;
         this.assignee = null;
         this.last_striker = null;
         this.last_contact_s = null;     // scheduled scene-clock s of the last touchdown
-        this.last_drop_s = MAX_POUND_S; // drop time of the last slam
+        this.last_drop_s = MAX_POUND_S; // drop time of the last kick's slam
+        this.kick_td_s = null;          // scheduled touchdown of the latest kick
+        this.kick_intervals = [];       // recent kick-to-kick intervals, s
+        // Idle formation anchor (see action_point): slides from `from` (row,
+        // col) at t0 to the target at t1 (scene-clock s).
+        this.action = { from_row: 0, from_col: 0, t0: 0, t1: 0 };
+        this.action_vel = [0, 0];   // its velocity smoothed (ACTION_VEL_SMOOTH_S), cells/s
         this.set_target(this.target);
 
-        // Targeting vector (knob 4) and its arrow: shaft plus two head
-        // strokes as three line segments, drawn over everything from the last
-        // struck block (hidden until the first strike).
+        // Targeting vector: knob 3 its length, knob 4 its direction.
         this.bind(CH_EXPAND_X, (n) => { this.vector_cells = n; },
             (norm) => lerp_scalar(MIN_VECTOR_CELLS, MAX_VECTOR_CELLS, norm));
         this.bind(CH_EXPAND_Y, (a) => { this.vector_angle = a; },
             (norm) => norm * 2 * Math.PI);
-        this.arrow_positions = new Float32Array(6 * 3);
-        const arrow_geom = new THREE.BufferGeometry();
-        arrow_geom.setAttribute('position',
-            new THREE.BufferAttribute(this.arrow_positions, 3));
-        this.arrow = new THREE.LineSegments(arrow_geom,
-            new THREE.LineBasicMaterial({ color: 'white', depthTest: false,
+
+        // Strike trail (see TRAIL_FADE_BEATS): a ring of struck cells with
+        // their strike times (beats), drawn as one segment per consecutive
+        // pair with per-vertex RGBA, over everything.
+        this.beats = 0;     // beats elapsed, for trail ages
+        this.trail_row = new Int32Array(MAX_TRAIL);
+        this.trail_col = new Int32Array(MAX_TRAIL);
+        this.trail_beat = new Float32Array(MAX_TRAIL).fill(-Infinity);
+        this.trail_next = 0;
+        // Cube corners (index bits = x, y, z sign) and its 12 edges (corner
+        // pairs differing in one bit); the offsets joined between consecutive
+        // points are the 8 corners, or just the centre.
+        const hx = this.cube_base_size / 2, hy = this.cube_base_height / 2;
+        this.cube_corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+            [(i & 4 ? 1 : -1) * hx, (i & 2 ? 1 : -1) * hy, (i & 1 ? 1 : -1) * hx]);
+        this.cube_edges = [];
+        for (let i = 0; i < 8; i++) {
+            for (const bit of [1, 2, 4]) {
+                if (!(i & bit)) {
+                    this.cube_edges.push([i, i | bit]);
+                }
+            }
+        }
+        this.trail_offsets = TRAIL_CORNERS ? this.cube_corners : [[0, 0, 0]];
+        this.trail_pts = Array.from({ length: MAX_TRAIL }, () => ({ x: 0, y: 0, z: 0, a: 0 }));
+        const max_verts = 2 * ((MAX_TRAIL - 1) * this.trail_offsets.length +
+            (TRAIL_CUBES ? MAX_TRAIL * this.cube_edges.length : 0));
+        this.trail_positions = new Float32Array(max_verts * 3);
+        this.trail_colors = new Float32Array(max_verts * 4).fill(1);
+        const trail_geom = new THREE.BufferGeometry();
+        trail_geom.setAttribute('position',
+            new THREE.BufferAttribute(this.trail_positions, 3));
+        trail_geom.setAttribute('color',
+            new THREE.BufferAttribute(this.trail_colors, 4));
+        trail_geom.setDrawRange(0, 0);
+        this.trail = new THREE.LineSegments(trail_geom,
+            new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false,
                 transparent: true }));
-        this.arrow.renderOrder = 10;
-        this.arrow.frustumCulled = false;
-        this.arrow.visible = false;
-        this.world_group.add(this.arrow);
+        this.trail.renderOrder = 10;
+        this.trail.frustumCulled = false;
+        this.world_group.add(this.trail);
 
         const isom_angle = Math.asin(1 / Math.sqrt(3));
         this.base_group.rotation.x = isom_angle;
@@ -596,9 +663,9 @@ export class GantryScene extends Scene {
 
         // The target tracks the knob only while its gantry is waiting parked
         // on it; once a gantry sets off for a target that target holds (the
-        // arrow keeps tracking the knob, and the next target takes its
-        // direction at the strike), so knob turns never yank a moving gantry
-        // around. If no gantry could take the target yet, keep trying.
+        // next target takes the knobs' vector at the strike), so knob turns
+        // never yank a moving gantry around. If no gantry could take the
+        // target yet, keep trying.
         const waiting = this.assignee === null ||
             (this.assignee.at_rest_on_target() && !this.assignee.striking);
         if (this.struck !== null && waiting) {
@@ -665,9 +732,9 @@ export class GantryScene extends Scene {
                 g_a.coast_secs() > SLAM_GRACE_S) {
             g_a.move_to(this.cell_x(this.target[1]), this.cell_z(this.target[0]));
         }
-        this.update_idle_goals();
+        this.update_idle_goals(dt);
         this.update_paddle_goals();
-        for (const g of this.active) {
+        for (const g of this.active_gantries) {
             g.anim_frame(dt);
         }
         for (const g of this.exiting) {
@@ -691,7 +758,8 @@ export class GantryScene extends Scene {
             s.anim_frame(dt, this.cam_orth);
         }
 
-        this.update_arrow(elapsed_time);
+        this.beats += dt * beats_per_sec;
+        this.update_trail(elapsed_time);
     }
 
     // Ripple height at logical position pos (y ignored): the sum of every
@@ -753,34 +821,66 @@ export class GantryScene extends Scene {
         }
     }
 
-    // Redraw the targeting arrow from the centre of the last struck block to
-    // the centre of the block the knobs aim at right now (their vector
-    // snapped to a cell; usually the target, but while a gantry is travelling
-    // to a locked target it shows where the knobs point instead); both ends
-    // ride the ripple height (see VECTOR_Y).
-    update_arrow(elapsed_time) {
-        if (this.struck === null) {
-            return;
-        }
-        this.arrow.visible = true;
-        const o_x = this.cell_x(this.struck[1]);
-        const o_z = this.cell_z(this.struck[0]);
-        const [aim_row, aim_col] = this.aim_from(this.struck);
-        const tip_x = this.cell_x(aim_col);
-        const tip_z = this.cell_z(aim_row);
+    // Record a strike at (row, col) on the trail.
+    add_trail_point(row, col) {
+        const k = this.trail_next;
+        this.trail_next = (k + 1) % MAX_TRAIL;
+        this.trail_row[k] = row;
+        this.trail_col[k] = col;
+        this.trail_beat[k] = this.beats;
+    }
+
+    // Append a trail line from point a + offset oa to point b + offset ob,
+    // each end with its point's alpha (written straight into the buffers).
+    trail_line(a, oa, b, ob) {
+        const p = this.trail_positions, c = this.trail_colors, n = this.trail_lines++;
+        p[6 * n] = a.x + oa[0];
+        p[6 * n + 1] = a.y + oa[1];
+        p[6 * n + 2] = a.z + oa[2];
+        p[6 * n + 3] = b.x + ob[0];
+        p[6 * n + 4] = b.y + ob[1];
+        p[6 * n + 5] = b.z + ob[2];
+        c[8 * n + 3] = a.a;
+        c[8 * n + 7] = b.a;
+    }
+
+    // Rebuild the trail lines, oldest to newest: each live point at its
+    // block's centre and current ripple height with alpha eased down by age;
+    // its cube's edges (TRAIL_CUBES), and lines from the previous live point
+    // (one per corner, or centre to centre).
+    update_trail(elapsed_time) {
         const pos = this.cube_pos;
-        const o_y = VECTOR_Y + this.wave_y(pos.set(o_x, 0, o_z), elapsed_time);
-        const tip_y = VECTOR_Y + this.wave_y(pos.set(tip_x, 0, tip_z), elapsed_time);
-        const back = Math.atan2(o_z - tip_z, o_x - tip_x);
-        const p = this.arrow_positions;
-        p.set([o_x, o_y, o_z, tip_x, tip_y, tip_z]);
-        for (const [k, side] of [[2, 1], [4, -1]]) {
-            const h = back + side * ARROW_HEAD_SPREAD;
-            p.set([tip_x, tip_y, tip_z,
-                tip_x + ARROW_HEAD * Math.cos(h), tip_y,
-                tip_z + ARROW_HEAD * Math.sin(h)], k * 3);
+        this.trail_lines = 0;
+        let prev = null;
+        for (let i = 0; i < MAX_TRAIL; i++) {
+            const k = (this.trail_next + i) % MAX_TRAIL;
+            const age = this.beats - this.trail_beat[k];
+            if (age >= TRAIL_FADE_BEATS) {
+                prev = null;
+                continue;
+            }
+            const pt = this.trail_pts[k];
+            pos.set(this.cell_x(this.trail_col[k]), 0, this.cell_z(this.trail_row[k]));
+            pt.x = pos.x;
+            pt.y = this.wave_y(pos, elapsed_time);
+            pt.z = pos.z;
+            pt.a = ease(1 - age / TRAIL_FADE_BEATS);
+            if (TRAIL_CUBES) {
+                for (const [c0, c1] of this.cube_edges) {
+                    this.trail_line(pt, this.cube_corners[c0], pt, this.cube_corners[c1]);
+                }
+            }
+            if (prev !== null) {
+                for (const o of this.trail_offsets) {
+                    this.trail_line(prev, o, pt, o);
+                }
+            }
+            prev = pt;
         }
-        this.arrow.geometry.attributes.position.needsUpdate = true;
+        const geom = this.trail.geometry;
+        geom.setDrawRange(0, 2 * this.trail_lines);
+        geom.attributes.position.needsUpdate = true;
+        geom.attributes.color.needsUpdate = true;
     }
 
     // Every ROLL_BEATS, apply one step of any gantry-count change: roll a
@@ -792,14 +892,14 @@ export class GantryScene extends Scene {
             return;
         }
         const parked = this.gantries.find((g) => g.state == 'parked');
-        if (this.active.length < this.target_count && parked !== undefined) {
+        if (this.active_gantries.length < this.target_count && parked !== undefined) {
             // (none parked while every gantry is still rolling out: retry
             // next time)
             parked.place_at(this.cell_x(this.target[1]), this.cell_z(this.win_row));
-            this.activate(parked);
-            this.active.unshift(parked);
-        } else if (this.active.length > this.target_count) {
-            const g = this.active.pop();
+            this.activate_gantry(parked);
+            this.active_gantries.unshift(parked);
+        } else if (this.active_gantries.length > this.target_count) {
+            const g = this.active_gantries.pop();
             g.state = 'exiting';
             g.tracking = false;
             g.paddle_goal = 0;
@@ -820,6 +920,7 @@ export class GantryScene extends Scene {
         }
         const delay = this.get_beat_delay(t);
         const drop_secs = clamp(delay, MIN_POUND_S, MAX_POUND_S);
+        this.record_kick(this.clock.getElapsedTime() + Math.max(delay, drop_secs), drop_secs);
         setTimeout(() => {
             const g = this.assignee;
             if (g === null || g.striking) {
@@ -830,15 +931,14 @@ export class GantryScene extends Scene {
             const late_s = Math.abs(g.secs_to_pass() - drop_secs);
             if (g.at_rest_on_target() || late_s <= STRIKE_TOLERANCE_S ||
                     (late_s <= RETIME_MAX_S && g.retime_pass(drop_secs))) {
-                this.last_drop_s = drop_secs;
                 g.start_pound(drop_secs);
             }
         }, Math.max(0, delay - drop_secs) * 1000);
     }
 
-    // Paddle touchdown: ripple, sparks and stamp at the struck block, which
-    // becomes the arrow's origin; the next target is chosen straight away so
-    // another gantry can start for it while this one lifts.
+    // Paddle touchdown: ripple, sparks, stamp and a trail point at the struck
+    // block; the next target is chosen straight away so another gantry can
+    // start for it while this one lifts.
     on_contact(g) {
         this.last_striker = g;
         // The assignee may be passing over its block rather than parked on
@@ -850,6 +950,7 @@ export class GantryScene extends Scene {
         this.add_excitation(new THREE.Vector3(pos.x, 0, pos.z));
         this.stamp_at(pos);
         this.struck = [Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch)];
+        this.add_trail_point(...this.struck);
         this.last_contact_s = g.touchdown_s;
         this.set_target(this.aim_from(this.struck));
     }
@@ -869,11 +970,22 @@ export class GantryScene extends Scene {
         if (k_cur < 0 || this.outline_row[k_cur] != row || this.outline_col[k_cur] != col) {
             this.outline_target(row, col);
         }
+        if (this.target === undefined || row != this.target[0] || col != this.target[1]) {
+            // The idle anchor slides on from wherever it is now to the new
+            // target, arriving at its predicted touchdown.
+            const now = this.clock.getElapsedTime();
+            const [from_row, from_col] = this.target === undefined ? [row, col] :
+                this.action_point(now);
+            const budget = this.travel_budget_secs();
+            const span = Number.isFinite(budget) ? budget + TRAVEL_SAFETY_S : this.beat_period_s();
+            this.action = { from_row, from_col, t0: now, t1: now + span };
+        }
         this.target = [row, col];
         const keep = !reselect && this.assignee !== null &&
             this.can_reach_row(this.assignee, row);
         if (!keep) {
-            this.assignee = this.choose_assignee(row, col);
+            const best = this.choose_assignee(row, col);
+            this.assignee = (reselect && this.plan_swap(best, row, col)) || best;
         }
         if (this.assignee !== null) {
             this.send_assignee();
@@ -884,8 +996,70 @@ export class GantryScene extends Scene {
 
     // Whether g can head for `row` without crossing a neighbour's bridge.
     can_reach_row(g, row) {
-        const [lo, hi] = this.row_limits(this.active.indexOf(g));
+        const [lo, hi] = this.row_limits(this.active_gantries.indexOf(g));
         return row >= lo && row <= hi;
+    }
+
+    // If `best` (chosen for cell (row, col)) is an outer gantry that also
+    // struck last, hand the target to its inner neighbour instead, so that a
+    // free gantry stays on each side of the action; returns that neighbour,
+    // or null if the swap can't be done cleanly. The outer gantry yields
+    // outward over the same time the inner one takes to reach the target, to
+    // a row at least MIN_ROW_GAP beyond it and at least as far as the inner
+    // one travels: both moves start together, so the gap between their
+    // bridges only grows. Only when both moves fit the beat at
+    // SWAP_CELLS_PER_S (once swapped, the inner one keeps the run), the outer
+    // one isn't moving inward, and both have room.
+    plan_swap(best, row, col) {
+        const n = this.active_gantries.length;
+        const centre = (n - 1) / 2;
+        const k = this.active_gantries.indexOf(best);
+        if (n < 3 || best === null || best !== this.last_striker ||
+                Math.abs(k - centre) <= 0.5) {
+            return null;
+        }
+        const dir = k > centre ? 1 : -1;    // outward, in rows
+        const inner = this.active_gantries[k - dir];
+        if (inner.striking || best.bridge.vel * dir < 0) {
+            return null;
+        }
+        const x = this.cell_x(col);
+        const z = this.cell_z(row);
+        const budget = this.travel_budget_secs();
+        const swap_secs = (cells) => 1.5 * cells / SWAP_CELLS_PER_S;
+        if (!Number.isFinite(budget) ||
+                swap_secs(inner.fastest_secs_to(x, z) * MAX_HURRY_CELLS_PER_S / 1.5) > budget) {
+            return null;
+        }
+        // The inner gantry's own far side must leave it room for the row.
+        const far = this.active_gantries[k - 2 * dir];
+        if (far !== undefined) {
+            const span = this.row_span(far);
+            if (dir > 0 ? row < span[1] + MIN_ROW_GAP : row > span[0] - MIN_ROW_GAP) {
+                return null;
+            }
+        }
+        const inner_travel = Math.max(0, (row - this.row_of(inner)) * dir);
+        const yield_row = this.row_of(best) + dir * Math.max(inner_travel,
+            (row - this.row_of(best)) * dir + MIN_ROW_GAP);
+        // It must get clear at least as fast as the inner one closes in.
+        if (swap_secs(Math.abs(yield_row - this.row_of(best))) > budget) {
+            return null;
+        }
+        const beyond = this.active_gantries[k + dir];
+        if (beyond !== undefined) {
+            const span = this.row_span(beyond);
+            if (dir > 0 ? yield_row > span[0] - MIN_ROW_GAP : yield_row < span[1] + MIN_ROW_GAP) {
+                return null;
+            }
+        }
+        best.tracking = false;
+        best.yield_until = this.clock.getElapsedTime() + budget;
+        // Across the columns it just eases to a stop from its current
+        // momentum (a smooth stop from v over the budget covers v * budget / 2).
+        best.move_to(best.mover.position.x + best.trolley.vel * budget / 2,
+            this.cell_z(yield_row), budget);
+        return inner;
     }
 
     // The gantry to strike cell (row, col), among those that can reach its
@@ -898,7 +1072,7 @@ export class GantryScene extends Scene {
         const z = this.cell_z(row);
         const budget = this.travel_budget_secs();
         let best = null, best_key = null;
-        for (const g of this.active) {
+        for (const g of this.active_gantries) {
             if (!this.can_reach_row(g, row)) {
                 continue;
             }
@@ -914,42 +1088,75 @@ export class GantryScene extends Scene {
         return best;
     }
 
+    // Note a kick whose slam (drop_secs long) would touch down at td_s (see
+    // KICK_HISTORY).
+    record_kick(td_s, drop_secs) {
+        if (this.kick_td_s !== null) {
+            const interval = td_s - this.kick_td_s;
+            if (interval >= MIN_KICK_PERIOD_S && interval <= MAX_KICK_PERIOD_S) {
+                this.kick_intervals.push(interval);
+                if (this.kick_intervals.length > KICK_HISTORY) {
+                    this.kick_intervals.shift();
+                }
+            }
+        }
+        this.kick_td_s = td_s;
+        this.last_drop_s = drop_secs;
+    }
+
+    // Kick period (s): median of recent intervals, or the scene's beat.
+    beat_period_s() {
+        const n = this.kick_intervals.length;
+        if (n < 2) {
+            return 60 / this.get_local_bpm();
+        }
+        const sorted = [...this.kick_intervals].sort((a, b) => a - b);
+        return sorted[n >> 1];
+    }
+
+    // The first predicted touchdown (scene-clock s) at or after t_min: the
+    // latest kick's touchdown plus whole periods. Null before any kick.
+    next_touchdown_s(t_min) {
+        if (this.kick_td_s === null) {
+            return null;
+        }
+        const period = this.beat_period_s();
+        return this.kick_td_s + Math.max(0, Math.ceil((t_min - this.kick_td_s) / period)) * period;
+    }
+
     // Seconds the assignee has to reach the target: until TRAVEL_SAFETY_S
-    // before the next scheduled touchdown (whole beats after the last one,
-    // at least MIN_TRAVEL_S away). Unlimited before the first strike.
+    // before the next predicted touchdown at least MIN_TRAVEL_S away.
+    // Unlimited before the first kick.
     travel_budget_secs() {
-        if (this.last_contact_s === null) {
-            return Infinity;
-        }
-        const beat_s = 60 / this.get_local_bpm();
-        let budget = this.last_contact_s + beat_s - TRAVEL_SAFETY_S -
-            this.clock.getElapsedTime();
-        while (budget < MIN_TRAVEL_S) {
-            budget += beat_s;
-        }
-        return budget;
+        const now = this.clock.getElapsedTime();
+        const td = this.next_touchdown_s(now + MIN_TRAVEL_S + TRAVEL_SAFETY_S);
+        return td === null ? Infinity : td - TRAVEL_SAFETY_S - now;
     }
 
     // Send the assignee to the target (leaving any idle glide with its
-    // momentum). Before the first strike it travels there and stops; after
-    // that it passes over it at the predicted touchdown, still moving (see
+    // momentum). Before the first kick it travels there and stops; after that
+    // it passes over it at the predicted touchdown, still moving (see
     // STRIKE_TOLERANCE_S).
     send_assignee() {
         const g = this.assignee;
         g.tracking = false;
         const x = this.cell_x(this.target[1]);
         const z = this.cell_z(this.target[0]);
-        if (this.last_contact_s === null) {
+        if (this.kick_td_s === null) {
             g.move_to(x, z);
             return;
         }
-        const beat_s = 60 / this.get_local_bpm();
+        // It knows only the target, so it passes over it keeping its own
+        // momentum: the direction it approaches from, at its average speed,
+        // with the bridge's share capped so its overshoot stays in its rows.
         const arrive_secs = this.travel_budget_secs() + TRAVEL_SAFETY_S;
-        const [next_row, next_col] = this.aim_from(this.target);
-        const span_s = arrive_secs + beat_s;
+        const [lo, hi] = this.row_limits(this.active_gantries.indexOf(g));
+        const row = this.target[0];
+        const vz_limit = (rows) => Math.max(0, rows) * this.pitch / OVERSHOOT_S;
         g.pass_through(x, z, arrive_secs, {
-            x: (this.cell_x(next_col) - g.mover.position.x) / span_s,
-            z: (this.cell_z(next_row) - g.mover.position.z) / span_s,
+            x: (x - g.mover.position.x) / arrive_secs,
+            z: clamp((z - g.mover.position.z) / arrive_secs,
+                -vz_limit(row - lo), vz_limit(hi - row)),
         });
     }
 
@@ -959,51 +1166,67 @@ export class GantryScene extends Scene {
     update_paddle_goals() {
         const now = this.clock.getElapsedTime();
         let anticipation = 0;
-        if (this.last_contact_s !== null) {
-            // Next predicted slam start (still counting it until
-            // SLAM_GRACE_S after it was due), and when to be at READY_H.
-            const beat_s = 60 / this.get_local_bpm();
-            const first_slam = this.last_contact_s + beat_s - this.last_drop_s;
-            const beats_on = Math.max(0, Math.ceil(
-                (now - SLAM_GRACE_S - first_slam) / beat_s));
-            const to_ready = first_slam + beats_on * beat_s - PADDLE_SMOOTH_S - now;
+        // Next predicted slam start (still counting it until SLAM_GRACE_S
+        // after it was due), and when to be at READY_H.
+        const td = this.next_touchdown_s(now - SLAM_GRACE_S + this.last_drop_s);
+        if (td !== null) {
+            const to_ready = td - this.last_drop_s - PADDLE_SMOOTH_S - now;
             anticipation = ease(clamp(1 - to_ready / ANTICIPATE_S, 0, 1));
         }
-        for (const g of this.active) {
+        for (const g of this.active_gantries) {
             const ready = g === this.assignee;
             g.paddle_goal = ready ? READY_H * anticipation : 0;
         }
     }
 
-    // Set every idle gantry's glide goal for this frame. The anticipated
-    // action point slides from the target towards the next predicted target
-    // over each beat (so it moves continuously through strikes, when the
-    // target jumps ahead by exactly the vector as the slide restarts). Idle
-    // bridges sit FORMATION_ROWS apart centred on it by bridge order (so the
-    // middle gantries flank the action and the outer ones cover either side),
-    // clamped clear of their neighbours; idle trolleys follow the column of
-    // the target after next.
-    update_idle_goals() {
-        const beat_s = 60 / this.get_local_bpm();
-        const phase = this.last_contact_s === null ? 0 : clamp(
-            (this.clock.getElapsedTime() - this.last_contact_s) / beat_s, 0, 1);
-        const d_row = Math.round(this.vector_cells * Math.sin(this.vector_angle));
-        const d_col = Math.round(this.vector_cells * Math.cos(this.vector_angle));
-        // The glide trails a steadily moving goal by its velocity x
-        // IDLE_SMOOTH_S, so aim that far ahead along the action's motion
-        // (the vector per beat) to sit on the spot rather than behind it.
-        const lead = IDLE_SMOOTH_S / beat_s;
-        const action_row = this.target[0] + d_row * (phase + lead);
-        const ready_x = this.cell_x(this.target[1] + d_col * (1 + phase + lead));
-        const centre = (this.active.length - 1) / 2;
-        for (let k = 0; k < this.active.length; k++) {
-            const g = this.active[k];
-            if (g === this.assignee) {
+    // The idle formation's anchor (fractional [row, col]) at scene time t: it
+    // slides at constant speed from where it was when the target last
+    // changed to that target, arriving at the predicted touchdown, then rests
+    // there. Built from targets only (no knob prediction): with steady
+    // strikes it moves continuously with the action, and with no new target
+    // it waits on the current one, ready to head anywhere.
+    action_point(t) {
+        const a = this.action;
+        const u = a.t1 > a.t0 ? clamp((t - a.t0) / (a.t1 - a.t0), 0, 1) : 1;
+        return [a.from_row + (this.target[0] - a.from_row) * u,
+            a.from_col + (this.target[1] - a.from_col) * u];
+    }
+
+    // The anchor's velocity at scene time t, [rows/s, cols/s] (0 once it
+    // has arrived).
+    action_velocity(t) {
+        const a = this.action;
+        if (!(t >= a.t0 && t < a.t1)) {
+            return [0, 0];
+        }
+        const span = a.t1 - a.t0;
+        return [(this.target[0] - a.from_row) / span, (this.target[1] - a.from_col) / span];
+    }
+
+    // Set every idle gantry's glide goal for this frame: bridges
+    // FORMATION_ROWS apart centred on the anchor's row by bridge order (so the
+    // middle gantries flank it and the outer ones cover either side), clamped
+    // clear of their neighbours; trolleys level with it. Both lead the anchor
+    // along its smoothed velocity (see IDLE_SMOOTH_S).
+    update_idle_goals(dt) {
+        const now = this.clock.getElapsedTime();
+        const [action_row, action_col] = this.action_point(now);
+        const [v_row, v_col] = this.action_velocity(now);
+        const k = 1 - Math.exp(-dt / ACTION_VEL_SMOOTH_S);
+        const av = this.action_vel;
+        av[0] += (v_row - av[0]) * k;
+        av[1] += (v_col - av[1]) * k;
+        const lead_row = action_row + av[0] * IDLE_SMOOTH_S;
+        const ready_x = this.cell_x(action_col + av[1] * IDLE_SMOOTH_S);
+        const centre = (this.active_gantries.length - 1) / 2;
+        for (let i = 0; i < this.active_gantries.length; i++) {
+            const g = this.active_gantries[i];
+            if (g === this.assignee || g.yield_until > now) {
                 continue;
             }
-            const [lo, hi] = this.row_limits(k);
+            const [lo, hi] = this.row_limits(i);
             const home = lo <= hi ?
-                clamp(action_row + (k - centre) * FORMATION_ROWS, lo, hi) :
+                clamp(lead_row + (i - centre) * FORMATION_ROWS, lo, hi) :
                 this.row_of(g);
             g.tracking = true;
             g.goal_x = ready_x;
@@ -1012,7 +1235,8 @@ export class GantryScene extends Scene {
         }
     }
 
-    activate(g) {
+    // Put gantry g to work.
+    activate_gantry(g) {
         g.state = 'active';
         g.striking = false;
         g.pound_phase = 'free';
@@ -1040,12 +1264,12 @@ export class GantryScene extends Scene {
     }
 
     // [min, max] rows g may occupy on its current move: from where it is to
-    // its target, plus how far a pass-through can coast beyond the target
-    // before it is redirected or eased back (SLAM_GRACE_S plus a frame).
+    // its target, plus how far a pass-through can overshoot the target
+    // (OVERSHOOT_S at its passing speed).
     row_span(g) {
         const now = this.row_of(g);
         const target = this.target_row_of(g);
-        const coast = g.bridge.to_vel * (SLAM_GRACE_S + 1 / 30) / this.pitch;
+        const coast = g.bridge.to_vel * OVERSHOOT_S / this.pitch;
         return [Math.min(now, target, target + coast), Math.max(now, target, target + coast)];
     }
 
@@ -1054,8 +1278,8 @@ export class GantryScene extends Scene {
     // these limits bridges never cross, however many gantries are moving.
     // Empty (lo > hi) if squeezed shut.
     row_limits(k) {
-        const up = this.active[k - 1];
-        const down = this.active[k + 1];
+        const up = this.active_gantries[k - 1];
+        const down = this.active_gantries[k + 1];
         const lo = up ? Math.ceil(this.row_span(up)[1] + MIN_ROW_GAP) : -Infinity;
         const hi = down ? Math.floor(this.row_span(down)[0] - MIN_ROW_GAP) : Infinity;
         return [lo, hi];
@@ -1088,9 +1312,15 @@ export class GantryScene extends Scene {
             this.stamp_col[k] -= d_col;
         }
         this.target = [this.target[0] - d_row, this.target[1] - d_col];
+        this.action.from_row -= d_row;
+        this.action.from_col -= d_col;
         for (let k = 0; k < MAX_OUTLINES; k++) {
             this.outline_row[k] -= d_row;
             this.outline_col[k] -= d_col;
+        }
+        for (let k = 0; k < MAX_TRAIL; k++) {
+            this.trail_row[k] -= d_row;
+            this.trail_col[k] -= d_col;
         }
         if (this.struck !== null) {
             this.struck = [this.struck[0] - d_row, this.struck[1] - d_col];

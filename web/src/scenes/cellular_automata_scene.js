@@ -316,10 +316,8 @@ export class CellularAutomataScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        if (this.active) {
-            // Land the seed on the audible beat (events arrive early).
-            setTimeout(() => this.spawn_seed(), this.get_beat_delay(t) * 1000);
-        }
+        // Land the seed on the audible beat (events arrive early).
+        setTimeout(() => this.spawn_seed(), this.get_beat_delay(t) * 1000);
     }
 
     handle_sync(t, bpm, beat) {

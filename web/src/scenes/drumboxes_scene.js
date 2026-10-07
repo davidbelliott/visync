@@ -39,6 +39,11 @@ const POINT_LIGHT_INTENSITY = 30;
 const POINT_LIGHT_HEIGHT = 40;      // world units above the drum plane
 const DIRECTIONAL_INTENSITY = 0.3;
 
+// A gap this long (s) between frames means the scene was off screen; strikes
+// queued before it froze with the scene and are dropped rather than all
+// landing on the first frames back.
+const HIDDEN_GAP_S = 0.5;
+
 // Scratch objects reused by per-frame instance updates (no per-frame alloc).
 const SCRATCH_POS = new THREE.Vector3();
 const SCRATCH_COLOR = new THREE.Color();
@@ -321,6 +326,7 @@ export class DrumboxScene extends Scene {
         this.base_group.add(this.directional_light);
 
         this.color_hue = 0.0;
+        this.last_frame_ms = null;      // performance.now() of the last frame
 
         // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
         this.bind_zoom();
@@ -354,6 +360,13 @@ export class DrumboxScene extends Scene {
         if (!this.initialized) {
             return;
         }
+        const now_ms = performance.now();
+        if (this.last_frame_ms !== null && now_ms - this.last_frame_ms > HIDDEN_GAP_S * 1000) {
+            for (const paddle_group of this.paddle_groups) {
+                paddle_group.impacts.length = 0;
+            }
+        }
+        this.last_frame_ms = now_ms;
 
         this.drums_group.position.y += DRIFT_VEL * dt;
         const max_offset = 2 * this.spacing * Math.sqrt(2);
@@ -410,21 +423,10 @@ export class DrumboxScene extends Scene {
         }
     }
 
-    activate() {
-        super.activate();
-        // Strikes that were in flight when the scene was last hidden froze
-        // with it; drop them so they don't all land on the first frame back.
-        for (const paddle_group of this.paddle_groups) {
-            paddle_group.impacts.length = 0;
-        }
-    }
-
     handle_beat(t, channel) {
-        if (this.active) {
-            const time_till_impact = this.get_beat_delay(t);
-            for (const paddle_group of this.paddle_groups) {
-                paddle_group.impacts.push([time_till_impact, channel]);
-            }
+        const time_till_impact = this.get_beat_delay(t);
+        for (const paddle_group of this.paddle_groups) {
+            paddle_group.impacts.push([time_till_impact, channel]);
         }
     }
 

@@ -12,7 +12,6 @@ import { Tesseract } from './src/highdim.js';
 import { Scene } from './src/scenes/scene.js';
 import { GantryScene } from './src/scenes/gantry_scene.js';
 import { HexagonScene } from './src/scenes/hexagon_scene.js';
-import { SlideScene } from './src/scenes/slide_scene.js';
 import { SpectrumScene } from './src/scenes/spectrum_scene.js';
 import { IntroScene } from './src/scenes/intro_scene.js';
 import { IceCreamScene } from './src/scenes/ice_cream_scene.js';
@@ -33,7 +32,6 @@ import { HelixScene } from './src/scenes/helix_scene.js';
 import { TriangularPrismScene } from './src/scenes/triangular_prism_scene.js';
 import { SphereGridScene } from './src/scenes/sphere_grid_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
-import { TextScene } from './src/scenes/text_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
 import { BuildingScene } from './src/scenes/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field.js';
@@ -437,8 +435,6 @@ class GraphicsContext {
             [24, new DebugScene(this)],
             [25, new PoseScene(this)],
 
-            //[20, new SlideScene(this, ["img/jungle-background.jpg"])],
-            //[21, new TextScene(this)],
             //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
         ]);
 
@@ -631,10 +627,8 @@ class GraphicsContext {
         });
     }
 
-    // Put scene_idx in the given slot, leaving every other slot untouched.
-    // Deactivates whatever scene is leaving the slot (unless it's still
-    // shown in another slot) and activates the new one; updates the fg/bg
-    // HUD labels if this is slot 0 or 1, the only slots with one.
+    // Put scene_idx in the given slot, leaving every other slot untouched,
+    // and update the HUD's scene list.
     set_slot(slot, scene_idx) {
         if (scene_idx == 0) {
             scene_idx = undefined;
@@ -642,17 +636,7 @@ class GraphicsContext {
             return;
         }
 
-        const old_idx = this.shown_scenes[slot];
         this.shown_scenes[slot] = scene_idx;
-
-        if (old_idx !== undefined && !this.shown_scenes.includes(old_idx)) {
-            this.scenes.get(old_idx).deactivate();
-        }
-        const new_scene = this.scenes.get(scene_idx);
-        if (new_scene !== undefined && !this.shown_scenes.includes(scene_idx)) {
-            new_scene.activate();
-        }
-
         this.update_scene_hud();
     }
 

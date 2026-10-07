@@ -25,7 +25,6 @@ export class Scene extends THREE.Scene {
         this.min_bpm = max_bpm / 2;
         this.num_states = num_states;
         this.cur_state_idx = 0;
-        this.active = false;
         this.div_change_hysteresis_bpm = 5;
         this.div_change_debounce_cnt = 4;
         this.div_change_debounce = 0;
@@ -169,14 +168,6 @@ export class Scene extends THREE.Scene {
 
     render(renderer, underlying_buffer) {
         renderer.render(this, this.camera);
-    }
-
-    activate() {
-        this.active = true;
-    }
-
-    deactivate() {
-        this.active = false;
     }
 
     handle_resize(width, height) {

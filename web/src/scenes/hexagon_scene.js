@@ -197,8 +197,11 @@ export class HexagonScene extends Scene {
                 transparent: true,
             });
             //material = new THREE.MeshBasicMaterial({ color: "red" });
-            this.plane = this.create_plane(this.cam_orth, this.background_material);
-            this.plane.position.z = -900;
+            // Full-screen quad (see hex_shader.vert): placed in clip space by
+            // the shader, so it is never culled or resized with the camera.
+            this.plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2),
+                this.background_material);
+            this.plane.frustumCulled = false;
             this.add(this.plane);
         });
 
@@ -230,14 +233,6 @@ export class HexagonScene extends Scene {
 
         // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
         this.bind_zoom();
-    }
-
-    create_plane(camera, material) {
-        const geometry = new THREE.PlaneGeometry(camera.right - camera.left,
-            camera.top - camera.bottom);
-        const plane = new THREE.Mesh(geometry, material);
-        plane.position.z = -100;   // position in front of other objects
-        return plane;
     }
 
     anim_frame(dt) {
@@ -277,11 +272,6 @@ export class HexagonScene extends Scene {
         if (this.uniforms != null) {
             this.uniforms.resolution.value.set(width, height);
             this.uniforms.pixel_ratio.value = window.devicePixelRatio;
-        }
-        if (this.plane != null) {
-            this.remove(this.plane);
-            this.plane = this.create_plane(this.cam_orth, this.background_material);
-            this.add(this.plane);
         }
     }
 }

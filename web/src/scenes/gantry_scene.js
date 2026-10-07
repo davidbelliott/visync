@@ -217,7 +217,7 @@ export class GantryScene extends Scene {
         this.max_num_sparks = 64;
         this.cur_spark_idx = 0;
         for (let i = 0; i < this.max_num_sparks; i++) {
-            const s = new Spark(0.3, "white", [0, 1]);
+            const s = new Spark(0.2, "white", [0, 1]);
             s.active = false;
             this.cubes_group.add(s);
             this.sparks.push(s);
@@ -423,7 +423,7 @@ export class GantryScene extends Scene {
                 Math.random() * 0.5,
                 Math.random() - 0.5);*/
             //vel.normalize();
-            const vel = new THREE.Vector3(1, 0.5, 0);
+            const vel = new THREE.Vector3(0.5, 0.5, 0);
 
             vel.applyEuler(new THREE.Euler(0, Math.PI / 8 * i, 0));
             vel.multiplyScalar(avg_vel);

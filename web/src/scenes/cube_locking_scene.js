@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_X, CH_ROT_Y, knob_to_rate } from '../controller_map.js';
+import {
+    CH_ROT_X, CH_ROT_Y, CH_EXPAND_X, CH_EXPAND_Y, knob_to_rate
+} from '../controller_map.js';
+import { InstancedGeometryCollection } from '../instanced_geom.js';
 import {
     ease,
+    lerp_scalar,
     update_persp_camera_aspect,
     update_orth_camera_aspect,
     rand_int,
@@ -13,6 +17,7 @@ import {
     make_wireframe_cylinder,
     create_instanced_cube,
     make_wireframe_circle,
+    create_instanced_cube_templates,
     ShaderLoader,
     Spark,
     ObjectPool,
@@ -22,6 +27,68 @@ import {
 // Nominal free-rotation rate in rad/s; knob_to_rate scales it to [-2, 2] x
 // this. Chosen to match the old quarter-turn-per-8-beats pace at 120 bpm.
 const NOM_ROT_RATE = 0.4;
+
+// Tube geometry resolution: rings along the path x quads around each ring.
+// A ring is TUBE_RADIAL quads = TUBE_RADIAL * 6 indices; draw ranges are
+// snapped to whole quads (6 indices) so segment ends never split a triangle.
+const TUBE_RINGS = 1024;
+const TUBE_RADIAL = 32;
+const IDX_PER_RING = TUBE_RADIAL * 6;
+// Nominal speed of the moving tube segments, in rings/s; knob 4 scales it
+// over [-1, 1] x this (centred = stopped). Matches the old fixed 360 indices
+// per frame at 60 fps.
+const NOM_TUBE_SPEED = 360 * 60 / IDX_PER_RING;
+// Visible segment length in rings: the scene's original 9000 indices by
+// default; knob 3 sweeps linearly from TUBE_MIN_LEN to TUBE_MAX_LEN. 16 rings
+// (~4.6 units, about one tube diameter) keeps the shortest segment a clearly
+// visible stub; 768 rings is three quarters of the loop: long, but with a
+// gap left so the movement still reads.
+const TUBE_DEFAULT_LEN = 9000 / IDX_PER_RING;
+const TUBE_MIN_LEN = 16;
+const TUBE_MAX_LEN = 768;
+// The three tubes' heads start this many rings apart so they never move in
+// lockstep (the original 39000-index offsets).
+const TUBE_HEAD_SPACING = 39000 / IDX_PER_RING;
+
+// Kick outline tracers (as in the vector field scene): a faded copy of the
+// expanding outline is dropped every OUTLINE_TRACER_INTERVAL beats and fades
+// out over OUTLINE_TRACER_LIFETIME beats, leaving a short echo trail behind
+// the expansion. Beat-relative so the trail spacing scales with tempo.
+const OUTLINE_TRACER_INTERVAL = 1 / 32;
+const OUTLINE_TRACER_LIFETIME = 1 / 4;
+const OUTLINE_TRACER_COUNT =
+    Math.ceil(OUTLINE_TRACER_LIFETIME / OUTLINE_TRACER_INTERVAL) + 1;
+// Fill point light for the underside, which the key (directional, from +y)
+// and the existing point light (above, behind) never reach; both rotate with
+// the assembly, so the dark side is always its -y faces. Half the existing
+// point light's intensity with the same falloff, placed below and slightly
+// off-axis so side faces catch it at different angles and keep their form.
+const FILL_LIGHT_INTENSITY = 25;
+const FILL_LIGHT_POS = new THREE.Vector3(10, -40, 20);
+
+// Outline cube edge length (scene units) and its peak opacity on the kick.
+const OUTLINE_SIZE = 24;
+const OUTLINE_OPACITY = 0.8;
+const WHITE = new THREE.Color('white');
+const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
+
+// A length or position along a tube in rings -> draw-range indices, snapped
+// down to a whole quad (6 indices).
+function rings_to_draw_idx(rings) {
+    return 6 * Math.floor(rings * IDX_PER_RING / 6);
+}
+
+// The tube path is a closed loop, so a segment crossing the seam should wrap
+// to the start. Repeating the index buffer makes any window
+// [start, start + len) with start < one loop and len <= one loop a single
+// contiguous draw range.
+function repeat_index_twice(geom) {
+    const idx = geom.index.array;
+    const doubled = new idx.constructor(idx.length * 2);
+    doubled.set(idx);
+    doubled.set(idx, idx.length);
+    geom.setIndex(new THREE.BufferAttribute(doubled, 1));
+}
 
 class CustomSinCurve extends THREE.Curve {
     constructor( scale = 1 ) {
@@ -136,6 +203,10 @@ export class CubeLockingScene extends Scene {
         this.light2.position.set(0, 20, -20);
         this.base_group.add(this.light2);
 
+        this.fill_light = new THREE.PointLight("white", FILL_LIGHT_INTENSITY, 100, 1.5);
+        this.fill_light.position.copy(FILL_LIGHT_POS);
+        this.base_group.add(this.fill_light);
+
         this.object_color = new THREE.Color("cyan");
 
         const stl_loader = new STLLoader();
@@ -199,7 +270,9 @@ export class CubeLockingScene extends Scene {
                     this.tube_geometries = [];
 
                     for (let i = 0; i < 3; i++) {
-                        const tube_geom = new THREE.TubeGeometry( path, 1024, 2, 32, false );
+                        const tube_geom = new THREE.TubeGeometry(
+                            path, TUBE_RINGS, 2, TUBE_RADIAL, false);
+                        repeat_index_twice(tube_geom);
                         if (i == 1) {
                             tube_geom.rotateY(Math.PI / 2);
                         } else if (i == 2) {
@@ -219,10 +292,11 @@ export class CubeLockingScene extends Scene {
             for (let j = 1; j < 2; j++) {
                 for (let k = 1; k < 2; k++) {
                     //if ((i + j + k) % 2 == 0) {
-                        const c = make_wireframe_cube([24, 24, 24], "white");
+                        const c = make_wireframe_cube(
+                            [OUTLINE_SIZE, OUTLINE_SIZE, OUTLINE_SIZE], "white");
                         c.position.set((i - 1) * 8, (j - 1) * 8, (k - 1) * 8);
                         c.material.transparent = true;
-                        c.material.opacity = 0.8;
+                        c.material.opacity = OUTLINE_OPACITY;
                         this.cube_wireframe.add(c);
                         this.cubes.push(c);
                     //}
@@ -231,12 +305,40 @@ export class CubeLockingScene extends Scene {
         }
 
         this.base_group.add(this.cube_wireframe);
+
+        // Outline tracers: a ring of instanced wireframe cubes under
+        // base_group (so the trail turns with the assembly). Each slot holds a
+        // snapshot of the outline's scale and opacity, faded by age.
+        const [outline_wire_template] = create_instanced_cube_templates(
+            OUTLINE_SIZE, OUTLINE_SIZE, OUTLINE_SIZE);
+        this.outline_tracers = new InstancedGeometryCollection(
+            this.base_group, outline_wire_template, 'Lines', OUTLINE_TRACER_COUNT);
+        this.tracer_birth = new Float32Array(OUTLINE_TRACER_COUNT).fill(-Infinity);
+        this.tracer_opacity = new Float32Array(OUTLINE_TRACER_COUNT);
+        for (let i = 0; i < OUTLINE_TRACER_COUNT; i++) {
+            this.outline_tracers.create_geom(new THREE.Vector3(), WHITE,
+                ZERO_SCALE, null, 0);
+        }
+        this.next_tracer = 0;
+        this.beat_time = 0;             // beats elapsed, for tracer ages
+        this.last_tracer_beat = -Infinity;
+        this.tracer_scale = new THREE.Vector3();
+
         this.add(this.base_group);
 
         const spark_constructor = () => { return new Spark(1.0, "white", [0, 1]); };
         this.spark_pool = new ObjectPool(spark_constructor, 64);
         this.base_group.add(this.spark_pool);
-        this.draw_range = 0;
+        // Tube segments: each tube's tail position around its looped path in
+        // rings, [0, TUBE_RINGS); the segment runs from there for tube_len
+        // rings, wrapping across the loop's seam.
+        this.tube_tails = [0, 1, 2].map((i) => (2 - i) * TUBE_HEAD_SPACING);
+        this.tube_len = TUBE_DEFAULT_LEN;
+        this.tube_speed = 1;
+        this.bind(CH_EXPAND_X, (v) => { this.tube_len = v; },
+            (norm) => lerp_scalar(TUBE_MIN_LEN, TUBE_MAX_LEN, norm));
+        this.bind(CH_EXPAND_Y, (v) => { this.tube_speed = v; },
+            (norm) => 2 * norm - 1);
 
         // Free rotation: knob 8 sets the yaw rate about the assembly's Y axis
         // and knob 9 the pitch rate about the viewport-horizontal (world X)
@@ -256,14 +358,7 @@ export class CubeLockingScene extends Scene {
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        if (this.tube_geometries) {
-            this.draw_range = (this.draw_range + 360);
-            for (let i = 0; i < 3; i++) {
-                const offset = (2 - i) * 39000;
-                const this_range = (this.draw_range + offset) % (this.tube_geometries[0].index.count);
-                this.tube_geometries[i].setDrawRange(this_range, 9000);
-            }
-        }
+        this.update_tubes(dt);
 
         // Free rotation (driven by the knob-8/9 bindings registered in the
         // ctor). The default XYZ euler order applies yaw about the group's Y
@@ -300,10 +395,50 @@ export class CubeLockingScene extends Scene {
                 const t = this.beat_clock.getElapsedBeats();
                 frac = clamp(t / beats_per_expansion - 0.1, 0, 1);
             }
+            const opacity = OUTLINE_OPACITY * (1.0 - frac);
+            const scale = 1 + 2 * frac;
             for (const c of this.cubes) {
-                c.material.opacity = 0.8 * (1.0 - frac);
-                c.scale.setScalar(1 + 2 * frac);
+                c.material.opacity = opacity;
+                c.scale.setScalar(scale);
             }
+            this.update_outline_tracers(dt * beats_per_sec, opacity, scale);
+        }
+    }
+
+    // Advance the tube segments by dt seconds and set each tube's draw range
+    // to its tube_len-ring window (in the doubled index buffer, so a window
+    // crossing the loop's seam stays one draw).
+    update_tubes(dt) {
+        if (!this.tube_geometries) {
+            return;
+        }
+        const len = rings_to_draw_idx(this.tube_len);
+        for (let i = 0; i < 3; i++) {
+            let tail = this.tube_tails[i] + dt * NOM_TUBE_SPEED * this.tube_speed;
+            tail = ((tail % TUBE_RINGS) + TUBE_RINGS) % TUBE_RINGS;
+            this.tube_tails[i] = tail;
+            this.tube_geometries[i].setDrawRange(rings_to_draw_idx(tail), len);
+        }
+    }
+
+    // Drop a tracer of the outline every OUTLINE_TRACER_INTERVAL beats while
+    // it is visible, then fade every tracer by age. d_beats: beats this frame;
+    // opacity/scale: the outline's current values.
+    update_outline_tracers(d_beats, opacity, scale) {
+        this.beat_time += d_beats;
+        if (opacity > 0 &&
+                this.beat_time - this.last_tracer_beat >= OUTLINE_TRACER_INTERVAL) {
+            const i = this.next_tracer;
+            this.next_tracer = (i + 1) % OUTLINE_TRACER_COUNT;
+            this.last_tracer_beat = this.beat_time;
+            this.tracer_birth[i] = this.beat_time;
+            this.tracer_opacity[i] = opacity;
+            this.outline_tracers.set_scale(i, this.tracer_scale.setScalar(scale));
+        }
+        for (let i = 0; i < OUTLINE_TRACER_COUNT; i++) {
+            const age = this.beat_time - this.tracer_birth[i];
+            const fade = clamp(1 - age / OUTLINE_TRACER_LIFETIME, 0, 1);
+            this.outline_tracers.set_color(i, WHITE, this.tracer_opacity[i] * fade);
         }
     }
 

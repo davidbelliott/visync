@@ -42,8 +42,8 @@ KNOB_COUNT = 16
 # Channels the scenes actually bind (mirrors web/src/controller_map.js), shown
 # next to the knob number so the interesting sliders are easy to find.
 KNOB_NAMES = {
-    3: "expand x / tesseract scale x",
-    4: "expand y / tesseract scale y",
+    3: "expand x / tesseract scale x / tube length",
+    4: "expand y / tesseract scale y / tube speed",
     5: "tesseract scale z",
     6: "tesseract scale w",
     8: "rot y (yaw)",

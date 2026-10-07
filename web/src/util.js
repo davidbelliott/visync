@@ -315,7 +315,7 @@ export class Spark extends THREE.Object3D {
         }
         this.velocity = new THREE.Vector3();
         this.acceleration = new THREE.Vector3();
-        this.flicker_frames = 3;
+        this.flicker_frames = 5;
         this.cur_frame = 0;
         this.active = true;
         this.flicker = flicker;

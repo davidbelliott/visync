@@ -396,7 +396,7 @@ export class CubeLockingScene extends Scene {
                 frac = clamp(t / beats_per_expansion - 0.1, 0, 1);
             }
             const opacity = OUTLINE_OPACITY * (1.0 - frac);
-            const scale = 1 + 2 * frac;
+            const scale = 1 + 1 * frac;
             for (const c of this.cubes) {
                 c.material.opacity = opacity;
                 c.scale.setScalar(scale);

@@ -1,7 +1,8 @@
 "use strict";
 import * as THREE from 'three';
 import {
-    ShaderLoader
+    ShaderLoader,
+    ResourceLoader
 } from './util.js';
 
 // Rotates v by unit quaternion q, using the same (counter-clockwise) sign
@@ -139,11 +140,53 @@ function create_fill_mat(transparent=false) {
 }
 
 
+// Unlit solid fill in the exact instance color, with instance alpha rendered
+// as screen-door transparency through the house 4x4 ordered dither: each
+// pixel is either fully drawn or discarded, so fading fills dissolve in the
+// dither pattern, stay opaque (no depth sorting), and match the wireframe's
+// color exactly at alpha 1. Pushed back like the lit fill so edges draw on top.
+function create_dither_fill_mat() {
+    const vertexShader = [
+        "attribute vec3 instanceOffset;",
+        "attribute vec4 instanceColor;",
+        "attribute vec3 instanceScale;",
+        "attribute vec4 instanceQuaternion;",
+        "varying vec4 vColor;",
+        QUAT_ROTATE_GLSL,
+        "void main() {",
+        "    vec3 transformed = quat_rotate(instanceQuaternion, position * instanceScale) + instanceOffset;",
+        "    gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);",
+        "    vColor = instanceColor;",
+        "}",
+    ].join("\n");
+
+    return new ResourceLoader(['glsl/chunks/dither_pars.frag']).load().then(
+        ([dither_pars]) => new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: [
+                "varying vec4 vColor;",
+                dither_pars,
+                "void main() {",
+                "    if (dither4x4(gl_FragCoord.xy, vColor.a) < 0.5) {",
+                "        discard;",
+                "    }",
+                "    gl_FragColor = vec4(vColor.rgb, 1.0);",
+                "}",
+            ].join("\n"),
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+        }));
+}
+
+
 // A batch of identical geometries drawn in a single call, with per-instance
 // position, scale, rotation (a quaternion), and RGBA color. Alpha only
 // blends for the line draw types and, when transparent_fill is set, for
 // Triangles; an opaque (default) triangle fill ignores instance alpha.
-// Valid types: Lines, LineStrip, Triangles
+// DitherFill is an unlit fill in the instance color whose alpha dissolves
+// through the 4x4 dither (see create_dither_fill_mat).
+// Valid types: Lines, LineStrip, Triangles, DitherFill
 export class InstancedGeometryCollection {
     constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024,
                 transparent_fill=false) {
@@ -186,8 +229,10 @@ export class InstancedGeometryCollection {
             this.mesh = new THREE.Line(this.instancedGeometry, this.mat);
             this.mesh.frustumCulled = false;
             this.scene.add(this.mesh);
-        } else if (this.draw_type == 'Triangles') {
-            create_fill_mat(transparent_fill).then((mat) => {
+        } else if (this.draw_type == 'Triangles' || this.draw_type == 'DitherFill') {
+            const mat_promise = this.draw_type == 'Triangles' ?
+                create_fill_mat(transparent_fill) : create_dither_fill_mat();
+            mat_promise.then((mat) => {
                 this.mat = mat;
                 this.mesh = new THREE.Mesh(this.instancedGeometry, this.mat);
                 this.mesh.frustumCulled = false;

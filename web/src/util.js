@@ -410,11 +410,12 @@ export class BeatClock extends THREE.Clock {
 
 // Follows a target value with eased moves: each new target starts a cubic
 // Hermite curve from the current value and velocity that lands exactly on the
-// target, at rest, after move_time seconds. From rest that is an ease-in/
-// ease-out (smoothstep); mid-move retargets (a knob still turning) carry the
-// velocity over, so continuous input never hitches or restarts from rest.
+// target after move_time seconds, at rest or (end_vel) still moving, in which
+// case it then coasts on at that velocity until the next target. From rest to
+// rest that is an ease-in/ease-out (smoothstep); retargets carry the velocity
+// over, so continuous input never hitches or restarts from rest.
 export class EasedFollower {
-    // move_time: s from the latest target change to settling exactly on it.
+    // move_time: s from the latest target change to reaching it.
     constructor(value=0, move_time=1.0) {
         this.move_time = move_time;
         this.value = value;
@@ -422,36 +423,93 @@ export class EasedFollower {
         this.target = value;
         this.from = value;      // current curve's start value and velocity
         this.from_vel = 0;
+        this.to_vel = 0;        // velocity on reaching the target
         this.frac = 1;          // progress through the current curve, 0..1
+        this.coast = 0;         // s spent coasting past the target
     }
 
-    set_target(target) {
+    set_target(target, end_vel=0) {
         this.from = this.value;
         this.from_vel = this.vel;
         this.target = target;
-        this.frac = 0;
+        this.to_vel = end_vel;
+        this.frac = this.move_time > 0 ? 0 : 1;
+        this.coast = 0;
+    }
+
+    // Glide towards `goal` (which may keep moving) without stopping, for dt
+    // seconds: critically damped (closed-form SmoothDamp, Game Programming
+    // Gems 4), settling in roughly smooth_time, never faster than max_speed.
+    // Velocity stays continuous (a goal moving towards us can be overshot
+    // slightly rather than stopped dead). Abandons any eased move; velocity
+    // carries over into the next set_target.
+    track(goal, dt, smooth_time, max_speed) {
+        const omega = 2 / smooth_time;
+        const x = omega * dt;
+        const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+        const max_change = max_speed * smooth_time;
+        const change = clamp(this.value - goal, -max_change, max_change);
+        const temp = (this.vel + omega * change) * dt;
+        const value = this.value - change + (change + temp) * decay;
+        this.vel = (this.vel - omega * temp) * decay;
+        this.value = value;
+        // No eased move in progress: the target is just where we are, so a
+        // following set_target to any other point (even the goal) moves.
+        this.target = value;
+        this.to_vel = 0;
+        this.frac = 1;
+        return value;
+    }
+
+    // Jump to `value` at rest, abandoning any move.
+    reset(value) {
+        this.value = this.from = this.target = value;
+        this.vel = this.from_vel = this.to_vel = 0;
+        this.frac = 1;
+    }
+
+    // Seconds until the current move reaches its target (0 once there).
+    remaining_secs() {
+        return this.frac >= 1 ? 0 : (1 - this.frac) * this.move_time;
+    }
+
+    // Translate the whole curve by `offset` (e.g. when re-basing coordinates);
+    // the motion itself is unchanged.
+    shift(offset) {
+        this.value += offset;
+        this.from += offset;
+        this.target += offset;
     }
 
     // Advance by dt seconds; returns the new value.
     update(dt) {
         if (this.frac >= 1) {
+            // Reached (or no move): rest, or coast on at the end velocity.
+            this.coast += dt;
+            this.vel = this.to_vel;
+            this.value = this.target + this.to_vel * this.coast;
             return this.value;
         }
-        this.frac = Math.min(1, this.frac + dt / this.move_time);
-        if (this.frac === 1) {
-            this.value = this.target;
-            this.vel = 0;
-            return this.value;
-        }
-        // Hermite basis with end velocity 0; the start velocity term is scaled
-        // by move_time to convert value/s into value per unit frac.
-        const s = this.frac, s2 = s * s, s3 = s2 * s;
         const t = this.move_time;
+        const frac = this.frac + dt / t;
+        if (frac >= 1) {
+            this.frac = 1;
+            this.coast = (frac - 1) * t;
+            this.vel = this.to_vel;
+            this.value = this.target + this.to_vel * this.coast;
+            return this.value;
+        }
+        this.frac = frac;
+        // Cubic Hermite basis; the end velocities are scaled by move_time to
+        // convert value/s into value per unit frac.
+        const s = frac, s2 = s * s, s3 = s2 * s;
         this.value = (2 * s3 - 3 * s2 + 1) * this.from +
             (s3 - 2 * s2 + s) * t * this.from_vel +
-            (3 * s2 - 2 * s3) * this.target;
+            (3 * s2 - 2 * s3) * this.target +
+            (s3 - s2) * t * this.to_vel;
         this.vel = (6 * s2 - 6 * s) / t * (this.from - this.target) +
-            (3 * s2 - 4 * s + 1) * this.from_vel;
+            (3 * s2 - 4 * s + 1) * this.from_vel +
+            (3 * s2 - 2 * s) * this.to_vel;
         return this.value;
     }
 }

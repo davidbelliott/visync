@@ -203,10 +203,9 @@ export class IceCreamScene extends Scene {
         this.cones.forEach((cone, i) => {
             cone.rotation.x += clock_dt * beats_per_sec / rot_movement_beats * Math.PI / 2 * this.target_rot_multiplier;
         });
-        // Knob 8 scales the foreground group's continuous spin to
-        // [-cur_rate, +cur_rate] (on top of the existing state multiplier).
-        this.fg_group.rotation.y += clock_dt * 0.2 * this.target_rot_multiplier
-            * this.rot_rate;
+        // Knob 8 sets the foreground group's continuous spin (centred =
+        // stopped); its direction follows the knob, like every scene's yaw.
+        this.fg_group.rotation.y += clock_dt * 0.2 * this.rot_rate;
 
         this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
 

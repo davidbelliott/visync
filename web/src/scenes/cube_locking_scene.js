@@ -348,7 +348,7 @@ export class CubeLockingScene extends Scene {
         this.rot_rate = 1;
         this.pitch_rate = 0;
         this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
-        this.bind(CH_ROT_X, (v) => { this.pitch_rate = -v; }, knob_to_rate);
+        this.bind(CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 

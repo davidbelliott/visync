@@ -33,10 +33,9 @@ export class YellowRobotScene extends Scene {
             -this.frustum_size / 2, -8, 1000);
         this.clear();
         // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps on top
-        // of a half-turn base (robots face the camera). Negated to match the
-        // physical knob's direction.
+        // of a half-turn base (robots face the camera).
         this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y, -1);
+        this.yaw.bind(this, CH_ROT_Y);
 
         this.tesseract_group = new THREE.Group();
         this.tesseract = new Tesseract(this.tesseract_group, 4);

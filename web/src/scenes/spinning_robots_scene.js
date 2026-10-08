@@ -4,7 +4,7 @@ import { Scene } from './scene.js';
 import {
     CH_EXPAND_X, CH_EXPAND_Y, CH_ROT_X, CH_ROT_Y, knob_with_zero_zone
 } from '../controller_map.js';
-import { SteppedRotation } from '../stepped_rotation.js';
+import { SteppedRotation, ISOMETRIC_PITCHES } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -89,11 +89,12 @@ export class SpinningRobotsScene extends Scene {
         super(context);
 
         // Knob 8 sets the grid's yaw rate, knob 9 the camera's pitch rate
-        // (negated to match the knob's direction); both shown in eased 45 deg
-        // steps.
+        // (negated to match the knob's direction), shown in eased steps: yaw
+        // every 45 deg, pitch only between isometric views (+-35.26 deg
+        // either side of the horizontal).
         this.yaw = new SteppedRotation(NOM_ROT_RATE);
         this.yaw.bind(this, CH_ROT_Y);
-        this.pitch = new SteppedRotation(NOM_ROT_RATE);
+        this.pitch = new SteppedRotation(NOM_ROT_RATE, { stops: ISOMETRIC_PITCHES });
         this.pitch.bind(this, CH_ROT_X, -1);
 
         const width = window.innerWidth;

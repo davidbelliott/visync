@@ -1,33 +1,65 @@
 // Knob-rate rotation shown in discrete, eased steps.
 //
 // A hidden angle integrates the knob-set rate continuously (the same rate
-// control as the free-rotation scenes); the visible angle moves to that angle
-// rounded to the nearest multiple of `step` with an ease-in/ease-out tween. A
-// move always runs to completion before the next starts (heading for wherever
-// the target is by then), so every move starts and stops from rest.
+// control as the free-rotation scenes); the visible angle moves to the stop
+// nearest that angle (multiples of `step`, or a given set of `stops` per turn)
+// with an ease-in/ease-out tween. A move always runs to completion before the
+// next starts (heading for wherever the target is by then), so every move
+// starts and stops from rest.
 //
 // Usage, per rotation axis:
 //   this.yaw = new SteppedRotation(NOM_ROT_RATE);
 //   this.yaw.bind(this, CH_ROT_Y);
 //   ...in anim_frame:  group.rotation.y = this.yaw.update(dt);
+// and for a pitch that rests only on isometric views:
+//   this.pitch = new SteppedRotation(NOM_ROT_RATE, { stops: ISOMETRIC_PITCHES });
 import { lerp_scalar, ease } from './util.js';
 import { knob_to_rate } from './controller_map.js';
+
+// The isometric tilt (rad): the elevation of a view straight down a cube's
+// body diagonal.
+const ISO = Math.asin(1 / Math.sqrt(3));
+// Pitch stops per turn (rad) that keep an isometric view: the tilt above or
+// below the horizontal, facing either way.
+export const ISOMETRIC_PITCHES = [ISO, Math.PI - ISO, Math.PI + ISO, 2 * Math.PI - ISO];
 
 export class SteppedRotation {
     // nom_rate: rad/s of the hidden angle at the default 1x; the knob scales
     //   it to [-2, 2] x (centred = stopped).
-    // step: visible step size in rad (PI/4 keeps isometric-friendly angles).
+    // step: visible step size in rad (PI/4 keeps isometric-friendly angles),
+    //   used unless `stops` (angles within one turn, rad) is given.
     // move_time: s; duration of each eased move.
-    constructor(nom_rate, step=Math.PI / 4, move_time=1.0) {
+    // The visible angle starts on the stop nearest 0.
+    constructor(nom_rate, { step = Math.PI / 4, stops = null, move_time = 1.0 } = {}) {
         this.nom_rate = nom_rate;
         this.step = step;
+        this.stops = stops;
         this.move_time = move_time;
         this.rate = nom_rate;   // current hidden-angle rate, rad/s
         this.hidden = 0;        // continuous knob-integrated angle, rad
-        this.angle = 0;         // visible angle, rad
-        this.from = 0;          // current move's start/end angles, rad
-        this.to = 0;
+        this.angle = this.snap(0);  // visible angle, rad
+        this.from = this.angle; // current move's start/end angles, rad
+        this.to = this.angle;
         this.frac = 1;          // progress through the current move, 0..1
+    }
+
+    // The stop nearest `angle` (rad).
+    snap(angle) {
+        if (this.stops === null) {
+            return Math.round(angle / this.step) * this.step;
+        }
+        const turn = 2 * Math.PI;
+        const base = Math.floor(angle / turn) * turn;
+        let best = null;
+        for (const offset of [-turn, 0, turn]) {
+            for (const stop of this.stops) {
+                const candidate = base + offset + stop;
+                if (best === null || Math.abs(candidate - angle) < Math.abs(best - angle)) {
+                    best = candidate;
+                }
+            }
+        }
+        return best;
     }
 
     // Drive the rate from a knob channel on `scene`. sign = -1 flips the
@@ -40,7 +72,7 @@ export class SteppedRotation {
     // Advance by dt seconds; returns the visible angle in rad.
     update(dt) {
         this.hidden += this.rate * dt;
-        const target = Math.round(this.hidden / this.step) * this.step;
+        const target = this.snap(this.hidden);
         if (this.frac >= 1 && target !== this.to) {
             this.from = this.angle;
             this.to = target;

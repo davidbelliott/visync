@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
+import { VIEW_NOM_ROT_RATE } from '../view_transform.js';
 import {
     lerp_scalar,
     ease,
@@ -13,7 +14,6 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 
 export class TessellateScene extends Scene {
     constructor(context) {
@@ -167,16 +167,13 @@ export class TessellateScene extends Scene {
 
         this.add(this.base_group);
         this.evolve_time = 0;
-        // Separate accumulator for the Z spin so knob 8 can scale its rate
-        // without affecting the pattern's evolution speed (evolve_time).
+        // Separate accumulator for the Z spin so the shared view yaw can drive
+        // it without affecting the pattern's evolution speed (evolve_time).
         this.rot_z = 0;
-        // Knob 8 sets the spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -204,9 +201,13 @@ export class TessellateScene extends Scene {
             evolve_dt += clock_dt * (beat_elapsed < 2.0 ? 2.0 : 0.0);
         }
         this.evolve_time += evolve_dt;
-        // Knob 8 scales the Z spin rate/direction to [-cur_rate, +cur_rate].
-        // Colour stays tied to the actual rotation (cur_rot) as before.
-        this.rot_z += evolve_dt * Math.PI * 2 / 128 * this.rot_rate;
+        // Spin about the pattern's own up axis (Z) as the shared view yaw
+        // advances (2 pi / 128 rad/s at 1x), sped up with the evolution's
+        // beat bursts (evolve_dt vs clock_dt). Colour stays tied to the actual
+        // rotation (cur_rot).
+        const burst = clock_dt > 0 ? evolve_dt / clock_dt : 1;
+        this.rot_z += this.context.view.yaw_delta / VIEW_NOM_ROT_RATE *
+            Math.PI * 2 / 128 * burst;
         const cur_rot = this.rot_z;
         this.base_group.rotation.z = cur_rot;
         //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));

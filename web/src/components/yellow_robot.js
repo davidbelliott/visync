@@ -118,7 +118,8 @@ export class YellowRobot extends Component {
     }
 
     // Opacity for the robot at grid cell (i, j): fully opaque at the center,
-    // fading radially to nearly transparent at the outermost corners.
+    // fading in square rings (Chebyshev distance, matching the grid's shape)
+    // to nearly transparent around the whole outer edge.
     robot_alpha(i, j) {
         const n = this._n_per_side;
         const center = (n - 1) / 2;
@@ -127,11 +128,8 @@ export class YellowRobot extends Component {
         }
         const dx = i - center;
         const dy = j - center;
-        const dist_sq = dx * dx + dy * dy;
-        const max_dist_sq = 2 * center * center;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const max_dist = center * Math.SQRT2;   // center -> corner
-        return Math.max(0.05, (1 - dist/max_dist) ** 2);
+        const dist = Math.max(Math.abs(dx), Math.abs(dy)) / center;  // 1 at the edge ring
+        return Math.max(0.05, (1 - dist) ** 2);
     }
 
     // Centered grid position for the robot at column i, row j.

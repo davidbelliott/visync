@@ -1,6 +1,5 @@
 import { Scene } from "./scene.js";
 import * as THREE from "three";
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     create_instanced_cube,
     make_wireframe_special,
@@ -22,9 +21,6 @@ export class HomeBackgroundScene extends Scene {
     constructor(context) {
         super(context, 'cube-bounce');
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.base_scale = 1.5;
 
 
@@ -72,7 +68,7 @@ export class HomeBackgroundScene extends Scene {
         this.impacts = new Array(NUM_IMPACTS).fill(Number.MAX_VALUE);
         this.impact_idx = 0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -93,10 +89,10 @@ export class HomeBackgroundScene extends Scene {
         this.cubes_group.scale.setScalar(all_scale);
 
 
-        // Knob 8 scales the cube group's continuous spin (both axes) to
-        // [-cur_rate, +cur_rate], so it can slow, stop, or reverse.
-        this.cubes_group.rotation.x += 0.1 * dt * this.rot_rate;
-        this.cubes_group.rotation.y += 0.4 * dt * this.rot_rate;
+        // The cube group tumbles with the shared view yaw: about X at half
+        // its pace and about Y at twice it (0.1 / 0.4 rad/s at 1x).
+        this.cubes_group.rotation.x = this.view_yaw(0.5);
+        this.cubes_group.rotation.y = this.view_yaw(2);
         this.ls.rotation.x += 0.2 * dt;
         this.ls.rotation.y += 0.1 * dt;
         //this.pc.rotation.y += 0.05 * dt;

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     ease, BeatClock, lerp_scalar, clamp, make_wireframe_cube
 } from '../util.js';
@@ -88,9 +87,6 @@ export class SphereGridScene extends Scene {
     constructor(context) {
         super(context, 'spheregrid', 2, 180);
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;
@@ -189,14 +185,15 @@ export class SphereGridScene extends Scene {
         this.camera.rotation.x = isom_angle;
         this.elapsed_time = 0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
     
     anim_frame(dt) {
         const adjusted_elapsed = (this.beat_clock.running && this.beat_clock.getElapsedBeats() < 0.5 ? 4 : 1) * dt;
-        // Knob 8 scales the continuous spin rate to [-0.05, +0.05] rad/s.
-        this.cube_group.rotation.y += 0.05 * dt * this.rot_rate;
+        // Spin with the shared view yaw at a quarter of its pace (0.05 rad/s
+        // at 1x).
+        this.cube_group.rotation.y = this.view_yaw(0.25);
         this.elapsed_time += adjusted_elapsed;
 
         const saturation = 1.0;

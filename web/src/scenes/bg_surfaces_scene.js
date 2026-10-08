@@ -1,6 +1,5 @@
 import { Scene } from "./scene.js";
 import * as THREE from "three";
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import {
     create_instanced_cube,
@@ -28,9 +27,6 @@ export class BackgroundSurfacesScene extends Scene {
     constructor(context) {
         super(context, 'param-surface');
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
         this.clear();
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 4000);
         this.cam_persp.position.set(0, 0, 200);
@@ -134,7 +130,7 @@ export class BackgroundSurfacesScene extends Scene {
         this.add(this.base_group);
         this.evolve_time = 0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -157,8 +153,8 @@ export class BackgroundSurfacesScene extends Scene {
         }
         this.evolve_time += add_dt;
 
-        // Knob 8 scales the continuous spin rate to [-0.1, +0.1] rad/s.
-        this.base_group.rotation.y += 0.1 * dt * this.rot_rate;
+        // Spin with the shared view yaw, at half its pace (0.1 rad/s at 1x).
+        this.base_group.rotation.y = this.view_yaw(0.5);
         this.amb_color_hue = 0.08 * this.evolve_time % 1;
 
         this.amblight.color.setHSL(this.amb_color_hue % 1, 1, 0.5);

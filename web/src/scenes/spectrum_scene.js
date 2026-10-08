@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -80,14 +80,21 @@ class Signal {
 }
 
 
+// Rotation (rad), identical to the spinning robots scene's so the two step in
+// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
+// upright views (isometric tilt up or down, or level) starting tilted towards
+// the viewer (so the
+// spectrum and its traces read in 3D).
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
+// Random jitter added to the spectrum (scene units): low, so the signal peaks
+// and their traces stay clean.
+const NOISE_AMPL = 0.3;
+
 export class SpectrumScene extends Scene {
     constructor(context) {
-        super(context, 'spectrum', 3, 200);
+        super(context, 'spectrum', 1, 200);
 
-        // Knob 8 sets the continuous Y spin rate/direction (per frame, when
-        // rotating_y is active).
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -109,7 +116,6 @@ export class SpectrumScene extends Scene {
         this.clear();
         this.clock = new THREE.Clock(true);
         this.sync_clock = new THREE.Clock(false);
-        this.state_change_clock = new THREE.Clock(false);
 
         this.base_group = new THREE.Group();
 
@@ -133,7 +139,7 @@ export class SpectrumScene extends Scene {
             this.base_group.add(this.line);
         }
 
-        this.show_traces = false;
+        this.show_traces = true;
         this.traces = [];
         this.max_num_traces = 10;
         this.trace_spacing = this.line_length / this.num_divisions;
@@ -172,8 +178,10 @@ export class SpectrumScene extends Scene {
             this.base_group.add(front_mesh);
         }
 
-        this.base_group.rotation.x = 0;
-        this.base_group.rotation.y = 0;
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
 
         this.add(this.base_group);
         this.camera = this.cam_orth;
@@ -183,16 +191,10 @@ export class SpectrumScene extends Scene {
             this.signals.push(new Signal(0.5, 2 * (this.ceiling_height - i)));
         }
 
-        this.target_rot_x = 0;
-        this.start_rot_x = 0;
-
-        this.rot = 0;
-        this.target_noise_ampl = 5.0;
-        this.start_noise_ampl = 5.0;
 
         this.elapsed_beats = 0.0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -218,23 +220,13 @@ export class SpectrumScene extends Scene {
         const beats_per_sec = this.get_local_bpm() / 60;
 
 
-        if (this.rotating_y) {
-            // Knob 8 sets the continuous Y spin rate/direction (full = +1/frame).
-            this.rot += this.rot_rate;
-        }
-        //const target_x_rot_delta = this.target_rot_x - this.base_group.rotation.x;
-        //this.base_group.rotation.x += Math.sign(target_x_rot_delta) * Math.min(Math.abs(target_x_rot_delta), 0.01);
-        //
+        // The shared view rotation in eased steps (yaw about the group's Y,
+        // pitch about the viewport horizontal: XYZ euler order).
+        this.base_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
-        // Handle state change X rotation
-        const x_rot_beats = 8;
-        const x_rot_frac = clamp(this.state_change_clock.getElapsedTime() * beats_per_sec / x_rot_beats, 0, 1);
-        this.base_group.rotation.x = lerp_scalar(this.start_rot_x, this.target_rot_x, x_rot_frac);
-
-        // Handle noise level change
-        const noise_ampl = lerp_scalar(this.start_noise_ampl, this.target_noise_ampl, x_rot_frac);
-
-        let frequencyData = this.get_frequency_data(noise_ampl);
+        let frequencyData = this.get_frequency_data(NOISE_AMPL);
 
         const clock_dt = this.clock.getDelta();
         this.elapsed_beats += clock_dt * beats_per_sec;
@@ -263,47 +255,6 @@ export class SpectrumScene extends Scene {
 
         // Notify Three.js of the change in the positions data
         this.line.geometry.attributes.position.needsUpdate = true;
-        //this.plane.position.z -= 0.02;
-        //this.plane.rotation.y += 0.01;
-        //
-        this.base_group.rotation.y = this.rot * Math.PI / 1024;
-    }
-
-    state_transition(old_state_idx, new_state_idx) {
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
-        if (new_state_idx == 0) {
-            this.start_rot_x = this.base_group.rotation.x;
-            this.target_rot_x = 0;
-            this.rotating_y = false;
-            this.start_noise_ampl = this.target_noise_ampl;
-            this.target_noise_ampl = 1.0;
-            this.doubletime = false;
-            this.show_traces = false;
-        } else if (new_state_idx == 1) {
-            this.start_rot_x = this.base_group.rotation.x;
-            this.target_rot_x = isom_angle;
-            this.rotating_y = true;
-            this.start_noise_ampl = this.target_noise_ampl;
-            this.target_noise_ampl = 0.5;
-            this.doubletime = false;
-            this.show_traces = true;
-        } else if (new_state_idx == 2) {
-            this.start_rot_x = this.base_group.rotation.x;
-            this.target_rot_x = isom_angle;
-            this.rotating_y = true;
-            this.start_noise_ampl = this.target_noise_ampl;
-            this.target_noise_ampl = 0.3;
-            this.doubletime = true;
-            this.show_traces = true;
-        }
-        for (const trace of this.traces) {
-            trace.visible = this.show_traces;
-        }
-
-        for (const marker of this.markers) {
-            marker.visible = this.show_traces;
-        }
-        this.state_change_clock.start();
     }
 
     handle_sync(t, bpm, beat) {

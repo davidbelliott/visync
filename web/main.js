@@ -51,6 +51,7 @@ import {
     clamp
 } from './src/util.js';
 import { BoxDef } from './src/geom_def.js';
+import { ViewTransform } from './src/view_transform.js';
 import { WebsocketController, create_knobs, apply_control_change }
     from './src/controller.js';
 
@@ -406,6 +407,8 @@ class GraphicsContext {
         // Created before scenes so scenes can bind to them.
         this.knobs = create_knobs();
         //this.controller = new WebsocketController(this, "ws://localhost:8766", this.knobs);
+        // The shared rotation and zoom every scene reads (knobs 8, 9, 10).
+        this.view = new ViewTransform(this.knobs);
 
         // Create scenes
         this.scenes = new Map([
@@ -553,13 +556,14 @@ class GraphicsContext {
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.update_conn_indicator();
+        this.view.update(dt);
         this.shown_scenes.forEach((idx) => {
             if (idx === undefined) {
                 return;
             }
             const scene = this.scenes.get(idx);
             scene.anim_frame(dt);
-            scene.update_zoom(dt);
+            scene.update_zoom();
         });
     }
 

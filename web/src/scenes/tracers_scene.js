@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import {
     clamp,
     lerp_scalar,
@@ -30,9 +29,6 @@ export class TracersScene extends Scene {
     constructor(context) {
         super(context, 'tracers', 3);
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         this.vbo_scene = new THREE.Scene();
         this.vbo_camera = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
@@ -257,10 +253,10 @@ export class TracersScene extends Scene {
         //this.cubes_group.scale.setScalar(this.base_scale);
 
 
-        // Knob 8 scales the cube group's continuous spin (both axes) to
-        // [-cur_rate, +cur_rate], so it can slow, stop, or reverse.
-        this.cubes_group.rotation.x += 0.1 * dt * this.rot_rate;
-        this.cubes_group.rotation.y += 0.4 * dt * this.rot_rate;
+        // The cube group tumbles with the shared view yaw: about X at half
+        // its pace and about Y at twice it (0.1 / 0.4 rad/s at 1x).
+        this.cubes_group.rotation.x = this.view_yaw(0.5);
+        this.cubes_group.rotation.y = this.view_yaw(2);
 
         this.ls.rotation.x += 0.2 * dt;
         this.ls.rotation.y += 0.1 * dt;

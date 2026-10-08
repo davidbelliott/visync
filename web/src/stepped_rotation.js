@@ -1,46 +1,62 @@
-// Knob-rate rotation shown in discrete, eased steps.
+// Stepped (quantised) view of a continuous rotation.
 //
-// A hidden angle integrates the knob-set rate continuously (the same rate
-// control as the free-rotation scenes); the visible angle moves to the stop
-// nearest that angle (multiples of `step`, or a given set of `stops` per turn)
+// Given a continuously changing source angle each frame (typically the shared
+// view yaw or pitch, see view_transform.js), the visible angle moves to the
+// stop nearest it (multiples of `step`, or a given set of `stops` per turn)
 // with an ease-in/ease-out tween. A move always runs to completion before the
 // next starts (heading for wherever the target is by then), so every move
-// starts and stops from rest.
+// starts and stops from rest; it always takes the short way round, so a scene
+// shown again after the source has turned a lot doesn't spin through the
+// missed turns.
 //
 // Usage, per rotation axis:
-//   this.yaw = new SteppedRotation(NOM_ROT_RATE);
-//   this.yaw.bind(this, CH_ROT_Y);
-//   ...in anim_frame:  group.rotation.y = this.yaw.update(dt);
-// and for a pitch that rests only on isometric views:
-//   this.pitch = new SteppedRotation(NOM_ROT_RATE, { stops: ISOMETRIC_PITCHES });
+//   this.yaw = new SteppedRotation();
+//   ...in anim_frame:  group.rotation.y = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+// and for an upright pitch (isometric views and level), starting at the tilt:
+//   this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+//   ...group.rotation.x = this.pitch.update(dt, PITCH_BASE + this.view_pitch(STEPPED_SCALE));
 import { lerp_scalar, ease } from './util.js';
-import { knob_to_rate } from './controller_map.js';
 
 // The isometric tilt (rad): the elevation of a view straight down a cube's
-// body diagonal.
-const ISO = Math.asin(1 / Math.sqrt(3));
-// Pitch stops per turn (rad) that keep an isometric view: the tilt above or
-// below the horizontal, facing either way.
-export const ISOMETRIC_PITCHES = [ISO, Math.PI - ISO, Math.PI + ISO, 2 * Math.PI - ISO];
+// body diagonal. Stepped pitches start from +/- this (a base added to the
+// source angle; see the scenes' PITCH_BASE).
+export const ISOMETRIC_TILT = Math.asin(1 / Math.sqrt(3));
+const ISO = ISOMETRIC_TILT;
+// Upright pitch stops (rad), for use with `bounce`: the isometric tilt below
+// (looking up at the bottom), level, and above (looking down on the top).
+// Anything steeper reads as upside down and is too disorienting, so the
+// source pitch is folded back and forth across this range instead of
+// wrapping round a full turn.
+export const UPRIGHT_PITCHES = [-ISO, 0, ISO];
+
+// Pace of every stepped scene: this x the shared view rotation (0.15 rad/s
+// at knob 1x, a 45 deg step roughly every 5 s). One value for all of them so
+// their steps happen together and land on the same stops: scenes whose base
+// angles agree mod 45 deg stay aligned (e.g. gantry and spinning robots both
+// on odd 45 deg multiples).
+export const STEPPED_SCALE = 0.75;
+
+const TURN = 2 * Math.PI;
 
 export class SteppedRotation {
-    // nom_rate: rad/s of the hidden angle at the default 1x; the knob scales
-    //   it to [-2, 2] x (centred = stopped).
     // step: visible step size in rad (PI/4 keeps isometric-friendly angles),
     //   used unless `stops` (angles within one turn, rad) is given.
+    // bounce: instead of repeating the stops every turn, fold the source
+    //   back and forth between the lowest and highest stop (a triangle wave),
+    //   so the visible angle sweeps through the stops in order, reverses at
+    //   each end, and never leaves that range.
     // move_time: s; duration of each eased move.
-    // The visible angle starts on the stop nearest 0.
-    constructor(nom_rate, { step = Math.PI / 4, stops = null, move_time = 1.0 } = {}) {
-        this.nom_rate = nom_rate;
+    // start: rad; the visible angle starts on the stop nearest this (pass the
+    //   scene's base angle so it doesn't ease into place when first shown).
+    constructor({ step = Math.PI / 4, stops = null, bounce = false, move_time = 1.0, start = 0 } = {}) {
         this.step = step;
         this.stops = stops;
+        this.bounce = bounce;
         this.move_time = move_time;
-        this.rate = nom_rate;   // current hidden-angle rate, rad/s
-        this.hidden = 0;        // continuous knob-integrated angle, rad
-        this.angle = this.snap(0);  // visible angle, rad
-        this.from = this.angle; // current move's start/end angles, rad
+        this.angle = this.snap(start);  // visible angle, rad
+        this.from = this.angle;     // current move's start/end angles, rad
         this.to = this.angle;
-        this.frac = 1;          // progress through the current move, 0..1
+        this.frac = 1;              // progress through the current move, 0..1
     }
 
     // The stop nearest `angle` (rad).
@@ -48,10 +64,23 @@ export class SteppedRotation {
         if (this.stops === null) {
             return Math.round(angle / this.step) * this.step;
         }
-        const turn = 2 * Math.PI;
-        const base = Math.floor(angle / turn) * turn;
+        if (this.bounce) {
+            // Reflect into [lo, hi], then the nearest stop.
+            const lo = Math.min(...this.stops);
+            const span = Math.max(...this.stops) - lo;
+            const m = (((angle - lo) % (2 * span)) + 2 * span) % (2 * span);
+            const folded = lo + (m <= span ? m : 2 * span - m);
+            let best = this.stops[0];
+            for (const stop of this.stops) {
+                if (Math.abs(stop - folded) < Math.abs(best - folded)) {
+                    best = stop;
+                }
+            }
+            return best;
+        }
+        const base = Math.floor(angle / TURN) * TURN;
         let best = null;
-        for (const offset of [-turn, 0, turn]) {
+        for (const offset of [-TURN, 0, TURN]) {
             for (const stop of this.stops) {
                 const candidate = base + offset + stop;
                 if (best === null || Math.abs(candidate - angle) < Math.abs(best - angle)) {
@@ -62,18 +91,13 @@ export class SteppedRotation {
         return best;
     }
 
-    // Drive the rate from a knob channel on `scene`. sign = -1 flips the
-    // direction to match a physical knob's sense for this axis.
-    bind(scene, channel, sign=1) {
-        scene.bind(channel, (v) => { this.rate = sign * v * this.nom_rate; },
-            knob_to_rate);
-    }
-
-    // Advance by dt seconds; returns the visible angle in rad.
-    update(dt) {
-        this.hidden += this.rate * dt;
-        const target = this.snap(this.hidden);
+    // Advance by dt seconds towards the stop nearest `source` (rad); returns
+    // the visible angle in rad.
+    update(dt, source) {
+        const target = this.snap(source);
         if (this.frac >= 1 && target !== this.to) {
+            // Same orientation, whole turns closer: the short way round.
+            this.angle += Math.round((target - this.angle) / TURN) * TURN;
             this.from = this.angle;
             this.to = target;
             this.frac = 0;

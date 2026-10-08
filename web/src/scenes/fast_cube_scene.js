@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_Y } from '../controller_map.js';
-import { SteppedRotation } from '../stepped_rotation.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -105,9 +104,12 @@ class TunnelMovementBackground {
 
 const FILL_COLOR = "black";
 const FILL_OPACITY = 0.5;
-// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
-// A 45 deg step roughly every 5 s at 1x, matching the gantry scene.
-const NOM_ROT_RATE = 0.15;
+// Rotation (rad), identical to the spinning robots scene's so the two step in
+// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
+// upright views (isometric tilt up or down, or level) starting tilted towards
+// the viewer.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
 
 export class FastCubeScene extends Scene {
     constructor(context) {
@@ -127,7 +129,6 @@ export class FastCubeScene extends Scene {
 
         this.camera = this.cam_orth;
 
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
 
         this.clear();
         this.clock = new BeatClock(this);
@@ -206,11 +207,12 @@ export class FastCubeScene extends Scene {
         }
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
-        this.base_group.rotation.x = -isom_angle;
 
-        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps.
-        this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y);
+        // The shared view rotation in eased steps (see YAW_BASE).
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
 
 
         this.shader_loader = new ShaderLoader('glsl/default.vert', 'glsl/texture.frag');
@@ -231,7 +233,7 @@ export class FastCubeScene extends Scene {
 
         this.add(this.base_group);
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -270,7 +272,9 @@ export class FastCubeScene extends Scene {
 
     anim_frame(dt) {
         this.cur_frame++;
-        this.base_group.rotation.y = this.yaw.update(dt);
+        this.base_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         let half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         let full_beat_time = this.full_beat_clock.getElapsedBeats() / 4.0;

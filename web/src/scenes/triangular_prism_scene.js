@@ -73,7 +73,7 @@ export class TriangularPrismScene extends Scene {
         this.cube_rot = [0, 0];
         this.roll_dir = 2;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
 import { ShaderLoader, BeatClock } from '../util.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 
 // Double Helix Curve
@@ -72,6 +73,13 @@ class HelixCurve extends THREE.Curve {
     }
 }
 
+// Rotation (rad) about the helix's top (the group origin), identical to the
+// spinning robots scene's so the two step in lockstep: yaw every 45 deg from a
+// quarter-turn diagonal base, pitch between upright views (isometric tilt up
+// or down, or level) starting tilted towards the viewer.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
+
 export class HelixScene extends Scene {
     constructor(context) {
         super(context, 'helix', 1);
@@ -92,7 +100,11 @@ export class HelixScene extends Scene {
         this.clear();
 
 
-        this.camera.rotation.x = -Math.PI / 4;
+        // The shared view rotation in eased steps (see YAW_BASE).
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
         this.add(this.base_group);
 
 
@@ -164,7 +176,7 @@ export class HelixScene extends Scene {
 
         this.clock.start();
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -173,7 +185,9 @@ export class HelixScene extends Scene {
         for (const c of this.curves) {
             c.update(dt);
         }
-        //this.base_group.rotation.y += 0.1;
+        this.base_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
         const t = this.clock.getElapsedTime();
         const radius = 2 * Math.sin(t / 2) + 1;
 

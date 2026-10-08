@@ -12,12 +12,10 @@ import {
     EasedFollower
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation } from '../stepped_rotation.js';
-import { CH_ROT_Y, CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
+import { SteppedRotation, STEPPED_SCALE } from '../stepped_rotation.js';
+import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
 
 const CUBE_WAVE_SPEED = 1.5;
-// Nominal Y rotation rate in rad/s; knob_to_rate scales it to [-2, 2] x this.
-const NOM_ROT_RATE = 0.15;
 const NUM_CUBES_PER_SIDE = 32;
 
 // There is one global target block (outlined in white, drawn over
@@ -177,6 +175,7 @@ const TRAIL_FADE_BEATS = 8;
 const MAX_TRAIL = 24;
 const TRAIL_CORNERS = false;
 const TRAIL_CUBES = true;
+const STAMP_MAX_OPACITY = 0.5;
 
 // Pounded cubes turn solid in the wireframe colour, then dissolve through the
 // dither to transparent over STAMP_BEATS, leaving a trail along the vector.
@@ -497,11 +496,9 @@ export class GantryScene extends Scene {
         }
         this.cur_excitation = 0;
 
-        // Free Y rotation: knob 8 sets the signed rate (centred = stopped).
-        // yaw is the angle in rad on top of the PI/4 iso offset, shown in
-        // eased 45 deg steps of the continuously integrated knob rate.
-        this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y);
+        // Y rotation: the shared view yaw (on top of the PI/4 iso offset),
+        // shown in eased 45 deg steps.
+        this.yaw = new SteppedRotation();
 
         // Cube colour blends between these with yaw: color_a when the grid
         // sits at 0/180 deg, color_b at 90/270 deg.
@@ -648,7 +645,7 @@ export class GantryScene extends Scene {
 
         this.camera = this.cam_orth;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -656,7 +653,7 @@ export class GantryScene extends Scene {
         const beats_per_sec = this.get_local_bpm() / 60;
 
         // Y rotation (rate from the knob-8 binding registered in the ctor).
-        const yaw = this.yaw.update(dt);
+        const yaw = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
         this.base_group.rotation.y = Math.PI / 4 + yaw;
         const cur_color = this.cur_color.lerpColors(this.color_a, this.color_b,
             (1 - Math.cos(2 * yaw)) / 2);
@@ -721,7 +718,7 @@ export class GantryScene extends Scene {
                     this.cell_z(this.stamp_row[k]));
                 cube_pos.y = this.wave_y(cube_pos, elapsed_time);
                 this.stamp_fills.set_pos(k, cube_pos);
-                this.stamp_fills.set_color(k, cur_color, ease(stamp));
+                this.stamp_fills.set_color(k, cur_color, STAMP_MAX_OPACITY * ease(stamp));
             }
             this.stamp_fills.set_scale(k, shown ? UNIT_SCALE : ZERO_SCALE);
         }

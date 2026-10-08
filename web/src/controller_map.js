@@ -13,13 +13,12 @@ export const CH_EXPAND_Y = 4;
 export const CH_EXPAND_Z = 5;
 export const CH_EXPAND_W = 6;
 
-// Rotation of a scene's top-level group/scene/camera: knob 8 -> signed Y
-// rotation rate, knob 9 -> signed X (pitch) rate. Continuous scenes integrate
-// it directly; stepped scenes show it in eased 45 deg steps (SteppedRotation).
+// The shared view rotation (see view_transform.js): knob 8 -> signed yaw
+// rate, knob 9 -> signed pitch rate, integrated once for every scene.
 export const CH_ROT_Y = 8;
 export const CH_ROT_X = 9;
 
-// Camera zoom (see KnobZoom): next to the rotation knobs, so the three view
+// Shared view zoom (see view_transform.js): next to the rotation knobs, so the three view
 // controls sit together on the controller.
 export const CH_ZOOM = 10;
 

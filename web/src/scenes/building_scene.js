@@ -14,13 +14,9 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation } from '../stepped_rotation.js';
-import { CH_ROT_Y } from '../controller_map.js';
+import { SteppedRotation, STEPPED_SCALE } from '../stepped_rotation.js';
 
 const CUBE_WAVE_SPEED = 1.5;
-// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
-// Matches the gantry scene: a 45 deg step roughly every 5 s at 1x.
-const NOM_ROT_RATE = 0.15;
 const NUM_CUBES_PER_SIDE = 10;
 
 class Excitation extends THREE.Object3D {
@@ -291,10 +287,9 @@ export class BuildingScene extends Scene {
         this.drift_vel = 0.0;
 
 
-        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps on top
+        // The shared view yaw, shown in eased 45 deg steps on top
         // of the PI/4 iso offset.
-        this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y);
+        this.yaw = new SteppedRotation();
 
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
             (NUM_CUBES_PER_SIDE - 1) * this.cube_base_spacing;
@@ -396,7 +391,7 @@ export class BuildingScene extends Scene {
         this.marker_cube.position.set(0, 6, 0);
         this.cubes_group.add(this.marker_cube);
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -412,7 +407,7 @@ export class BuildingScene extends Scene {
         }
 
 
-        this.base_group.rotation.y = Math.PI / 4 + this.yaw.update(dt);
+        this.base_group.rotation.y = Math.PI / 4 + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         this.cubes_group.position.y -= this.drift_vel * dt;
 

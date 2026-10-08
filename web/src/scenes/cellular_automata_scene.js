@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_X, CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import { BeatClock } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 
@@ -23,8 +22,9 @@ const SEED_RADIUS = 5;
 const SEED_FILL = 0.2;
 // Cap on drawn cubes; cells beyond it (very dense boards) go undrawn.
 const MAX_INSTANCES = 1 << 18;
-// Continuous drift of the whole box (rad/s), scaled by knobs 8/9.
-const NOM_ROT_RATE = 0.05;
+// Drift of the whole box: this x the shared view rotation (0.05 rad/s at
+// knob 1x), slow so the evolving pattern stays readable.
+const ROT_SCALE = 0.25;
 
 // Rules to cycle through, in the standard S/B/C/N notation: survival
 // neighbor counts / birth neighbor counts / cell states / neighborhood.
@@ -180,13 +180,6 @@ export class CellularAutomataScene extends Scene {
         this.rule_idx = 0;
         this.set_rule(0);
 
-        // Free-rotation standard: knob 8 sets yaw rate, knob 9 pitch rate.
-        this.yaw = 0;
-        this.pitch = 0;
-        this.rot_rate = 1;
-        this.pitch_rate = 0;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
-        this.bind(CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
 
         // Paces generations at GENS_PER_BEAT.
         this.gen_clock = new BeatClock(this);
@@ -195,7 +188,7 @@ export class CellularAutomataScene extends Scene {
         // Something on screen before the first beat arrives.
         this.spawn_seed();
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -247,10 +240,10 @@ export class CellularAutomataScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.yaw += NOM_ROT_RATE * this.rot_rate * dt;
-        this.pitch += NOM_ROT_RATE * this.pitch_rate * dt;
-        this.base_group.rotation.x = this.pitch;
-        this.base_group.rotation.y = this.yaw;
+        // Free rotation from the shared view (yaw about the box's Y, pitch
+        // about the viewport horizontal: XYZ euler order).
+        this.base_group.rotation.x = this.view_pitch(ROT_SCALE);
+        this.base_group.rotation.y = this.view_yaw(ROT_SCALE);
 
         // Run a full generation whenever one falls due.
         if (this.gen_clock.getElapsedBeats() >= 1 / GENS_PER_BEAT) {

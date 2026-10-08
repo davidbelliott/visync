@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Component } from '../components/component.js';
-import { KnobZoom } from '../knob_zoom.js';
 import {
     lerp_scalar,
     ease,
@@ -36,7 +35,7 @@ export class Scene extends THREE.Scene {
         this.controls = new OrbitControls(this.camera, this.context.renderer.domElement);
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
-        this.knob_zoom = null;      // set by bind_zoom
+        this.zoom_base = null;      // set by bind_zoom
     }
 
     // Bind one of the context's knobs to a scene property. `apply` receives
@@ -46,19 +45,37 @@ export class Scene extends THREE.Scene {
         this.context.knobs.get(knob_idx).bind_to(apply, transform);
     }
 
-    // Opt in to the shared zoom knob (CH_ZOOM, see knob_zoom.js). base_zoom
-    // is the camera zoom the scene is composed at (default: the camera's
-    // current zoom, so call this once the camera is set up); the knob scales it.
-    bind_zoom(base_zoom=this.camera.zoom) {
-        this.knob_zoom = new KnobZoom(base_zoom);
-        this.knob_zoom.bind(this);
+    // The shared view rotation (see view_transform.js) times this scene's
+    // pace, rad: add the scene's base angle and apply it to whatever the
+    // scene rotates (or quantise it with a SteppedRotation). Axes a scene
+    // doesn't read stay locked.
+    view_yaw(scale = 1) {
+        return this.context.view.yaw * scale;
+    }
+
+    view_pitch(scale = 1) {
+        return this.context.view.pitch * scale;
+    }
+
+    // Opt in to the shared zoom (see view_transform.js). base_zoom is the
+    // camera zoom the scene is composed at (default: the camera's current
+    // zoom, so call this once the camera is set up); the shared factor
+    // scales it.
+    bind_zoom(base_zoom = this.camera.zoom) {
+        this.zoom_base = base_zoom;
     }
 
     // Called by the frame loop after anim_frame, so scenes need not remember
-    // to; applies to whichever camera the scene currently renders with.
-    update_zoom(dt) {
-        if (this.knob_zoom !== null) {
-            this.knob_zoom.update(dt, this.camera);
+    // to; applies to whichever camera the scene currently renders with,
+    // touching the projection only when the zoom changed.
+    update_zoom() {
+        if (this.zoom_base === null) {
+            return;
+        }
+        const zoom = this.zoom_base * this.context.view.zoom;
+        if (zoom !== this.camera.zoom) {
+            this.camera.zoom = zoom;
+            this.camera.updateProjectionMatrix();
         }
     }
 

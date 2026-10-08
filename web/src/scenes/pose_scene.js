@@ -69,7 +69,7 @@ export class PoseScene extends Scene {
         // No pose received yet.
         this.last_pose_time = null;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 

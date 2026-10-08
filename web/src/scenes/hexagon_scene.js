@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
+import { VIEW_NOM_ROT_RATE } from '../view_transform.js';
 import {
     lerp_scalar,
     ease,
@@ -15,6 +15,9 @@ import {
 } from '../util.js';
 
 const ROT_DIV = 1024;
+// Spin pace: this x the shared view yaw (~0.74 rad/s at knob 1x, the old
+// 2 ROT_DIV units per frame at 60 fps).
+const YAW_SCALE = 2 * 60 * 2 * Math.PI / ROT_DIV / VIEW_NOM_ROT_RATE;
 
 class CubeAssembly extends THREE.Group {
     constructor(parent_scene, start_exploded, template_obj, min_spacing, max_spacing, depth) {
@@ -115,9 +118,9 @@ class CubeAssembly extends THREE.Group {
     }
 
     anim_frame(dt, beats_per_sec) {
-        // Knob 8 scales the continuous Y spin to [-cur_rate, +cur_rate]
-        // (rate bound on the parent scene; see HexagonScene constructor).
-        this.cur_rotation = (this.cur_rotation + 2 * this.parent_scene.rot_rate) % ROT_DIV;
+        // Spin with the shared view yaw, in ROT_DIV units per turn.
+        const turns = this.parent_scene.view_yaw(YAW_SCALE) / (2 * Math.PI);
+        this.cur_rotation = ((turns * ROT_DIV) % ROT_DIV + ROT_DIV) % ROT_DIV;
         if (this.depth == 1) {
             this.axis_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
             this.orbit_group.rotation.y = 2 * Math.PI * (1 / ROT_DIV * this.cur_rotation);
@@ -162,10 +165,6 @@ export class HexagonScene extends Scene {
     constructor(context) {
         super(context, 'hexagons');
 
-        // Knob 8 sets the continuous Y spin rate/direction in [-cur_rate,
-        // +cur_rate]; the CubeAssembly children read this.rot_rate each frame.
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -231,7 +230,7 @@ export class HexagonScene extends Scene {
 
         this.elapsed_beats = 0.0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 

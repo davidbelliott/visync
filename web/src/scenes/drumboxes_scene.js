@@ -328,7 +328,7 @@ export class DrumboxScene extends Scene {
         this.color_hue = 0.0;
         this.last_frame_ms = null;      // performance.now() of the last frame
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 import { LightningStrike } from '../lightning_strike.js';
 import {
     lerp_scalar,
@@ -22,9 +21,6 @@ export class IceCreamScene extends Scene {
     constructor(context) {
         super(context, 'ice-cream');
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -186,7 +182,7 @@ export class IceCreamScene extends Scene {
         this.rot = 512 / 4;
         this.elapsed_time = 0.0;
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -203,9 +199,8 @@ export class IceCreamScene extends Scene {
         this.cones.forEach((cone, i) => {
             cone.rotation.x += clock_dt * beats_per_sec / rot_movement_beats * Math.PI / 2 * this.target_rot_multiplier;
         });
-        // Knob 8 sets the foreground group's continuous spin (centred =
-        // stopped); its direction follows the knob, like every scene's yaw.
-        this.fg_group.rotation.y += clock_dt * 0.2 * this.rot_rate;
+        // The foreground spins with the shared view yaw (0.2 rad/s at 1x).
+        this.fg_group.rotation.y = this.view_yaw();
 
         this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
 

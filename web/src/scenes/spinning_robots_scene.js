@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
 import {
-    CH_EXPAND_X, CH_EXPAND_Y, CH_ROT_X, CH_ROT_Y, knob_with_zero_zone
+    CH_EXPAND_X, CH_EXPAND_Y, knob_with_zero_zone
 } from '../controller_map.js';
-import { SteppedRotation, ISOMETRIC_PITCHES } from '../stepped_rotation.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -16,19 +16,16 @@ import {
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 
-// Wireframe opacity [0, 1] for the robots at the middle edges of the grid; the
-// center robot stays at 1.0 and opacity falls off linearly with distance
-// (clamped to 0, so the far corners fade out completely).
-// 0.15 keeps the mid-edge robots just visible against the black background.
+// Wireframe opacity [0, 1] for the robots on the grid's outer ring; the center
+// robot stays at 1.0 and opacity falls off linearly in square rings
+// (Chebyshev distance, matching the grid's shape). 0.15 keeps the edge robots
+// just visible against the black background.
 const EDGE_WIREFRAME_OPACITY = 0.15;
 
 // Robot grid spacing in scene units at full knob travel (the scene's original
 // spacing: robots ~5 units wide sit just clear of each other).
 const MAX_SPREAD = 8;
 
-// Nominal grid yaw / camera pitch rate in rad/s; knobs 8/9 scale it to
-// [-2, 2] x this. The scene's original drift speed (a 45 deg step every ~8 s).
-const NOM_ROT_RATE = 0.1;
 
 // Robot-local geometry (y up, robot faces +z), in scene units. The torso
 // center sits BODY_BASE_Y above the robot origin; arms and shoes hang off the
@@ -78,6 +75,16 @@ const VISOR_FLASH_MIN_OPACITY = 0.3;
 // so 2.0 (grey 0.64) makes a full flash solid white.
 const VISOR_LIGHT_INTENSITY = 2.0;
 
+// Rotation (rad), identical in the spinning and yellow robot scenes apart from
+// YAW_BASE: both step with the shared view at STEPPED_SCALE, yaw every 45 deg
+// and pitch between upright views (isometric tilt up or down, or level)
+// starting tilted towards the viewer (PITCH_BASE), applied to the robots'
+// group the same way. The yaw base is a quarter-turn diagonal, matching the
+// gantry's PI/4 so both sit on the same odd/even 45 deg multiple; the yellow
+// robots face 90 deg from these.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
+
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
@@ -88,14 +95,10 @@ export class SpinningRobotsScene extends Scene {
     constructor(context) {
         super(context);
 
-        // Knob 8 sets the grid's yaw rate, knob 9 the camera's pitch rate
-        // (negated to match the knob's direction), shown in eased steps: yaw
-        // every 45 deg, pitch only between isometric views (+-35.26 deg
-        // either side of the horizontal).
-        this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y);
-        this.pitch = new SteppedRotation(NOM_ROT_RATE, { stops: ISOMETRIC_PITCHES });
-        this.pitch.bind(this, CH_ROT_X, -1);
+        // The shared view rotation turns and tilts the grid in eased steps:
+        // yaw every 45 deg, pitch between -35.26, 0 and +35.26 deg.
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -112,7 +115,7 @@ export class SpinningRobotsScene extends Scene {
         this.clear();
         this.base_group = new THREE.Group();
 
-        this.robots_per_side = 12;
+        this.robots_per_side = 8;
 
         // Grid spacing along x / z, driven live by MIDI knobs 3 and 4 like
         // the yellow robot grid; starts at the scene's original spacing. The
@@ -134,14 +137,14 @@ export class SpinningRobotsScene extends Scene {
                                     // of strobing in unison
 
         const half_side = (this.robots_per_side - 1) / 2;
-        // Center to mid-edge distance: dist_from_center_norm reaches 1 at the
-        // middle of each grid edge and overshoots at the corners.
+        // Center to edge-ring distance: dist_from_center_norm reaches 1 all
+        // around the grid's outer ring.
         const edge_dist = Math.max(half_side, 1e-6);
         for (let i = 0; i < this.robots_per_side; i++) {
             for (let j = 0; j < this.robots_per_side; j++) {
                 this.grid_coords.push(new THREE.Vector2(
                     i - half_side, j - half_side));
-                const dist_from_center_norm = Math.hypot(i - half_side, j - half_side) / edge_dist;
+                const dist_from_center_norm = Math.max(Math.abs(i - half_side), Math.abs(j - half_side)) / edge_dist;
                 this.robot_alphas.push(clamp(
                     lerp_scalar(1.0, EDGE_WIREFRAME_OPACITY, dist_from_center_norm), 0, 1));
                 this.spinner_phases.push(Math.PI / 8 * (i + j));
@@ -241,14 +244,15 @@ export class SpinningRobotsScene extends Scene {
         this.spinner_color = new THREE.Color();
         this.tmp_vec = new THREE.Vector3();
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        this.base_group.rotation.y = this.yaw.update(dt);
-        this.camera.rotation.x = this.pitch.update(dt);
+        this.base_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         const throw_time = this.throw_clock.getElapsedBeats();

@@ -13,9 +13,9 @@ import {
     ShaderLoader,
     BeatClock
 } from '../util.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 
 const BODY_COLOR = new THREE.Color("red");
-const ROT_BEATS = 3.75;
 // Beats to lerp the clap arm orientation (front vs. overhead) after each
 // measure's toggle. 1 beat finishes the swing before the next clap (beat 2),
 // so the flip reads as part of the wind-up instead of a snap.
@@ -265,6 +265,13 @@ class DDRArrow extends THREE.LineSegments {
     }
 }
 
+// Rotation (rad), identical to the spinning robots scene's so the two step in
+// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
+// upright views (isometric tilt up or down, or level) starting tilted towards
+// the viewer.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
+
 export class DDRScene extends Scene {
     constructor(context) {
         super(context, 'ddrrobot', 1);
@@ -354,20 +361,19 @@ export class DDRScene extends Scene {
             this.initialized = true;
         });
 
-        this.camera.rotation.x = -Math.asin(1 / Math.sqrt(3));     // isometric angle
+        // The shared view rotation in eased steps (see YAW_BASE).
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
         this.add(this.base_group);
-
-        // Robot rotation, in 90 degree increments starting from 45 degrees
-        this.start_robot_rot = 0;
-        this.target_robot_rot = 0;
-        this.robot_rot_clock = new BeatClock(this);
 
         // Clock for robot shuffling movement
         this.half_beat_clock = new BeatClock(this);
         this.clap_clock = new BeatClock(this);
         this.measure_clock = new BeatClock(this);
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -375,9 +381,9 @@ export class DDRScene extends Scene {
         if (!this.initialized) {
             return;
         }
-        const rot_frac = ease(clamp(this.robot_rot_clock.getElapsedBeats() / ROT_BEATS, 0, 1));
-        const robot_rot = lerp_scalar(this.start_robot_rot, this.target_robot_rot, rot_frac);
-        this.base_group.rotation.y = Math.PI / 4 + Math.PI / 2 * robot_rot;
+        this.base_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         const half_beat_time = clamp(this.half_beat_clock.getElapsedBeats() / 2.0, 0, 1);
         const measure_time = clamp(this.measure_clock.getElapsedBeats() / 4.0, 0, 1);
@@ -403,9 +409,6 @@ export class DDRScene extends Scene {
 
     handle_sync(t, bpm, beat) {
         if (beat % 4 == 1) {
-            this.start_robot_rot = this.target_robot_rot;
-            this.target_robot_rot++;
-            this.robot_rot_clock.start(this.get_local_bpm());
             this.measure_clock.start(this.get_local_bpm());
 
             for (const r of this.robots) {

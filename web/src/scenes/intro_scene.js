@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
 import {
-    CH_ROT_Y,
     CH_EXPAND_X,
     CH_EXPAND_Y,
     CH_EXPAND_Z,
@@ -9,12 +8,10 @@ import {
     knob_with_zero_zone,
 } from '../controller_map.js';
 import { BeatClock } from '../util.js';
-import { SteppedRotation } from '../stepped_rotation.js';
+import { SteppedRotation, STEPPED_SCALE } from '../stepped_rotation.js';
 import { Tesseract } from '../highdim.js';
 
-// Nominal Y rotation rate in rad/s; knob 8 scales it to [-2, 2] x this.
-// A 45 deg step roughly every 5 s at 1x, matching the gantry scene.
-const NOM_ROT_RATE = 0.15;
+
 
 
 export class IntroScene extends Scene {
@@ -53,9 +50,8 @@ export class IntroScene extends Scene {
 
         this.add(this.base_group);
 
-        // Knob 8 sets the Y rotation rate, shown in eased 45 deg steps.
-        this.yaw = new SteppedRotation(NOM_ROT_RATE);
-        this.yaw.bind(this, CH_ROT_Y);
+        // The shared view yaw, shown in eased 45 deg steps.
+        this.yaw = new SteppedRotation();
 
         // Per-axis scale of the tesseract: one knob per 4D axis, mapping to
         // that axis's scale in [0, 1] (1 is full size). The bottom of each
@@ -68,12 +64,12 @@ export class IntroScene extends Scene {
         this.bind(CH_EXPAND_Z, (v) => { this.scales[2] = v; }, scale_knob);
         this.bind(CH_EXPAND_W, (v) => { this.scales[3] = v; }, scale_knob);
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
     anim_frame(dt) {
-        this.tesseract.rotation.y = this.yaw.update(dt);
+        this.tesseract.rotation.y = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         // Per-axis scale is driven directly by the CH_EXPAND_* knobs bound in
         // the constructor. `scales` holds the four axis scales as set by those

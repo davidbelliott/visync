@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
 import {
-    CH_ROT_X, CH_ROT_Y, CH_EXPAND_X, CH_EXPAND_Y, knob_to_rate
+    CH_EXPAND_X, CH_EXPAND_Y
 } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import {
@@ -24,9 +24,9 @@ import {
     BeatClock
 } from '../util.js';
 
-// Nominal free-rotation rate in rad/s; knob_to_rate scales it to [-2, 2] x
-// this. Chosen to match the old quarter-turn-per-8-beats pace at 120 bpm.
-const NOM_ROT_RATE = 0.4;
+// Free-rotation pace: this x the shared view rotation (0.4 rad/s at knob 1x),
+// the old quarter-turn-per-8-beats pace at 120 bpm.
+const ROT_SCALE = 2;
 
 // Tube geometry resolution: rings along the path x quads around each ring.
 // A ring is TUBE_RADIAL quads = TUBE_RADIAL * 6 indices; draw ranges are
@@ -340,19 +340,13 @@ export class CubeLockingScene extends Scene {
         this.bind(CH_EXPAND_Y, (v) => { this.tube_speed = v; },
             (norm) => 2 * norm - 1);
 
-        // Free rotation: knob 8 sets the yaw rate about the assembly's Y axis
-        // and knob 9 the pitch rate about the viewport-horizontal (world X)
-        // axis, each in [-2, 2] * NOM_ROT_RATE rad/s (knob centred = stopped).
-        this.yaw = Math.PI / 2 * 2.5;
-        this.pitch = isom_angle;
-        this.rot_rate = 1;
-        this.pitch_rate = 0;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
-        this.bind(CH_ROT_X, (v) => { this.pitch_rate = v; }, knob_to_rate);
+        // Free rotation from the shared view, on top of these base angles.
+        this.yaw_base = Math.PI / 2 * 2.5;
+        this.pitch_base = isom_angle;
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
@@ -360,14 +354,13 @@ export class CubeLockingScene extends Scene {
         const beats_per_sec = this.get_local_bpm() / 60;
         this.update_tubes(dt);
 
-        // Free rotation (driven by the knob-8/9 bindings registered in the
-        // ctor). The default XYZ euler order applies yaw about the group's Y
-        // axis first, then pitch about the world X axis, so the pitch axis
-        // stays horizontal in the viewport whatever the yaw.
+        // Free rotation from the shared view. The default XYZ euler order
+        // applies yaw about the group's Y axis first, then pitch about the
+        // world X axis, so the pitch axis stays horizontal in the viewport
+        // whatever the yaw.
         {
-            this.yaw += dt * NOM_ROT_RATE * this.rot_rate;
-            this.pitch += dt * NOM_ROT_RATE * this.pitch_rate;
-            this.base_group.rotation.x = this.pitch;
+            this.yaw = this.yaw_base + this.view_yaw(ROT_SCALE);
+            this.base_group.rotation.x = this.pitch_base + this.view_pitch(ROT_SCALE);
             this.base_group.rotation.y = this.yaw;
 
             // Fill colour swings orange <-> magenta once per quarter turn of

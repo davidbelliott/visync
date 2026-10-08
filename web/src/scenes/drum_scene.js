@@ -1,7 +1,6 @@
 import { DrumKit } from '../components/drum_kit.js';
 import { Scene } from './scene.js';
 import * as THREE from 'three';
-import { CH_ROT_Y, knob_to_rate } from '../controller_map.js';
 
 const KIT_SCALE = 1.25;
 const KIT_SOURCE_HEIGHT = 4;
@@ -10,10 +9,6 @@ export class DrumKitScene extends Scene {
     constructor(context) {
         super(context);
 
-        // Knob 8 sets the continuous spin rate/direction in [-cur_rate, +cur_rate].
-        // Applied whenever the knob value changes (see Knob.bind_to).
-        this.rot_rate = 1;
-        this.bind(CH_ROT_Y, (v) => { this.rot_rate = v; }, knob_to_rate);
 
         this.camera = this.cam_persp;
         this.camera.position.set(0, 0, 20);
@@ -40,13 +35,13 @@ export class DrumKitScene extends Scene {
         this.camera.zoom = 2;
         this.camera.updateProjectionMatrix();
 
-        // Knob CH_ZOOM scales the camera zoom (see Scene.bind_zoom).
+        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
     anim_frame(dt) {
         super.anim_frame(dt);
-        // Knob 8 scales the continuous spin rate to [-0.2, +0.2] rad/s.
-        this.kit.rotation.y += dt * 0.2 * this.rot_rate;
+        // Spin with the shared view yaw (0.2 rad/s at 1x).
+        this.kit.rotation.y = this.view_yaw();
     }
 }

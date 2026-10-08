@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { VIEW_NOM_ROT_RATE } from '../view_transform.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -14,6 +14,42 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
+
+// Rotation (rad), identical to the spinning robots scene's so the two step in
+// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
+// upright views (isometric tilt up or down, or level, edge-on to the pattern)
+// starting tilted towards the viewer. Applied to view_group, about the
+// flat-laid pattern's normal.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
+
+// The lizard tiling (img/lizard.svg, an Escher-style 3-fold tessellation).
+// TEMPLATE_SCALE: SVG units -> scene units (y flipped: SVG is y-down).
+// TILE_SPACING: scene units between neighbouring lattice copies.
+// TILE_OFFSET: where orientation 0's lizard sits within its lattice cell;
+// orientations 1 and 2 sit at this turned by 120 / 240 deg. These three
+// values are what make the outlines interlock exactly.
+const TEMPLATE_SCALE = new THREE.Vector3(0.05, -0.05, 0.05);
+const TILE_SPACING = 12.45;
+const TILE_OFFSET = [-5.35, 1.65];
+// Radius (scene units) of the tiled disc: enough that, fully zoomed out at a
+// 21:9 aspect and either pitch stop, the view's corners are still inside it
+// (about 116 units out in the pattern plane). EDGE_FADE_WIDTH: the outer band
+// over which lizards fade to transparent (eased), so the disc's edge never
+// shows; at the default zoom the whole view is inside the opaque part.
+const FILL_RADIUS = 120;
+const EDGE_FADE_WIDTH = 60;
+// How far a lizard jumps out of the plane at the crest of its wave (scene
+// units).
+const JUMP_HEIGHT = 8;
+const COLOR_A = new THREE.Color("blue");
+const COLOR_B = new THREE.Color("magenta");
+const WHITE = new THREE.Color("white");
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+// Scratch objects for the per-frame instance updates (no per-frame alloc).
+const SCRATCH_POS = new THREE.Vector3();
+const SCRATCH_COLOR = new THREE.Color();
+const START_COLOR = new THREE.Color();
 
 export class TessellateScene extends Scene {
     constructor(context) {
@@ -32,144 +68,52 @@ export class TessellateScene extends Scene {
         this.camera = this.cam_orth;
 
         this.clock = new THREE.Clock();
+        // view_group carries the shared view rotation (Y up); base_group
+        // holds the pattern, built in its XY plane facing the camera, and
+        // lays it flat in view_group (its normal, +Z, along +Y).
+        this.view_group = new THREE.Group();
         this.base_group = new THREE.Group();
+        this.base_group.rotation.x = -Math.PI / 2;
+        this.view_group.add(this.base_group);
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.view_group.rotation.x = PITCH_BASE;
+        this.view_group.rotation.y = YAW_BASE;
 
         this.beat_clock = new THREE.Clock(false);
 
-        this.materials = [];
-
         this.clear();
 
-      var light = new THREE.PointLight(0xffffff, 1, Infinity);
-
-      this.add(light);
-
-        
-
-        // Create a material for the lines
-
-        for (let i = 0; i < 3; i++) {
-            this.materials[i] = new THREE.LineBasicMaterial({
-                        color: "blue",
-                        linewidth: 1,
-                        });
-        }
-
-        const fill_mat = new THREE.MeshBasicMaterial({
-                                    color: "black",
-                                    polygonOffset: true,
-                                    polygonOffsetFactor: 1, // positive value pushes polygon further away
-                                    polygonOffsetUnits: 1
-                                });
-
-        const loader = new SVGLoader();
-        this.inst_geoms = [];
-        this.indices_of_cells = [];
-        // load a SVG resource
-        loader.load(
-            // resource URL
-            'img/lizard.svg',
-            // called when the resource is loaded
-            (data) => {
-                const group = new THREE.Group();
-
-                let renderOrder = 0;
-
-                for (const path of data.paths) {
-
-                    // Iterate over each subPath
-                    for (const subPath of path.subPaths) {
-                        // Use the getSpacedPoints method to get a set of points along the path
-                        const points = subPath.getPoints();
-
-                        // Create a geometry from the points
-                        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                        this.inst_geoms.push(new InstancedGeometryCollection(this.base_group, geometry, 'LineStrip'));
-
-
-                        // Create a line from the geometry and the material
-                        const line = new THREE.Line(geometry, this.materials[0]);
-                        line.position.z = 0.5;
-                        line.renderOrder = renderOrder++;
-
-                        // Add the line to the group
-                        group.add(line);
+        // Lizard tiling: one outline instance per lizard, laid on a disc of
+        // the tiling's lattice (see FILL_RADIUS) with an edge fade.
+        this.lizards = null;    // the instanced outline collection, once loaded
+        this.liz_x = null;      // per-lizard rest position in the pattern plane
+        this.liz_y = null;
+        this.liz_turn = null;   // which of the 3 orientations (0-2)
+        this.liz_alpha = null;  // edge fade (see edge_alpha)
+        new SVGLoader().load('img/lizard.svg', (data) => {
+            // All sub-paths merged into one line-segment template, so a
+            // lizard is one instance in one draw call.
+            const verts = [];
+            for (const path of data.paths) {
+                for (const sub_path of path.subPaths) {
+                    const pts = sub_path.getPoints();
+                    for (let k = 0; k + 1 < pts.length; k++) {
+                        verts.push(pts[k].x, pts[k].y, 0, pts[k + 1].x, pts[k + 1].y, 0);
                     }
                 }
-                group.scale.multiplyScalar( 0.05 );
-                group.scale.y *= - 1;
-
-
-
-                group.position.set(-this.frustum_size / 2, this.frustum_size / 2, 0);
-                const spacing = 12.45;
-                const spacing_y = spacing / 2;
-                const spacing_x = Math.sqrt(3) * spacing / 2;
-
-                for (let i = 0; i < 3; i++) {
-                    const vector = new THREE.Vector3(-5.35, 1.65, 0);
-                    const quaternion = new THREE.Quaternion();
-                    quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), i * 2 * Math.PI / 3);
-                    vector.applyQuaternion(quaternion);
-                    // The cell offsets rotate counter-clockwise while each
-                    // lizard outline rotates clockwise; that pairing is what
-                    // makes the y-flipped (negative-scale) template tessellate.
-                    const outline_quat = new THREE.Quaternion();
-                    outline_quat.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -i * 2 * Math.PI / 3);
-                    this.indices_of_cells.push([]);
-                    for (let j = -4; j < 5; j++) {
-                        for (let k = -4; k < 5; k++) {
-                            const quaternion2 = new THREE.Quaternion();
-                            quaternion2.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 2 * Math.PI / 3);
-
-                            const offset = new THREE.Vector3(spacing_x * j, spacing_y * j, 0);
-                            offset.add(new THREE.Vector3(2 * spacing_x * k, 0, 0));
-                            //offset.applyQuaternion(quaternion2);
-
-                            if (k % 2 == 1) {
-                                //offset.add(new THREE.Vector3(0, spacing_y / 2, 0));
-                            }
-
-
-
-                            const this_pos = vector.clone();
-                            this_pos.add(offset);
-
-                            //const vector = new THREE.Vector3(-5.35, 1.65, 0);
-                            //vector.add(offset);
-
-                            this_pos.applyQuaternion(quaternion);
-
-                            for (let l = 0; l < this.inst_geoms.length; l++) {
-                                this.indices_of_cells[i].push([l,
-                                        this.inst_geoms[l].create_geom(this_pos, new THREE.Color("blue"), new THREE.Vector3(0.05, -0.05, 0.05), outline_quat)
-                                    ]
-                                );
-                            }
-                        }
-                    }
-                }
-
-                this.isom_angle = -Math.asin(1 / Math.sqrt(3));
-                this.base_group.rotation.x = this.isom_angle;     // isometric angle
-            },
-            // called when loading is in progresses
-            function ( xhr ) {
-                //console.log( 'SVG ' + ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
-            },
-            // called when loading has errors
-            function ( error ) {
-                console.log( 'An error happened: ' + error);
             }
-        );
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+            this.build_tiling(geom);
+        }, undefined, (error) => {
+            console.log('An error happened: ' + error);
+        });
 
         this.base_group.scale.set(1, 1, 1);
 
-        this.add(this.base_group);
+        this.add(this.view_group);
         this.evolve_time = 0;
-        // Separate accumulator for the Z spin so the shared view yaw can drive
-        // it without affecting the pattern's evolution speed (evolve_time).
-        this.rot_z = 0;
         this.elapsed_time_beats = 0;
         update_orth_camera_aspect(this.camera, aspect, this.frustum_size);
 
@@ -201,44 +145,77 @@ export class TessellateScene extends Scene {
             evolve_dt += clock_dt * (beat_elapsed < 2.0 ? 2.0 : 0.0);
         }
         this.evolve_time += evolve_dt;
-        // Spin about the pattern's own up axis (Z) as the shared view yaw
-        // advances (2 pi / 128 rad/s at 1x), sped up with the evolution's
-        // beat bursts (evolve_dt vs clock_dt). Colour stays tied to the actual
-        // rotation (cur_rot).
-        const burst = clock_dt > 0 ? evolve_dt / clock_dt : 1;
-        this.rot_z += this.context.view.yaw_delta / VIEW_NOM_ROT_RATE *
-            Math.PI * 2 / 128 * burst;
-        const cur_rot = this.rot_z;
-        this.base_group.rotation.z = cur_rot;
-        //this.base_group.rotation.x = this.isom_angle * 0.5 * (1 + Math.sin(this.elapsed_time_beats * Math.PI * 2 / 16));
+        // The shared view rotation in eased steps (see YAW_BASE). Colour
+        // stays tied to the yaw (cur_rot).
+        this.view_group.rotation.x = this.pitch.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        const cur_rot = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.view_group.rotation.y = YAW_BASE + cur_rot;
 
-
-        const get_jump_func = (i, r, t) => {
-            return 1 * (Math.max(1, 2 * Math.sin(2 * Math.PI * (t - 1 / 3 * i + 1 / 150 * r))) - 1);
+        if (this.lizards === null) {
+            return;
         }
-
-        const color1 = new THREE.Color("blue");
-        const color2 = new THREE.Color("magenta");
-        const start_color = new THREE.Color();
-        start_color.lerpColors(color1, color2, Math.abs((3 * cur_rot / (2 * Math.PI) % 2) - 1));
-        const end_color = new THREE.Color("white");
+        // Each lizard jumps out of the plane (+Z, towards the viewer when
+        // tilted down) in a wave running across x, phased by orientation,
+        // and flashes white with it.
+        START_COLOR.lerpColors(COLOR_A, COLOR_B, Math.abs((3 * cur_rot / (2 * Math.PI) % 2) - 1));
         const t = this.evolve_time / 8;
-        this.indices_of_cells.forEach((indices, i) => {
-            for (const idx of indices) {
-                const pos = this.inst_geoms[idx[0]].get_pos(idx[1]);
-                const r = pos.x;
-                const jump_frac = get_jump_func(i, r, t);
-                pos.z = 8 * jump_frac;
-                this.inst_geoms[idx[0]].set_pos(idx[1], pos);
-
-                const this_color = new THREE.Color();
-                this_color.lerpColors(start_color, end_color, jump_frac);
-                this.inst_geoms[idx[0]].set_color(idx[1], this_color);
-            }
-        });
+        const pos = SCRATCH_POS;
+        for (let k = 0; k < this.liz_x.length; k++) {
+            const jump = Math.max(1, 2 * Math.sin(2 * Math.PI *
+                (t - this.liz_turn[k] / 3 + this.liz_x[k] / 150))) - 1;
+            pos.set(this.liz_x[k], this.liz_y[k], JUMP_HEIGHT * jump);
+            this.lizards.set_pos(k, pos);
+            SCRATCH_COLOR.lerpColors(START_COLOR, WHITE, jump);
+            this.lizards.set_color(k, SCRATCH_COLOR, this.liz_alpha[k]);
+        }
     }
 
-
+    // Lay the lizards out: the tiling repeats on a hexagonal lattice of
+    // spacing TILE_SPACING, three lizards per cell (one per orientation,
+    // each the template turned by -120 deg i at offset R(120 deg i) *
+    // TILE_OFFSET; the lattice is unchanged by those turns). Every lattice
+    // copy within FILL_RADIUS of the centre is placed.
+    build_tiling(template) {
+        const s = TILE_SPACING;
+        const b1 = [Math.sqrt(3) / 2 * s, s / 2];     // lattice basis, 60 deg apart
+        const b2 = [0, s];
+        const reach = Math.ceil(FILL_RADIUS / (Math.sqrt(3) / 2 * s)) + 1;
+        const xs = [], ys = [], turns = [];
+        for (let i = 0; i < 3; i++) {
+            const ang = i * 2 * Math.PI / 3;
+            const ox = TILE_OFFSET[0] * Math.cos(ang) - TILE_OFFSET[1] * Math.sin(ang);
+            const oy = TILE_OFFSET[0] * Math.sin(ang) + TILE_OFFSET[1] * Math.cos(ang);
+            for (let m = -reach; m <= reach; m++) {
+                for (let n = -2 * reach; n <= 2 * reach; n++) {
+                    const x = ox + m * b1[0] + n * b2[0];
+                    const y = oy + m * b1[1] + n * b2[1];
+                    if (Math.hypot(x, y) < FILL_RADIUS) {
+                        xs.push(x);
+                        ys.push(y);
+                        turns.push(i);
+                    }
+                }
+            }
+        }
+        const count = xs.length;
+        this.lizards = new InstancedGeometryCollection(this.base_group, template, 'Lines', count);
+        this.liz_x = Float32Array.from(xs);
+        this.liz_y = Float32Array.from(ys);
+        this.liz_turn = Uint8Array.from(turns);
+        this.liz_alpha = new Float32Array(count);
+        const quat = new THREE.Quaternion();
+        for (let k = 0; k < count; k++) {
+            // The cell offsets turn counter-clockwise while each outline
+            // turns clockwise; that pairing is what makes the y-flipped
+            // (negative-scale) template tessellate.
+            quat.setFromAxisAngle(Z_AXIS, -turns[k] * 2 * Math.PI / 3);
+            SCRATCH_POS.set(xs[k], ys[k], 0);
+            this.lizards.create_geom(SCRATCH_POS, COLOR_A, TEMPLATE_SCALE, quat);
+            const r = Math.hypot(xs[k], ys[k]);
+            this.liz_alpha[k] = ease(clamp((FILL_RADIUS - r) / EDGE_FADE_WIDTH, 0, 1));
+        }
+    }
 
     handle_sync(t, bpm, beat) {
     }

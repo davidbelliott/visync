@@ -12,11 +12,67 @@ import {
     EasedFollower
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation, STEPPED_SCALE } from '../stepped_rotation.js';
+import { SpringFabric } from '../spring_fabric.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
 
-const CUBE_WAVE_SPEED = 1.5;
+// The cube field is a spring fabric (src/spring_fabric.js): each cube on a
+// spring to its rest height, coupled to its 4 neighbours, damped. Units are
+// cells and seconds.
+// Tuned for pond ripples: a strike knocks its one cube down, and rings spread
+// out from it slowly and keep going, with little bounce in place.
+// FABRIC_ANCHOR (1/s^2): pull back to rest; weak (sqrt = 1 rad/s), just
+//   enough that the field doesn't drift, without making cubes bob on their
+//   own.
+// FABRIC_COUPLING (1/s^2): neighbour springs; ripples run out at about
+//   sqrt = 5.5 cells/s, slow enough to read as a spreading train of rings.
+// FABRIC_DAMPING (1/s): amplitude decays as exp(-damping/2 t); light, so
+//   rings are still ~0.4 units 1 s out and several crests remain at 2-3 s.
+// FABRIC_STRIKE_VEL (scene units/s, downward): velocity a strike gives the
+//   struck cube; dips it ~3 units.
+// FABRIC_EDGE_CELLS: absorbing band at the window edge, inside the faded-out
+//   cells (see CUBE_FADE_HALF_CELLS), so ripples don't reflect back in.
+const FABRIC_ANCHOR = 10;
+const FABRIC_COUPLING = 100;
+const FABRIC_DAMPING = 1.0;
+const FABRIC_STRIKE_VEL = 40;
+const FABRIC_EDGE_CELLS = 5;
 const NUM_CUBES_PER_SIDE = 32;
+// Strike sparks: launch elevation (rad) above the ground, 45 deg as before,
+// and a slight random spread around it and the nominal speed and ring
+// spacing, just enough that bursts don't repeat exactly: speed +-10%,
+// elevation +-4 deg, azimuth up to +-1/8 of the 22.5 deg ring spacing.
+const SPARK_ELEVATION = Math.PI / 4;
+const SPARK_SPEED_JITTER = 0.1;
+const SPARK_ELEVATION_JITTER = Math.PI / 45;
+const SPARK_AZIMUTH_JITTER = 0.125;
+// Fraction of the striking gantry's horizontal velocity the sparks inherit:
+// all of it, so a burst from a gantry passing through its strike carries on
+// with it.
+const SPARK_INHERIT_VEL = 1.0;
+// Spark lifetime (s): they wink out partway through their arc, about half as
+// long as they used to stay visible (until they fell behind the cubes).
+const SPARK_LIFE_S = 0.8;
+// Spark flicker: frames shown, then the same number hidden.
+const SPARK_FLICKER_FRAMES = 3;
+// Cube edge fade, as in the drumbox scene: the cube window re-centres on the
+// view by whole cells, so cubes fade out towards its edges (in square rings,
+// Chebyshev distance from the view's centre) and reach 0 where the window
+// stops being guaranteed to cover (CUBE_FADE_HALF_CELLS), so cells entering
+// or leaving it never pop. EDGE_FADE_BAND: fraction of that half-width over
+// which opacity eases from 1 to 0; 1 = all the way from the centre, so it
+// peaks there and fades in imperceptibly.
+const EDGE_FADE_BAND = 1.0;
+// Window cells either side of its centre minus the rounding margin: cells
+// win_col..win_col + N - 1 always cover the view centre -(N/2 - 0.5) to
+// +(N/2 - 1.5) cells, so the symmetric guaranteed half-width is N/2 - 1.5.
+const CUBE_FADE_HALF_CELLS = NUM_CUBES_PER_SIDE / 2 - 1.5;
+// Rotation (rad), identical to the spinning robots scene's so the two step in
+// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
+// upright views (isometric tilt up or down, or level) starting tilted towards
+// the viewer.
+const YAW_BASE = Math.PI / 4;
+const PITCH_BASE = ISOMETRIC_TILT;
 
 // There is one global target block (outlined in white, drawn over
 // everything). After each strike it
@@ -167,12 +223,15 @@ const DEFAULT_VECTOR_ANGLE = Math.PI / 4;   // rad from +col towards +row
 // brightest at the latest hit and dissolves towards the oldest. MAX_TRAIL
 // points cover every strike still visible (more than one per beat over
 // TRAIL_FADE_BEATS, so the oldest fade out rather than being overwritten).
-// With TRAIL_CORNERS each step joins all 8 corresponding corners of the two
-// cubes instead of their centres (tesseract-style extrusion along the path);
+// TRAIL_LINKS switches the lines joining consecutive struck cubes on or off
+// (off leaves just the outlined cubes, with TRAIL_CUBES). With TRAIL_CORNERS
+// each step joins all 8 corresponding corners of the two cubes instead of
+// their centres (tesseract-style extrusion along the path);
 // with TRAIL_CUBES each struck cube's own 12 edges are drawn too, so it stays
 // outlined in white (over its usual colour) for as long as its trail lasts.
 const TRAIL_FADE_BEATS = 8;
 const MAX_TRAIL = 24;
+const TRAIL_LINKS = false;
 const TRAIL_CORNERS = false;
 const TRAIL_CUBES = true;
 const STAMP_MAX_OPACITY = 0.5;
@@ -203,13 +262,6 @@ function lex_less(a, b) {
         }
     }
     return false;
-}
-
-class Excitation extends THREE.Object3D {
-    constructor(init_time) {
-        super();
-        this.init_time = init_time;
-    }
 }
 
 class Gantry {
@@ -478,6 +530,8 @@ export class GantryScene extends Scene {
         for (let i = 0; i < this.max_num_sparks; i++) {
             const s = new Spark(0.2, "white", [0, 1]);
             s.active = false;
+            s.flicker_frames = SPARK_FLICKER_FRAMES;
+            s.life_s = 0;
             this.world_group.add(s);
             this.sparks.push(s);
         }
@@ -487,18 +541,16 @@ export class GantryScene extends Scene {
         this.cube_base_spacing = 1;
         this.pitch = this.cube_base_size + this.cube_base_spacing;
 
-        this.excitations = [];
-        this.max_num_excitations = 8;
-        for (let i = 0; i < this.max_num_excitations; i++) {
-            const e = new Excitation(-100);
-            this.world_group.add(e);
-            this.excitations.push(e);
-        }
-        this.cur_excitation = 0;
+        // Cube heights: a spring fabric over the cube window (see FABRIC_*).
+        this.fabric = new SpringFabric(NUM_CUBES_PER_SIDE, {
+            anchor: FABRIC_ANCHOR, coupling: FABRIC_COUPLING,
+            damping: FABRIC_DAMPING, edge_cells: FABRIC_EDGE_CELLS,
+        });
 
-        // Y rotation: the shared view yaw (on top of the PI/4 iso offset),
-        // shown in eased 45 deg steps.
-        this.yaw = new SteppedRotation();
+        // The shared view rotation in eased steps (see YAW_BASE). Not
+        // `this.pitch`: that's the cell spacing.
+        this.yaw_step = new SteppedRotation();
+        this.pitch_step = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
 
         // Cube colour blends between these with yaw: color_a when the grid
         // sits at 0/180 deg, color_b at 90/270 deg.
@@ -618,7 +670,7 @@ export class GantryScene extends Scene {
                 }
             }
         }
-        this.trail_offsets = TRAIL_CORNERS ? this.cube_corners : [[0, 0, 0]];
+        this.trail_offsets = !TRAIL_LINKS ? [] : TRAIL_CORNERS ? this.cube_corners : [[0, 0, 0]];
         this.trail_pts = Array.from({ length: MAX_TRAIL }, () => ({ x: 0, y: 0, z: 0, a: 0 }));
         const max_verts = 2 * ((MAX_TRAIL - 1) * this.trail_offsets.length +
             (TRAIL_CUBES ? MAX_TRAIL * this.cube_edges.length : 0));
@@ -637,9 +689,8 @@ export class GantryScene extends Scene {
         this.trail.frustumCulled = false;
         this.world_group.add(this.trail);
 
-        const isom_angle = Math.asin(1 / Math.sqrt(3));
-        this.base_group.rotation.x = isom_angle;
-        this.base_group.rotation.y = Math.PI / 4.0;
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
         this.base_group.add(this.world_group);
         this.add(this.base_group);
 
@@ -652,9 +703,10 @@ export class GantryScene extends Scene {
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
 
-        // Y rotation (rate from the knob-8 binding registered in the ctor).
-        const yaw = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
-        this.base_group.rotation.y = Math.PI / 4 + yaw;
+        this.base_group.rotation.x = this.pitch_step.update(dt,
+            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+        const yaw = this.yaw_step.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.y = YAW_BASE + yaw;
         const cur_color = this.cur_color.lerpColors(this.color_a, this.color_b,
             (1 - Math.cos(2 * yaw)) / 2);
 
@@ -685,6 +737,8 @@ export class GantryScene extends Scene {
         const half = NUM_CUBES_PER_SIDE >> 1;
         this.win_row = Math.round(this.scroll_z.value / this.pitch) - half;
         this.win_col = Math.round(this.scroll_x.value / this.pitch) - half;
+        this.fabric.set_origin(this.win_row, this.win_col);
+        this.fabric.update(dt);
 
         const elapsed_time = this.clock.getElapsedTime();
         const cube_pos = this.cube_pos;
@@ -695,7 +749,7 @@ export class GantryScene extends Scene {
                 cube_pos.y = this.wave_y(cube_pos, elapsed_time);
                 const idx = i * NUM_CUBES_PER_SIDE + j;
                 this.inst_cubes.set_pos(idx, cube_pos);
-                this.inst_cubes.set_color(idx, cur_color);
+                this.inst_cubes.set_color(idx, cur_color, this.edge_alpha(cube_pos));
             }
         }
         this.update_outlines(dt * beats_per_sec, elapsed_time);
@@ -718,7 +772,8 @@ export class GantryScene extends Scene {
                     this.cell_z(this.stamp_row[k]));
                 cube_pos.y = this.wave_y(cube_pos, elapsed_time);
                 this.stamp_fills.set_pos(k, cube_pos);
-                this.stamp_fills.set_color(k, cur_color, STAMP_MAX_OPACITY * ease(stamp));
+                this.stamp_fills.set_color(k, cur_color,
+                    STAMP_MAX_OPACITY * ease(stamp) * this.edge_alpha(cube_pos));
             }
             this.stamp_fills.set_scale(k, shown ? UNIT_SCALE : ZERO_SCALE);
         }
@@ -752,6 +807,10 @@ export class GantryScene extends Scene {
         }
 
         for (const s of this.sparks) {
+            if (s.active) {
+                s.life_s -= dt;
+                s.active = s.life_s > 0;
+            }
             s.anim_frame(dt, this.cam_orth);
         }
 
@@ -759,17 +818,17 @@ export class GantryScene extends Scene {
         this.update_trail(elapsed_time);
     }
 
-    // Ripple height at logical position pos (y ignored): the sum of every
-    // excitation's expanding, decaying ring.
+    // Cube opacity [0, 1] at logical position pos (y ignored): 1 at the view's
+    // centre, easing to 0 at CUBE_FADE_HALF_CELLS (see EDGE_FADE_BAND).
+    edge_alpha(pos) {
+        const dist = Math.max(Math.abs(pos.x - this.scroll_x.value),
+            Math.abs(pos.z - this.scroll_z.value)) / (CUBE_FADE_HALF_CELLS * this.pitch);
+        return ease(clamp((1 - dist) / EDGE_FADE_BAND, 0, 1));
+    }
+
+    // Fabric height at logical position pos (y ignored), at its cell.
     wave_y(pos, elapsed_time) {
-        let y_offset = 0.0;
-        for (const e of this.excitations) {
-            const t = (elapsed_time - e.init_time) * CUBE_WAVE_SPEED;
-            const x = Math.hypot(pos.x - e.position.x, pos.z - e.position.z);
-            y_offset -= 3 * Math.sin(Math.max(0, Math.min(2 * Math.PI,
-                -0.2 * x + 7 * t))) * Math.exp(-1.5 * t);
-        }
-        return y_offset;
+        return this.fabric.height(Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch));
     }
 
     // Start fading out the current target's outline and fade one in on
@@ -943,8 +1002,9 @@ export class GantryScene extends Scene {
         const pos = g === this.assignee ?
             new THREE.Vector3(this.cell_x(this.target[1]), 0, this.cell_z(this.target[0])) :
             g.mover.position;
-        this.create_sparks(new THREE.Vector3(pos.x, 1.5, pos.z), 5, 25, "white");
-        this.add_excitation(new THREE.Vector3(pos.x, 0, pos.z));
+        this.create_sparks(new THREE.Vector3(pos.x, 1.5, pos.z), 5, 25, "white",
+            g.trolley.vel, g.bridge.vel);
+        this.kick_fabric(new THREE.Vector3(pos.x, 0, pos.z));
         this.stamp_at(pos);
         this.struck = [Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch)];
         this.add_trail_point(...this.struck);
@@ -1298,9 +1358,7 @@ export class GantryScene extends Scene {
         for (const g of this.gantries) {
             g.move_system(offset);
         }
-        for (const e of this.excitations) {
-            e.position.add(offset);
-        }
+        this.fabric.shift_labels(d_row, d_col);
         for (const s of this.sparks) {
             s.position.add(offset);
         }
@@ -1326,31 +1384,32 @@ export class GantryScene extends Scene {
         this.scroll_z.shift(offset.z);
     }
 
-    add_excitation(pos) {
-        const t = this.clock.getElapsedTime();
-        const excitation = this.excitations[this.cur_excitation];
-        this.cur_excitation = (this.cur_excitation + 1) % this.max_num_excitations;
-        excitation.init_time = t;
-        excitation.position.copy(pos);
-        excitation.position.y = 0;
+    // A strike at pos: kick the fabric down at its cell.
+    kick_fabric(pos) {
+        this.fabric.kick(Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch),
+            -FABRIC_STRIKE_VEL);
     }
 
-    create_sparks(pos, num, avg_vel, color) {
+    // A ring of 16 sparks thrown up and out from pos, each slightly
+    // randomized (SPARK_*_JITTER), carried along by the striker's velocity
+    // (base_vx / base_vz, world units/s; see SPARK_INHERIT_VEL).
+    create_sparks(pos, num, avg_vel, color, base_vx = 0, base_vz = 0) {
         for (let i = 0; i < 16; i++) {
-            /*const vel = new THREE.Vector3(
-                Math.random() - 0.5,
-                Math.random() * 0.5,
-                Math.random() - 0.5);*/
-            //vel.normalize();
-            const vel = new THREE.Vector3(0.5, 0.5, 0);
-
-            vel.applyEuler(new THREE.Euler(0, Math.PI / 8 * i, 0));
-            vel.multiplyScalar(avg_vel);
-            this.sparks[this.cur_spark_idx].active = true;
-            this.sparks[this.cur_spark_idx].position.copy(pos);
-            this.sparks[this.cur_spark_idx].velocity = vel;
-            this.sparks[this.cur_spark_idx].acceleration.set(0, -40, 0);
-            this.sparks[this.cur_spark_idx].material.color.set(color);
+            const spark = this.sparks[this.cur_spark_idx];
+            // avg_vel is per axis (0.5 up, 0.5 out), so the speed is / sqrt 2.
+            const speed = avg_vel * Math.SQRT1_2 * (1 + SPARK_SPEED_JITTER * (2 * Math.random() - 1));
+            const elev = SPARK_ELEVATION + SPARK_ELEVATION_JITTER * (2 * Math.random() - 1);
+            const azim = Math.PI / 8 * (i + SPARK_AZIMUTH_JITTER * (2 * Math.random() - 1));
+            const horiz = speed * Math.cos(elev);
+            spark.velocity.set(
+                horiz * Math.cos(azim) + SPARK_INHERIT_VEL * base_vx,
+                speed * Math.sin(elev),
+                -horiz * Math.sin(azim) + SPARK_INHERIT_VEL * base_vz);
+            spark.active = true;
+            spark.life_s = SPARK_LIFE_S;
+            spark.position.copy(pos);
+            spark.acceleration.set(0, -40, 0);
+            spark.material.color.set(color);
 
             this.cur_spark_idx = (this.cur_spark_idx + 1) % this.max_num_sparks;
         }

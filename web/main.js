@@ -59,6 +59,14 @@ import "./src/normalize.css";
 import "./src/style.css";
 
 
+// Whether each layered scene starts with a fresh depth buffer. true: every
+// layer draws fully over the ones below (stacking order always wins). false:
+// depth carries over, so a lower scene's geometry nearer the camera can show
+// through (and black-fill) parts of the scenes above; the scenes' cameras
+// differ, so where that happens is incidental, but it can interleave layers
+// in a way that looks good.
+const CLEAR_DEPTH_BETWEEN_SCENES = false;
+
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
 const MSG_TYPE_GOTO_SCENE = 2;
@@ -610,6 +618,10 @@ class GraphicsContext {
             this.shown_scenes.forEach((idx) => {
                 if (idx === undefined) {
                     return;
+                }
+                if (CLEAR_DEPTH_BETWEEN_SCENES) {
+                    this.renderer.setRenderTarget(null);
+                    this.renderer.clearDepth();
                 }
                 this.scenes.get(idx).render(this.renderer, this.buffers[0]);
                 const vector = new THREE.Vector2(0, 0);

@@ -36,7 +36,7 @@ MIDI_CC_MAX = 127.0
 # sync clock) to give the impression of continuous movement.
 FAKE_KNOB_MOVEMENT = True
 FAKE_KNOB_COUNT = 14
-FAKE_KNOB_PERIOD_BEATS = 64
+FAKE_KNOB_PERIOD_BEATS = 128
 FAKE_KNOB_UPDATE_HZ = 60
 
 # Interactive tempo control for --fake (see console_ui.py). Up/down step

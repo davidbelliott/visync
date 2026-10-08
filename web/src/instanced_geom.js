@@ -64,7 +64,10 @@ function create_wireframe_mat() {
 }
 
 
-function create_fill_mat(transparent=false) {
+// dither_alpha: render instance alpha as screen-door transparency through the
+// house 4x4 dither (as DitherFill does) instead of ignoring it, so lit fills
+// can fade out while staying opaque (no depth sorting).
+function create_fill_mat(transparent=false, dither_alpha=false) {
 
     var vertexShaderPars = [
         "attribute vec3 instanceOffset;",
@@ -113,7 +116,8 @@ function create_fill_mat(transparent=false) {
                     '#include <color_pars_fragment>\nvarying vec4 vInstanceColor;'
                 ).replace(
                     '#include <color_fragment>',
-                    'diffuseColor *= vInstanceColor;'
+                    'diffuseColor *= vInstanceColor;' + (dither_alpha ?
+                        '\nif (dither4x4(gl_FragCoord.xy, vInstanceColor.a) < 0.5) discard;' : '')
                 ).replace(
                     '#include <dithering_pars_fragment>',
                     dither_pars
@@ -185,8 +189,9 @@ function create_dither_fill_mat() {
 // blends for the line draw types and, when transparent_fill is set, for
 // Triangles; an opaque (default) triangle fill ignores instance alpha.
 // DitherFill is an unlit fill in the instance color whose alpha dissolves
-// through the 4x4 dither (see create_dither_fill_mat).
-// Valid types: Lines, LineStrip, Triangles, DitherFill
+// through the 4x4 dither (see create_dither_fill_mat); LitDitherFill is the
+// lit Triangles fill with its alpha dissolving the same way.
+// Valid types: Lines, LineStrip, Triangles, DitherFill, LitDitherFill
 export class InstancedGeometryCollection {
     constructor(scene, templateGeometry, draw_type='Lines', maxInstances=1024,
                 transparent_fill=false) {
@@ -229,9 +234,11 @@ export class InstancedGeometryCollection {
             this.mesh = new THREE.Line(this.instancedGeometry, this.mat);
             this.mesh.frustumCulled = false;
             this.scene.add(this.mesh);
-        } else if (this.draw_type == 'Triangles' || this.draw_type == 'DitherFill') {
-            const mat_promise = this.draw_type == 'Triangles' ?
-                create_fill_mat(transparent_fill) : create_dither_fill_mat();
+        } else if (['Triangles', 'DitherFill', 'LitDitherFill'].includes(this.draw_type)) {
+            const mat_promise =
+                this.draw_type == 'Triangles' ? create_fill_mat(transparent_fill) :
+                this.draw_type == 'LitDitherFill' ? create_fill_mat(false, true) :
+                create_dither_fill_mat();
             mat_promise.then((mat) => {
                 this.mat = mat;
                 this.mesh = new THREE.Mesh(this.instancedGeometry, this.mat);

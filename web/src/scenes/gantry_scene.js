@@ -3,8 +3,6 @@ import { Scene } from './scene.js';
 import {
     lerp_scalar,
     ease,
-    update_persp_camera_aspect,
-    update_orth_camera_aspect,
     create_instanced_cube_templates,
     create_instanced_cube,
     clamp,
@@ -16,149 +14,94 @@ import { SpringFabric } from '../spring_fabric.js';
 import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
 
-// The cube field is a spring fabric (src/spring_fabric.js): each cube on a
-// spring to its rest height, coupled to its 4 neighbours, damped. Units are
-// cells and seconds.
-// Tuned for pond ripples: a strike knocks its one cube down, and rings spread
-// out from it slowly and keep going, with little bounce in place.
-// FABRIC_ANCHOR (1/s^2): pull back to rest; weak (sqrt = 1 rad/s), just
-//   enough that the field doesn't drift, without making cubes bob on their
-//   own.
-// FABRIC_COUPLING (1/s^2): neighbour springs; ripples run out at about
-//   sqrt = 5.5 cells/s, slow enough to read as a spreading train of rings.
-// FABRIC_DAMPING (1/s): amplitude decays as exp(-damping/2 t); light, so
-//   rings are still ~0.4 units 1 s out and several crests remain at 2-3 s.
-// FABRIC_STRIKE_VEL (scene units/s, downward): velocity a strike gives the
-//   struck cube; dips it ~3 units.
-// FABRIC_EDGE_CELLS: absorbing band at the window edge, inside the faded-out
-//   cells (see CUBE_FADE_HALF_CELLS), so ripples don't reflect back in.
+// Grid cells (scene units): cube size, and the spacing between cube centres.
+const CUBE_SIZE = 3;
+const CELL = 4;
+// Cubes in the window laid out around the view (per side).
+const NUM_CUBES_PER_SIDE = 32;
+
+// Cube heights are a spring fabric (src/spring_fabric.js), tuned for pond
+// ripples: a strike knocks its one cube down and rings spread out from it.
+// Anchor/coupling in 1/s^2, damping in 1/s, strike velocity in units/s down;
+// the edge band absorbs ripples inside the faded-out cells.
 const FABRIC_ANCHOR = 10;
 const FABRIC_COUPLING = 100;
 const FABRIC_DAMPING = 1.0;
 const FABRIC_STRIKE_VEL = 40;
 const FABRIC_EDGE_CELLS = 5;
-const NUM_CUBES_PER_SIDE = 32;
-// Strike sparks: launch elevation (rad) above the ground, 45 deg as before,
-// and a slight random spread around it and the nominal speed and ring
-// spacing, just enough that bursts don't repeat exactly: speed +-10%,
-// elevation +-4 deg, azimuth up to +-1/8 of the 22.5 deg ring spacing.
+
+// Strike sparks: a ring of SPARKS_PER_STRIKE at SPARK_SPEED (units/s) and
+// SPARK_ELEVATION, slightly jittered (speed +-10%, elevation +-4 deg, azimuth
+// +-1/8 of the ring spacing), carrying on with the striking gantry's velocity.
+const MAX_SPARKS = 64;
+const SPARKS_PER_STRIKE = 16;
+const SPARK_SPEED = 25 * Math.SQRT1_2;
+const SPARK_GRAVITY = 40;
 const SPARK_ELEVATION = Math.PI / 4;
 const SPARK_SPEED_JITTER = 0.1;
 const SPARK_ELEVATION_JITTER = Math.PI / 45;
 const SPARK_AZIMUTH_JITTER = 0.125;
-// Fraction of the striking gantry's horizontal velocity the sparks inherit:
-// all of it, so a burst from a gantry passing through its strike carries on
-// with it.
 const SPARK_INHERIT_VEL = 1.0;
-// Spark lifetime (s): they wink out partway through their arc, about half as
-// long as they used to stay visible (until they fell behind the cubes).
 const SPARK_LIFE_S = 0.8;
-// Spark flicker: frames shown, then the same number hidden.
 const SPARK_FLICKER_FRAMES = 3;
-// Cube edge fade, as in the drumbox scene: the cube window re-centres on the
-// view by whole cells, so cubes fade out towards its edges (in square rings,
-// Chebyshev distance from the view's centre) and reach 0 where the window
-// stops being guaranteed to cover (CUBE_FADE_HALF_CELLS), so cells entering
-// or leaving it never pop. EDGE_FADE_BAND: fraction of that half-width over
-// which opacity eases from 1 to 0; 1 = all the way from the centre, so it
-// peaks there and fades in imperceptibly.
+
+// Cubes fade out towards the window's edges in square rings, reaching 0 where
+// the window (re-centred by whole cells) stops being guaranteed to cover, so
+// cells never pop in or out. EDGE_FADE_BAND: fraction of that half-width the
+// fade spans (1 = all the way from the centre).
 const EDGE_FADE_BAND = 1.0;
-// Window cells either side of its centre minus the rounding margin: cells
-// win_col..win_col + N - 1 always cover the view centre -(N/2 - 0.5) to
-// +(N/2 - 1.5) cells, so the symmetric guaranteed half-width is N/2 - 1.5.
 const CUBE_FADE_HALF_CELLS = NUM_CUBES_PER_SIDE / 2 - 1.5;
-// Rotation (rad), identical to the spinning robots scene's so the two step in
-// lockstep: yaw every 45 deg from a quarter-turn diagonal base, pitch between
-// upright views (isometric tilt up or down, or level) starting tilted towards
-// the viewer.
+
+// View rotation (rad), in lockstep with the spinning robots scene.
 const YAW_BASE = Math.PI / 4;
 const PITCH_BASE = ISOMETRIC_TILT;
+// Cube colours, blended with yaw: A at 0/180 deg, B at 90/270 deg.
+const COLOR_A = new THREE.Color("magenta");
+const COLOR_B = new THREE.Color("blue");
 
-// There is one global target block (outlined in white, drawn over
-// everything). After each strike it
-// becomes the struck block plus the targeting vector, and the gantry that can
-// get there soonest (counting a paddle still lifting) without crossing a
-// neighbour's bridge travels over and strikes it on the next kick.
+// There is one global target block. After each strike it becomes the struck
+// block plus the targeting vector, and the gantry that can get there soonest
+// without crossing a neighbour's bridge strikes it on the next kick.
 //
-// Crane motion: the bridge (along the rows) and the trolley (across the
-// columns) each travel on their own eased curve (smooth start and stop,
-// momentum kept through retargets), so paths curve like a real overhead
-// crane's. A move of d cells takes TRAVEL_BASE_S + d * the axis's s/cell
-// (the heavier bridge is slower than the trolley), and at least long enough
-// that the eased curve's peak speed (1.5x its average) stays under the axis's
-// top speed in cells/s, so long moves don't fly. A 3-cell hop takes ~0.75-0.9 s.
+// Crane motion: the bridge (rows, z) and trolley (columns, x) each follow
+// their own eased curve. A relaxed move of d cells takes TRAVEL_BASE_S +
+// d * the axis's s/cell, never peaking above the axis's top speed (cells/s).
 const TRAVEL_BASE_S = 0.35;
 const BRIDGE_S_PER_CELL = 0.15;
 const TROLLEY_S_PER_CELL = 0.11;
 const BRIDGE_MAX_CELLS_PER_S = 5;
 const TROLLEY_MAX_CELLS_PER_S = 6;
-// That relaxed pace is the default, but the gantry assigned to the target
-// hurries when the beat needs it: it sets off as the last paddle touches down
-// (lifting as it accelerates) and arrives TRAVEL_SAFETY_S before the next
-// scheduled touchdown (one beat on, or more if that's under MIN_TRAVEL_S
-// away), so it can strike every kick at 140+ bpm. No move ever peaks above
-// MAX_HURRY_CELLS_PER_S: a gantry that is too far away misses a kick rather
-// than teleporting.
+// The assignee hurries when the beat needs it, arriving TRAVEL_SAFETY_S before
+// the next predicted touchdown at least MIN_TRAVEL_S away, but never peaking
+// above MAX_HURRY_CELLS_PER_S (it misses the kick instead).
 const TRAVEL_SAFETY_S = 0.05;
 const MIN_TRAVEL_S = 0.2;
 const MAX_HURRY_CELLS_PER_S = 16;
-// Once the beat is established the assignee doesn't stop on its blocks: it is
-// timed to pass over the target exactly at the predicted touchdown, still
-// moving with its own momentum (the direction it approached from, at its
-// average approach speed; gantries know only the current target, not where
-// the knobs will send the next one), and redirects from there when the next
-// target appears, so a gantry striking successive blocks flows through them
-// while its paddle slams. On a kick the gantry is re-timed if needed so it is over the
-// block (within STRIKE_TOLERANCE_S) exactly at touchdown, keeping its onward
-// velocity; if the speed cap can't manage that it skips the strike rather
-// than hit beside the block. With no kick within SLAM_GRACE_S of passing the
-// block, the gantry eases back onto it and waits.
+// Once kicks are coming, the assignee passes over the target at the predicted
+// touchdown still moving, so successive strikes flow. A kick strikes if it is
+// over the block within STRIKE_TOLERANCE_S of touchdown, re-timing the pass
+// for errors up to RETIME_MAX_S; otherwise it skips. A pass can overshoot by
+// its speed x OVERSHOOT_S, which neighbours keep clear of.
 const STRIKE_TOLERANCE_S = 0.05;
-// A passing gantry can overshoot its target by about its passing speed x
-// OVERSHOOT_S (coasting SLAM_GRACE_S plus a frame, then the ease-back curve
-// carrying on briefly before it turns); neighbours keep clear of that much
-// (see row_span), and the bridge's passing speed is capped so the overshoot
-// fits the room it has.
+const RETIME_MAX_S = 0.1;
 const OVERSHOOT_S = 0.25;
-// Touchdowns are predicted from the kicks themselves, not the scene tempo:
-// the phase from every kick's scheduled touchdown (struck or not, so a run of
-// misses can't leave the prediction stale) and the period from the median of
-// the last KICK_HISTORY kick intervals within [MIN_KICK_PERIOD_S,
-// MAX_KICK_PERIOD_S] (outliers like fills or gaps are ignored), falling back
-// to the scene's bpm until there are two.
+// Touchdowns are predicted from the kicks: phase from the latest one, period
+// from the median of the last KICK_HISTORY intervals in range (else the bpm).
 const KICK_HISTORY = 6;
 const MIN_KICK_PERIOD_S = 0.2;
 const MAX_KICK_PERIOD_S = 1.5;
-// Idle gantries move with inertia: each frame they glide (critically damped,
-// at most IDLE_MAX_CELLS_PER_S) towards a formation spot that moves with the
-// action (see update_idle_goals), settling in ~IDLE_SMOOTH_S, slow enough
-// that small shifts in the spot are smoothed away. A glide that slow trails
-// a moving spot by its velocity x IDLE_SMOOTH_S, so the spot is led by that
-// much along the action's known velocity (itself smoothed over
-// ACTION_VEL_SMOOTH_S) and the gantries cruise on it rather than behind.
-// 12 cells/s keeps pace with a 3-cell step per beat at 175 bpm.
+// Idle gantries glide (critically damped, settling in ~IDLE_SMOOTH_S) towards
+// a formation spot that moves with the action, led by the action's velocity
+// (smoothed over ACTION_VEL_SMOOTH_S) so they cruise with it, not behind.
 const IDLE_SMOOTH_S = 0.8;
 const IDLE_MAX_CELLS_PER_S = 12;
 const ACTION_VEL_SMOOTH_S = 0.3;
 
-// Paddle motion, as a height fraction h (0 = up, 1 = on the block):
-//   - Anticipation: over the ANTICIPATE_S before the predicted next slam (the
-//     last touchdown plus whole beats, less the drop time, less the glide's
-//     settling time so it is actually there), the assigned gantry's paddle
-//     eases down to READY_H while it is still travelling, and holds there
-//     until SLAM_GRACE_S past the predicted slam; it eases back up if the
-//     beat passes without a kick. Paddles otherwise glide (smooth start, no
-//     overshoot) to their goal height, settling in ~PADDLE_SMOOTH_S.
-//   - Slam: on a kick, from wherever the paddle is to the block over the drop
-//     time, accelerating into the hit. The full MAX_POUND_S lands exactly on
-//     the beat when the beat is delayed enough to schedule it; in immediate
-//     mode (no lookahead) it shrinks to MIN_POUND_S so contact is at most that
-//     late, which from READY_H is only the last stretch. Impact effects fire
-//     on the frame the paddle actually touches down.
-//   - Lift: the paddle simply glides from the block towards its goal again,
-//     while the gantry already moves off. With strikes every beat that goal
-//     turns back to READY_H before it reaches the top, so a runner bobs
-//     smoothly (up, ease down, short slam) instead of snapping.
+// Paddle height h: 0 = up, 1 = on the block. The assignee's paddle eases down
+// to READY_H over the ANTICIPATE_S before the predicted slam (holding until
+// SLAM_GRACE_S after it); others glide back up (PADDLE_SMOOTH_S). A kick slams
+// it onto the block over the drop time (MAX_POUND_S, shrunk towards
+// MIN_POUND_S when there's no lookahead), accelerating into the hit.
 const ANTICIPATE_S = 0.2;
 const SLAM_GRACE_S = 0.1;
 const READY_H = 0.6;
@@ -166,87 +109,45 @@ const PADDLE_SMOOTH_S = 0.1;
 const MAX_POUND_S = 0.15;
 const MIN_POUND_S = 0.06;
 
-// GANTRY_COUNT gantries work the grid (fixed for now; knob 3 is free). The
-// count-change path is kept: if target_count changes, one gantry every
-// ROLL_BEATS rolls in from the window's upstream (low-row) edge or off its
-// downstream edge.
-const MAX_GANTRIES = 4;
+// GANTRY_COUNT gantries, bridges FORMATION_ROWS apart when idle (centred on
+// the action, so the middle ones tend to strike) and at least MIN_ROW_GAP
+// rows apart always.
 const GANTRY_COUNT = 4;
-const ROLL_BEATS = 2;
-// Idle gantries move with the action, ready for the next strike: bridges
-// FORMATION_ROWS apart centred on an anchor that slides steadily from target
-// to target (2 keeps a clear row between paddles), trolleys level with it
-// (see action_point).
-// Centring the formation leaves the middle gantries closest to the action, so
-// they tend to get the strikes while the outer ones cover turns either side.
 const FORMATION_ROWS = 2;
-// An outer gantry that keeps striking (running ahead of the rest) hands over
-// to its inner neighbour when that can be done cleanly (see plan_swap), so a
-// free gantry stays on each side of the action. Swap moves may peak at
-// SWAP_CELLS_PER_S: brisk but not violent.
-const SWAP_CELLS_PER_S = 14;
-// Gantry choice (see choose_assignee) favours gantries that can make the
-// next touchdown without peaking above COMFORT_CELLS_PER_S, so strikes don't
-// need lurching moves; the MAX_HURRY_CELLS_PER_S cap is only a fallback.
-const COMFORT_CELLS_PER_S = 9;
-// A kick only re-times the striking gantry's pass for small timing errors
-// (within RETIME_MAX_S); bigger ones skip the strike rather than lurch.
-const RETIME_MAX_S = 0.1;
-// Minimum rows between neighbouring gantries' bridges: one cell pitch clears
-// a 3-wide paddle.
 const MIN_ROW_GAP = 1;
+// An outer gantry that keeps striking hands over to its inner neighbour when
+// both moves fit the beat at SWAP_CELLS_PER_S (see plan_swap). Assignees are
+// preferred if they can make the touchdown at COMFORT_CELLS_PER_S.
+const SWAP_CELLS_PER_S = 14;
+const COMFORT_CELLS_PER_S = 9;
 
-// The grid is unbounded: blocks, gantries, stamps and ripples live at fixed
-// logical positions (cell (row, col) at z = row * pitch, x = col * pitch),
-// the view eases to keep the target block centred, and the
-// NUM_CUBES_PER_SIDE^2 cube instances are laid out as a window of cells
-// around the view. FOLLOW_SECS: s for the view to settle on a new target.
+// The view eases to centre the target (s to settle); logical positions are
+// shifted back towards the origin past REBASE_DIST (scene units).
 const FOLLOW_SECS = 1.2;
-// Logical distance (scene units) after which everything is shifted back
-// towards the origin, keeping coordinates small through hours of travel.
 const REBASE_DIST = 1000;
 
-// Targeting vector: knob 4 sets its direction in the grid plane (a full turn
-// over the knob's travel) and knob 3 its length in cells, from
-// MIN_VECTOR_CELLS (a 1-cell step can't round back onto the struck block) to
-// MAX_VECTOR_CELLS (steps clearly visible but staying on screen; the default).
-// The target is the last struck block plus this vector, rounded to a cell,
-// and follows the knobs until it is struck.
+// Targeting vector: knob 3 its length (cells), knob 4 its direction (a full
+// turn over the knob's travel, from +col towards +row).
 const MIN_VECTOR_CELLS = 1;
 const MAX_VECTOR_CELLS = 3;
-const DEFAULT_VECTOR_ANGLE = Math.PI / 4;   // rad from +col towards +row
+const DEFAULT_VECTOR_ANGLE = Math.PI / 4;
 
-// Strike trail: white lines joining the centres of recently struck blocks in
-// strike order, each point riding its block's bounce (cubes are centred on
-// the ripple height; the trail draws over them) and fading out on the
-// stamp's eased curve over TRAIL_FADE_BEATS from its strike, so the trail is
-// brightest at the latest hit and dissolves towards the oldest. MAX_TRAIL
-// points cover every strike still visible (more than one per beat over
-// TRAIL_FADE_BEATS, so the oldest fade out rather than being overwritten).
-// TRAIL_LINKS switches the lines joining consecutive struck cubes on or off
-// (off leaves just the outlined cubes, with TRAIL_CUBES). With TRAIL_CORNERS
-// each step joins all 8 corresponding corners of the two cubes instead of
-// their centres (tesseract-style extrusion along the path);
-// with TRAIL_CUBES each struck cube's own 12 edges are drawn too, so it stays
-// outlined in white (over its usual colour) for as long as its trail lasts.
+// Strike trail over the last TRAIL_FADE_BEATS: each struck cube outlined in
+// white (TRAIL_CUBES), and lines joining consecutive ones (TRAIL_LINKS) at
+// their centres or all 8 corners (TRAIL_CORNERS).
 const TRAIL_FADE_BEATS = 8;
 const MAX_TRAIL = 24;
 const TRAIL_LINKS = false;
 const TRAIL_CORNERS = false;
 const TRAIL_CUBES = true;
-const STAMP_MAX_OPACITY = 0.5;
 
-// Pounded cubes turn solid in the wireframe colour, then dissolve through the
-// dither to transparent over STAMP_BEATS, leaving a trail along the vector.
-// MAX_STAMPS live at once (a ring), plenty at one strike per kick.
+// Struck cubes fill solid, then dissolve over STAMP_BEATS.
 const STAMP_BEATS = 8;
+const STAMP_MAX_OPACITY = 0.5;
 const MAX_STAMPS = 32;
 
-// Target outlines (white wireframes drawn over everything): a new target's
-// fades in over OUTLINE_FADE_IN_BEATS, one beat so it brightens while its
-// gantry travels there and peaks at the strike; a former target's (struck or
-// re-aimed away from) fades out over STAMP_BEATS on the same eased curve as a
-// stamp's fill. MAX_OUTLINES covers every outline still fading at once.
+// Target outlines (drawn over everything) fade in over OUTLINE_FADE_IN_BEATS
+// and out over STAMP_BEATS.
 const OUTLINE_FADE_IN_BEATS = 1;
 const MAX_OUTLINES = 8;
 
@@ -254,7 +155,19 @@ const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
 const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
 const WHITE = new THREE.Color('white');
 
-// True if array a sorts before array b, comparing element by element.
+// Shortest time (s) for an eased move over `cells` that never exceeds
+// `cells_per_s`: the curve peaks at 1.5x its average speed.
+function min_move_secs(cells, cells_per_s) {
+    return 1.5 * cells / cells_per_s;
+}
+
+// Relaxed travel time (s) for one axis to cover `cells`.
+function axis_secs(cells, secs_per_cell, max_cells_per_s) {
+    return cells < 1e-6 ? 0 : Math.max(TRAVEL_BASE_S + secs_per_cell * cells,
+        min_move_secs(cells, max_cells_per_s));
+}
+
+// True if array a sorts before array b.
 function lex_less(a, b) {
     for (let i = 0; i < a.length; i++) {
         if (a[i] != b[i]) {
@@ -265,88 +178,59 @@ function lex_less(a, b) {
 }
 
 class Gantry {
-    constructor(parent_scene, parent_obj, width, start_xz) {
-        const start_pos = new THREE.Vector3(start_xz.x,
-            5.929,  // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
-            start_xz.z);
-        this.base_y = start_pos.y;
-        this.paddle_base_y = -1.0;
-        this.paddle_start_y = this.paddle_base_y;
-        this.paddle_end_y = (1.5 + 0.5) - this.base_y;
+    constructor(scene, parent_obj, width) {
+        this.scene = scene;
+        this.base_y = 5.929;    // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
+        this.paddle_up_y = -1.0;
+        this.paddle_down_y = (1.5 + 0.5) - this.base_y;
 
-        this.parent_obj = parent_obj;
-        this.clock = new THREE.Clock(false);
-        this.pound_clock = new THREE.Clock(false);
-        // Crane axes (see TRAVEL_BASE_S): bridge = z, trolley = x.
-        // end_sweep_pos is where the gantry is heading.
-        this.bridge = new EasedFollower(start_pos.z, 1);
-        this.trolley = new EasedFollower(start_pos.x, 1);
-        this.end_sweep_pos = new THREE.Vector3();
-        this.end_sweep_pos.copy(start_pos);
-        // Paddle part
+        this.bridge = new EasedFollower(0, 1);
+        this.trolley = new EasedFollower(0, 1);
+        this.end_sweep_pos = new THREE.Vector3(0, this.base_y, 0);     // where it's heading
+
         this.mover = new THREE.Group();
+        this.mover.position.y = this.base_y;
         this.paddle = create_instanced_cube([3, 1, 3], "white", true, "black", 0.5);
-        this.paddle.position.y = this.paddle_base_y;
+        this.paddle.position.y = this.paddle_up_y;
         this.mover.add(this.paddle);
-
-        this.cube_top = create_instanced_cube([1, 1, 1], "white", true, "black", 0.5);
-        this.mover.add(this.cube_top);
-
-        this.cube_intersection = create_instanced_cube([1.01, 0.5, 0.5], "white", true, "black", 0.5);
-        this.cube_intersection.add(create_instanced_cube([0.5, 1.01, 0.5], "white", true, "black", 0.5));
-        this.cube_top.add(this.cube_intersection);
-
-        this.vertical_beam = create_instanced_cube([0.5, 6.0, 0.5], "white", true, "black", 0.5);
-        this.vertical_beam.position.y = 3.5;
-        this.paddle.add(this.vertical_beam);
-
-        this.mover.position.copy(start_pos);
+        const cube_top = create_instanced_cube([1, 1, 1], "white", true, "black", 0.5);
+        const cross = create_instanced_cube([1.01, 0.5, 0.5], "white", true, "black", 0.5);
+        cross.add(create_instanced_cube([0.5, 1.01, 0.5], "white", true, "black", 0.5));
+        cube_top.add(cross);
+        this.mover.add(cube_top);
+        const vertical_beam = create_instanced_cube([0.5, 6.0, 0.5], "white", true, "black", 0.5);
+        vertical_beam.position.y = 3.5;
+        this.paddle.add(vertical_beam);
         parent_obj.add(this.mover);
-        this.parent_scene = parent_scene;
 
         this.x_beam = create_instanced_cube([width, 0.5, 0.5], "white", true, "black", 0.5);
-        this.x_beam.position.copy(start_pos);
-        this.x_beam.position.x = 0;
+        this.x_beam.position.y = this.base_y;
         parent_obj.add(this.x_beam);
 
-        this.clock.start();
-        this.pound_movement_secs = MAX_POUND_S;
-
-        // 'parked' (hidden, unused), 'active' (in the rotation) or 'exiting'
-        // (rolling off the grid before parking).
-        this.state = 'parked';
-        // Paddle (see ANTICIPATE_S): height h, its glide follower and goal,
-        // and the phase: 'free' (gliding) or 'slam' (striking = true).
+        // Paddle (see ANTICIPATE_S).
         this.paddle_h = 0;
         this.paddle_glide = new EasedFollower(0, 1);
         this.paddle_goal = 0;
-        this.pound_phase = 'free';
         this.striking = false;
         this.slam_from = 0;
-        // Idle gantries track a moving goal (set by the scene each frame)
-        // instead of making eased moves.
+        this.pound_secs = MAX_POUND_S;
+        this.pound_clock = new THREE.Clock(false);
+        // Idle gantries track a goal set by the scene each frame instead of
+        // making eased moves.
         this.tracking = false;
-        this.goal_x = start_pos.x;
-        this.goal_z = start_pos.z;
+        this.goal_x = 0;
+        this.goal_z = 0;
         this.yield_until = -Infinity;   // scene clock s; making way (plan_swap)
-        this.set_visible(false);
     }
 
-    set_visible(visible) {
-        this.mover.visible = visible;
-        this.x_beam.visible = visible;
-    }
-
-    // Jump straight to local (x, z), at rest.
+    // Jump straight to (x, z), at rest.
     place_at(x, z) {
         this.trolley.reset(x);
         this.bridge.reset(z);
         this.end_sweep_pos.set(x, this.base_y, z);
-        this.set_cube_xz(this.end_sweep_pos);
-    }
-
-    move_done() {
-        return this.move_remaining_secs() == 0;
+        this.mover.position.x = x;
+        this.mover.position.z = z;
+        this.x_beam.position.z = z;
     }
 
     // Seconds until both axes settle (0 at rest).
@@ -354,33 +238,20 @@ class Gantry {
         return Math.max(this.trolley.remaining_secs(), this.bridge.remaining_secs());
     }
 
-    // Travel time (s) for one axis to cover `dist` scene units.
-    static axis_secs(dist, pitch, secs_per_cell, max_cells_per_s) {
-        const cells = dist / pitch;
-        return dist < 1e-6 ? 0 : Math.max(TRAVEL_BASE_S + secs_per_cell * cells,
-            1.5 * cells / max_cells_per_s);
+    // Cells to (x, z) along the longer axis.
+    cells_to(x, z) {
+        return Math.max(Math.abs(x - this.trolley.value), Math.abs(z - this.bridge.value)) / CELL;
     }
 
-    // Relaxed travel time (s) from the current position to local (x, z).
     travel_secs_to(x, z) {
-        const pitch = this.parent_scene.pitch;
         return Math.max(
-            Gantry.axis_secs(Math.abs(x - this.trolley.value), pitch,
-                TROLLEY_S_PER_CELL, TROLLEY_MAX_CELLS_PER_S),
-            Gantry.axis_secs(Math.abs(z - this.bridge.value), pitch,
-                BRIDGE_S_PER_CELL, BRIDGE_MAX_CELLS_PER_S));
-    }
-
-    // Fastest possible travel time (s) to local (x, z), at full hurry.
-    fastest_secs_to(x, z) {
-        const cells = Math.max(Math.abs(x - this.trolley.value),
-            Math.abs(z - this.bridge.value)) / this.parent_scene.pitch;
-        return 1.5 * cells / MAX_HURRY_CELLS_PER_S;
+            axis_secs(Math.abs(x - this.trolley.value) / CELL, TROLLEY_S_PER_CELL, TROLLEY_MAX_CELLS_PER_S),
+            axis_secs(Math.abs(z - this.bridge.value) / CELL, BRIDGE_S_PER_CELL, BRIDGE_MAX_CELLS_PER_S));
     }
 
     anim_frame(dt) {
         if (this.tracking) {
-            const max_speed = IDLE_MAX_CELLS_PER_S * this.parent_scene.pitch;
+            const max_speed = IDLE_MAX_CELLS_PER_S * CELL;
             this.mover.position.x = this.trolley.track(this.goal_x, dt, IDLE_SMOOTH_S, max_speed);
             this.mover.position.z = this.bridge.track(this.goal_z, dt, IDLE_SMOOTH_S, max_speed);
         } else {
@@ -389,61 +260,49 @@ class Gantry {
         }
         this.x_beam.position.z = this.mover.position.z;
 
-        // Paddle (see ANTICIPATE_S). Impact effects fire on the frame the
-        // slam reaches the block, so the block never moves before it's hit.
-        if (this.pound_phase == 'slam') {
-            const u = Math.min(1, this.pound_clock.getElapsedTime() / this.pound_movement_secs);
+        // Impact effects fire on the frame the slam reaches the block, so the
+        // block never moves before it's hit.
+        if (this.striking) {
+            const u = Math.min(1, this.pound_clock.getElapsedTime() / this.pound_secs);
             this.paddle_h = this.slam_from + (1 - this.slam_from) * u * u;
             if (u >= 1) {
                 this.striking = false;
-                this.pound_phase = 'free';
                 this.paddle_glide.reset(1);
-                this.parent_scene.on_contact(this);
+                this.scene.on_contact(this);
             }
         } else {
-            this.paddle_h = this.paddle_glide.track(this.paddle_goal, dt,
-                PADDLE_SMOOTH_S, Infinity);
+            this.paddle_h = this.paddle_glide.track(this.paddle_goal, dt, PADDLE_SMOOTH_S, Infinity);
         }
-        this.paddle.position.y = lerp_scalar(this.paddle_start_y, this.paddle_end_y,
-            this.paddle_h);
+        this.paddle.position.y = lerp_scalar(this.paddle_up_y, this.paddle_down_y, this.paddle_h);
     }
 
-    // Pass over local (x, z) after exactly arrive_secs (or as soon as the
-    // speed cap allows), both axes together, moving at end_vel (an {x, z}
-    // velocity) on arrival and coasting on after (see STRIKE_TOLERANCE_S).
+    // Pass over (x, z) after arrive_secs (or as soon as the hurry cap allows),
+    // moving at end_vel ({x, z}) and coasting on after.
     pass_through(x, z, arrive_secs, end_vel) {
-        const pitch = this.parent_scene.pitch;
         this.end_sweep_pos.set(x, this.base_y, z);
-        const cap_secs = 1.5 * Math.max(Math.abs(x - this.trolley.value),
-            Math.abs(z - this.bridge.value)) / pitch / MAX_HURRY_CELLS_PER_S;
-        const secs = Math.max(arrive_secs, cap_secs);
+        const secs = Math.max(arrive_secs, min_move_secs(this.cells_to(x, z), MAX_HURRY_CELLS_PER_S));
         this.trolley.move_time = this.bridge.move_time = secs;
         this.trolley.set_target(x, end_vel.x);
         this.bridge.set_target(z, end_vel.z);
     }
 
-    // Seconds until the gantry is over its target: positive while on the way,
-    // negative once coasting past it (see pass_through).
+    // Seconds until over the target: negative once coasting past it.
     secs_to_pass() {
         const remaining = this.move_remaining_secs();
         return remaining > 0 ? remaining : -this.coast_secs();
     }
 
-    // Re-time the current pass to be over the target in exactly `secs`,
-    // keeping the onward velocity. False (and unchanged) if the speed cap
-    // can't make it.
+    // Re-time the current pass to be over the target in `secs`, keeping the
+    // onward velocity. False (unchanged) if the hurry cap can't make it.
     retime_pass(secs) {
         const x = this.end_sweep_pos.x, z = this.end_sweep_pos.z;
-        const cap_secs = 1.5 * Math.max(Math.abs(x - this.trolley.value),
-            Math.abs(z - this.bridge.value)) / this.parent_scene.pitch / MAX_HURRY_CELLS_PER_S;
-        if (cap_secs > secs + STRIKE_TOLERANCE_S) {
+        if (min_move_secs(this.cells_to(x, z), MAX_HURRY_CELLS_PER_S) > secs + STRIKE_TOLERANCE_S) {
             return false;
         }
         this.pass_through(x, z, secs, { x: this.trolley.to_vel, z: this.bridge.to_vel });
         return true;
     }
 
-    // Parked exactly on its target (not passing through it).
     at_rest_on_target() {
         return this.move_remaining_secs() == 0 && this.trolley.to_vel == 0 &&
             this.bridge.to_vel == 0;
@@ -455,35 +314,26 @@ class Gantry {
         return coasting ? Math.min(this.trolley.coast, this.bridge.coast) : 0;
     }
 
-    // Head for local (x, z) and stop there: each axis whose target changes
-    // sets off (or redirects, keeping its momentum) with its own travel time,
-    // shortened to max_secs when the gantry has a beat to make, but never so
-    // short that the eased curve peaks above MAX_HURRY_CELLS_PER_S.
+    // Head for (x, z) and stop there, each axis at its relaxed pace but
+    // within max_secs (and never above the hurry cap). Axes already headed
+    // there keep going undisturbed.
     move_to(x, z, max_secs = Infinity) {
-        const pitch = this.parent_scene.pitch;
         this.end_sweep_pos.set(x, this.base_y, z);
-        const secs = (dist, secs_per_cell, max_cells_per_s) => Math.max(
-            Math.min(max_secs, Gantry.axis_secs(dist, pitch, secs_per_cell, max_cells_per_s)),
-            1.5 * dist / pitch / MAX_HURRY_CELLS_PER_S);
-        if (x != this.trolley.target || this.trolley.to_vel != 0) {
-            this.trolley.move_time = secs(Math.abs(x - this.trolley.value),
-                TROLLEY_S_PER_CELL, TROLLEY_MAX_CELLS_PER_S);
-            this.trolley.set_target(x);
-        }
-        if (z != this.bridge.target || this.bridge.to_vel != 0) {
-            this.bridge.move_time = secs(Math.abs(z - this.bridge.value),
-                BRIDGE_S_PER_CELL, BRIDGE_MAX_CELLS_PER_S);
-            this.bridge.set_target(z);
-        }
+        const axis = (follower, to, secs_per_cell, max_cells_per_s) => {
+            if (to == follower.target && follower.to_vel == 0) {
+                return;
+            }
+            const cells = Math.abs(to - follower.value) / CELL;
+            follower.move_time = Math.max(
+                Math.min(max_secs, axis_secs(cells, secs_per_cell, max_cells_per_s)),
+                min_move_secs(cells, MAX_HURRY_CELLS_PER_S));
+            follower.set_target(to);
+        };
+        axis(this.trolley, x, TROLLEY_S_PER_CELL, TROLLEY_MAX_CELLS_PER_S);
+        axis(this.bridge, z, BRIDGE_S_PER_CELL, BRIDGE_MAX_CELLS_PER_S);
     }
 
-    set_cube_xz(pos) {
-        this.mover.position.x = pos.x;
-        this.mover.position.z = pos.z;
-        this.x_beam.position.z = pos.z;
-    }
-
-    move_system(offset) {
+    shift(offset) {
         this.mover.position.add(offset);
         this.x_beam.position.add(offset);
         this.end_sweep_pos.add(offset);
@@ -491,14 +341,12 @@ class Gantry {
         this.bridge.shift(offset.z);
     }
 
-    // Drop the paddle now, touching down drop_secs later (touchdown_s, on
-    // the scene clock: the exact scheduled time, which frame-quantised
-    // contact detection can trail slightly).
+    // Drop the paddle now, touching down drop_secs later (touchdown_s: that
+    // scheduled scene-clock time).
     start_pound(drop_secs) {
-        this.touchdown_s = this.parent_scene.clock.getElapsedTime() + drop_secs;
-        this.pound_movement_secs = drop_secs;
+        this.touchdown_s = this.scene.clock.getElapsedTime() + drop_secs;
+        this.pound_secs = drop_secs;
         this.striking = true;
-        this.pound_phase = 'slam';
         this.slam_from = this.paddle_h;
         this.pound_clock.start();
     }
@@ -516,66 +364,55 @@ export class GantryScene extends Scene {
             this.frustum_size * aspect / 2,
             this.frustum_size / 2,
             -this.frustum_size / 2, -1000, 1000);
+        this.camera = this.cam_orth;
         this.clear();
         this.clock = new THREE.Clock(true);
-        this.beat_idx = 0;
 
         this.base_group = new THREE.Group();
-        // Everything at logical positions; offset by -scroll so the followed
-        // point sits at the centre of the view.
+        this.base_group.rotation.x = PITCH_BASE;
+        this.base_group.rotation.y = YAW_BASE;
+        this.yaw = new SteppedRotation();
+        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.cur_color = new THREE.Color();
+        // Everything sits at logical positions (cell (row, col) at z = row *
+        // CELL, x = col * CELL) in world_group, offset by -scroll so the
+        // followed point is at the view's centre.
         this.world_group = new THREE.Group();
+        this.base_group.add(this.world_group);
+        this.add(this.base_group);
+
         this.sparks = [];
-        this.max_num_sparks = 64;
-        this.cur_spark_idx = 0;
-        for (let i = 0; i < this.max_num_sparks; i++) {
+        this.next_spark = 0;
+        for (let i = 0; i < MAX_SPARKS; i++) {
             const s = new Spark(0.2, "white", [0, 1]);
             s.active = false;
             s.flicker_frames = SPARK_FLICKER_FRAMES;
             s.life_s = 0;
+            s.acceleration.set(0, -SPARK_GRAVITY, 0);
             this.world_group.add(s);
             this.sparks.push(s);
         }
 
-        this.cube_base_size = 3;
-        this.cube_base_height = 3;
-        this.cube_base_spacing = 1;
-        this.pitch = this.cube_base_size + this.cube_base_spacing;
-
-        // Cube heights: a spring fabric over the cube window (see FABRIC_*).
         this.fabric = new SpringFabric(NUM_CUBES_PER_SIDE, {
             anchor: FABRIC_ANCHOR, coupling: FABRIC_COUPLING,
             damping: FABRIC_DAMPING, edge_cells: FABRIC_EDGE_CELLS,
         });
 
-        // The shared view rotation in eased steps (see YAW_BASE). Not
-        // `this.pitch`: that's the cell spacing.
-        this.yaw_step = new SteppedRotation();
-        this.pitch_step = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
-
-        // Cube colour blends between these with yaw: color_a when the grid
-        // sits at 0/180 deg, color_b at 90/270 deg.
-        this.color_a = new THREE.Color("magenta");
-        this.color_b = new THREE.Color("blue");
-        this.cur_color = new THREE.Color();
-
-        // Cube window: instance i * N + j shows cell (win_row + i, win_col + j),
-        // re-laid out every frame around the view (see anim_frame).
+        // Cube window: instance i * N + j shows cell (win_row + i, win_col + j).
         const [cube_wire_geom, cube_solid_geom] = create_instanced_cube_templates(
-            this.cube_base_size, this.cube_base_height, this.cube_base_size);
+            CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
         const num_cells = NUM_CUBES_PER_SIDE * NUM_CUBES_PER_SIDE;
         this.inst_cubes = new InstancedGeometryCollection(
             this.world_group, cube_wire_geom, 'Lines', num_cells);
         for (let k = 0; k < num_cells; k++) {
-            this.inst_cubes.create_geom(new THREE.Vector3(), this.color_a, UNIT_SCALE);
+            this.inst_cubes.create_geom(new THREE.Vector3(), COLOR_A, UNIT_SCALE);
         }
         this.win_row = 0;
         this.win_col = 0;
         this.cube_pos = new THREE.Vector3();
 
-        // Target outlines (see OUTLINE_FADE_IN_BEATS): a ring of instanced
-        // white wireframes, each on a cell with a fade level in [0, 1] and a
-        // direction (+1 fading in, -1 fading out). Depth testing is off and
-        // the render order high so they draw over the cube wireframes.
+        // Target outlines: a ring of slots, each on a cell with a fade in
+        // [0, 1] and a direction (+1 in, -1 out).
         this.outlines = new InstancedGeometryCollection(
             this.world_group, cube_wire_geom, 'Lines', MAX_OUTLINES);
         this.outlines.mat.depthTest = false;
@@ -589,79 +426,48 @@ export class GantryScene extends Scene {
         this.outline_dir = new Int8Array(MAX_OUTLINES);
         this.cur_outline = -1;      // slot outlining the current target
 
-        // Stamps: a ring of MAX_STAMPS struck cells, each with remaining stamp
-        // in [0, 1], drawn as dithered solids hidden at zero scale when spent.
+        // Stamps: a ring of struck cells, each fading from 1; hidden at zero
+        // scale when spent.
         this.stamp_fills = new InstancedGeometryCollection(
             this.world_group, cube_solid_geom, 'DitherFill', MAX_STAMPS);
         for (let k = 0; k < MAX_STAMPS; k++) {
-            this.stamp_fills.create_geom(new THREE.Vector3(), this.color_a, ZERO_SCALE);
+            this.stamp_fills.create_geom(new THREE.Vector3(), COLOR_A, ZERO_SCALE);
         }
         this.stamp_row = new Int32Array(MAX_STAMPS);
         this.stamp_col = new Int32Array(MAX_STAMPS);
         this.stamp_val = new Float32Array(MAX_STAMPS);
         this.next_stamp = 0;
 
-        // View follow: scroll is the logical (x, z) at the view centre.
+        // Scroll: the logical (x, z) at the view centre.
         this.scroll_x = new EasedFollower(0, FOLLOW_SECS);
         this.scroll_z = new EasedFollower(0, FOLLOW_SECS);
 
-        // Gantry pool. `active_gantries` is ordered upstream -> downstream (by row);
-        // `exiting` ones roll off before parking.
-        const width = NUM_CUBES_PER_SIDE * this.pitch;
+        // Gantries, ordered by row.
         this.gantries = [];
-        for (let i = 0; i < MAX_GANTRIES; i++) {
-            this.gantries.push(new Gantry(this, this.world_group, width,
-                new THREE.Vector3(0, 0, 0)));
-        }
-        this.active_gantries = [];
-        this.exiting = [];
-        this.target_count = GANTRY_COUNT;
         for (let k = 0; k < GANTRY_COUNT; k++) {
-            const g = this.gantries[k];
-            const row = Math.round((k - (GANTRY_COUNT - 1) / 2) * FORMATION_ROWS);
-            g.place_at(0, this.cell_z(row));
-            this.activate_gantry(g);
-            this.active_gantries.push(g);
+            const g = new Gantry(this, this.world_group, NUM_CUBES_PER_SIDE * CELL);
+            g.place_at(0, Math.round((k - (GANTRY_COUNT - 1) / 2) * FORMATION_ROWS) * CELL);
+            this.gantries.push(g);
         }
-        this.vector_angle = DEFAULT_VECTOR_ANGLE;   // knob 4, bound below
-        this.vector_cells = MAX_VECTOR_CELLS;       // knob 3, bound below
-        // Global target and last struck block, as [row, col] (struck null
-        // until the first strike); `assignee` is the gantry heading for the
-        // target (null while none can reach it yet).
-        this.target = [Math.round(this.row_of(this.active_gantries[0])), 0];
-        this.struck = null;
-        this.assignee = null;
-        this.last_striker = null;
-        this.last_contact_s = null;     // scheduled scene-clock s of the last touchdown
-        this.last_drop_s = MAX_POUND_S; // drop time of the last kick's slam
-        this.kick_td_s = null;          // scheduled touchdown of the latest kick
-        this.kick_intervals = [];       // recent kick-to-kick intervals, s
-        // Idle formation anchor (see action_point): slides from `from` (row,
-        // col) at t0 to the target at t1 (scene-clock s).
-        this.action = { from_row: 0, from_col: 0, t0: 0, t1: 0 };
-        this.action_vel = [0, 0];   // its velocity smoothed (ACTION_VEL_SMOOTH_S), cells/s
-        this.set_target(this.target);
 
-        // Targeting vector: knob 3 its length, knob 4 its direction.
+        this.vector_angle = DEFAULT_VECTOR_ANGLE;
+        this.vector_cells = MAX_VECTOR_CELLS;
         this.bind(CH_EXPAND_X, (n) => { this.vector_cells = n; },
             (norm) => lerp_scalar(MIN_VECTOR_CELLS, MAX_VECTOR_CELLS, norm));
         this.bind(CH_EXPAND_Y, (a) => { this.vector_angle = a; },
             (norm) => norm * 2 * Math.PI);
 
-        // Strike trail (see TRAIL_FADE_BEATS): a ring of struck cells with
-        // their strike times (beats), drawn as one segment per consecutive
-        // pair with per-vertex RGBA, over everything.
-        this.beats = 0;     // beats elapsed, for trail ages
+        // Strike trail: a ring of struck cells with their strike times (beats).
+        this.beats = 0;
         this.trail_row = new Int32Array(MAX_TRAIL);
         this.trail_col = new Int32Array(MAX_TRAIL);
         this.trail_beat = new Float32Array(MAX_TRAIL).fill(-Infinity);
         this.trail_next = 0;
-        // Cube corners (index bits = x, y, z sign) and its 12 edges (corner
-        // pairs differing in one bit); the offsets joined between consecutive
-        // points are the 8 corners, or just the centre.
-        const hx = this.cube_base_size / 2, hy = this.cube_base_height / 2;
+        // Cube corners (index bits = x, y, z sign) and edges (corner pairs
+        // differing in one bit).
+        const h = CUBE_SIZE / 2;
         this.cube_corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
-            [(i & 4 ? 1 : -1) * hx, (i & 2 ? 1 : -1) * hy, (i & 1 ? 1 : -1) * hx]);
+            [(i & 4 ? h : -h), (i & 2 ? h : -h), (i & 1 ? h : -h)]);
         this.cube_edges = [];
         for (let i = 0; i < 8; i++) {
             for (const bit of [1, 2, 4]) {
@@ -677,44 +483,44 @@ export class GantryScene extends Scene {
         this.trail_positions = new Float32Array(max_verts * 3);
         this.trail_colors = new Float32Array(max_verts * 4).fill(1);
         const trail_geom = new THREE.BufferGeometry();
-        trail_geom.setAttribute('position',
-            new THREE.BufferAttribute(this.trail_positions, 3));
-        trail_geom.setAttribute('color',
-            new THREE.BufferAttribute(this.trail_colors, 4));
+        trail_geom.setAttribute('position', new THREE.BufferAttribute(this.trail_positions, 3));
+        trail_geom.setAttribute('color', new THREE.BufferAttribute(this.trail_colors, 4));
         trail_geom.setDrawRange(0, 0);
         this.trail = new THREE.LineSegments(trail_geom,
-            new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false,
-                transparent: true }));
+            new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
         this.trail.renderOrder = 10;
         this.trail.frustumCulled = false;
         this.world_group.add(this.trail);
 
-        this.base_group.rotation.x = PITCH_BASE;
-        this.base_group.rotation.y = YAW_BASE;
-        this.base_group.add(this.world_group);
-        this.add(this.base_group);
+        // Targeting. `assignee` is the gantry heading for the target (null
+        // while none can reach it); `struck` is null until the first strike.
+        this.target = [Math.round(this.row_of(this.gantries[0])), 0];
+        this.struck = null;
+        this.assignee = null;
+        this.last_striker = null;
+        this.last_drop_s = MAX_POUND_S; // drop time of the last kick's slam
+        this.kick_td_s = null;          // scheduled touchdown of the latest kick
+        this.kick_intervals = [];       // recent kick-to-kick intervals, s
+        // Idle formation anchor: slides from `from` (row, col) at t0 to the
+        // target at t1 (scene-clock s). action_vel: its smoothed velocity.
+        this.action = { from_row: 0, from_col: 0, t0: 0, t1: 0 };
+        this.action_vel = [0, 0];
+        this.set_target(this.target);
 
-        this.camera = this.cam_orth;
-
-        // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
     }
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
 
-        this.base_group.rotation.x = this.pitch_step.update(dt,
+        this.base_group.rotation.x = this.pitch.update(dt,
             PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        const yaw = this.yaw_step.update(dt, this.view_yaw(STEPPED_SCALE));
+        const yaw = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
         this.base_group.rotation.y = YAW_BASE + yaw;
-        const cur_color = this.cur_color.lerpColors(this.color_a, this.color_b,
-            (1 - Math.cos(2 * yaw)) / 2);
+        const cur_color = this.cur_color.lerpColors(COLOR_A, COLOR_B, (1 - Math.cos(2 * yaw)) / 2);
 
-        // The target tracks the knob only while its gantry is waiting parked
-        // on it; once a gantry sets off for a target that target holds (the
-        // next target takes the knobs' vector at the strike), so knob turns
-        // never yank a moving gantry around. If no gantry could take the
-        // target yet, keep trying.
+        // The target follows the knobs only while its gantry waits on it, so
+        // knob turns never yank a moving gantry around.
         const waiting = this.assignee === null ||
             (this.assignee.at_rest_on_target() && !this.assignee.striking);
         if (this.struck !== null && waiting) {
@@ -731,78 +537,36 @@ export class GantryScene extends Scene {
         const sx = this.scroll_x.update(dt);
         const sz = this.scroll_z.update(dt);
         if (Math.abs(sx) > REBASE_DIST || Math.abs(sz) > REBASE_DIST) {
-            this.rebase(Math.round(sz / this.pitch), Math.round(sx / this.pitch));
+            this.rebase(Math.round(sz / CELL), Math.round(sx / CELL));
         }
         this.world_group.position.set(-this.scroll_x.value, 0, -this.scroll_z.value);
         const half = NUM_CUBES_PER_SIDE >> 1;
-        this.win_row = Math.round(this.scroll_z.value / this.pitch) - half;
-        this.win_col = Math.round(this.scroll_x.value / this.pitch) - half;
+        this.win_row = Math.round(this.scroll_z.value / CELL) - half;
+        this.win_col = Math.round(this.scroll_x.value / CELL) - half;
         this.fabric.set_origin(this.win_row, this.win_col);
         this.fabric.update(dt);
 
-        const elapsed_time = this.clock.getElapsedTime();
-        const cube_pos = this.cube_pos;
+        const pos = this.cube_pos;
         for (let i = 0; i < NUM_CUBES_PER_SIDE; i++) {
             for (let j = 0; j < NUM_CUBES_PER_SIDE; j++) {
-                cube_pos.set(this.cell_x(this.win_col + j), 0,
-                    this.cell_z(this.win_row + i));
-                cube_pos.y = this.wave_y(cube_pos, elapsed_time);
+                this.cell_pos(this.win_row + i, this.win_col + j, pos);
                 const idx = i * NUM_CUBES_PER_SIDE + j;
-                this.inst_cubes.set_pos(idx, cube_pos);
-                this.inst_cubes.set_color(idx, cur_color, this.edge_alpha(cube_pos));
+                this.inst_cubes.set_pos(idx, pos);
+                this.inst_cubes.set_color(idx, cur_color, this.edge_alpha(pos));
             }
         }
-        this.update_outlines(dt * beats_per_sec, elapsed_time);
-
-        // Stamps follow their cube and dissolve (eased) to transparent;
-        // hidden at zero scale once spent or outside the window.
-        const stamp_decay = dt * beats_per_sec / STAMP_BEATS;
-        for (let k = 0; k < MAX_STAMPS; k++) {
-            if (this.stamp_val[k] <= 0) {
-                continue;
-            }
-            const stamp = Math.max(0, this.stamp_val[k] - stamp_decay);
-            this.stamp_val[k] = stamp;
-            const i = this.stamp_row[k] - this.win_row;
-            const j = this.stamp_col[k] - this.win_col;
-            const shown = stamp > 0 && i >= 0 && i < NUM_CUBES_PER_SIDE &&
-                j >= 0 && j < NUM_CUBES_PER_SIDE;
-            if (shown) {
-                cube_pos.set(this.cell_x(this.stamp_col[k]), 0,
-                    this.cell_z(this.stamp_row[k]));
-                cube_pos.y = this.wave_y(cube_pos, elapsed_time);
-                this.stamp_fills.set_pos(k, cube_pos);
-                this.stamp_fills.set_color(k, cur_color,
-                    STAMP_MAX_OPACITY * ease(stamp) * this.edge_alpha(cube_pos));
-            }
-            this.stamp_fills.set_scale(k, shown ? UNIT_SCALE : ZERO_SCALE);
-        }
+        this.update_outlines(dt * beats_per_sec);
+        this.update_stamps(dt * beats_per_sec, cur_color);
 
         // Passed over the target with no kick: ease back onto it and wait.
         const g_a = this.assignee;
-        if (g_a !== null && !g_a.striking &&
-                g_a.coast_secs() > SLAM_GRACE_S) {
-            g_a.move_to(this.cell_x(this.target[1]), this.cell_z(this.target[0]));
+        if (g_a !== null && !g_a.striking && g_a.coast_secs() > SLAM_GRACE_S) {
+            g_a.move_to(this.target[1] * CELL, this.target[0] * CELL);
         }
         this.update_idle_goals(dt);
         this.update_paddle_goals();
-        for (const g of this.active_gantries) {
-            g.anim_frame(dt);
-        }
-        for (const g of this.exiting) {
-            g.anim_frame(dt);
-        }
-        // Exited gantries park (hidden) once they've rolled off the window.
-        for (let k = this.exiting.length - 1; k >= 0; k--) {
-            const g = this.exiting[k];
-            if (g.move_done()) {
-                g.state = 'parked';
-                g.set_visible(false);
-                this.exiting.splice(k, 1);
-            }
-        }
-        // Bridges span the window, centred on the view.
         for (const g of this.gantries) {
+            g.anim_frame(dt);
             g.x_beam.position.x = this.scroll_x.value;
         }
 
@@ -815,42 +579,38 @@ export class GantryScene extends Scene {
         }
 
         this.beats += dt * beats_per_sec;
-        this.update_trail(elapsed_time);
+        this.update_trail();
     }
 
-    // Cube opacity [0, 1] at logical position pos (y ignored): 1 at the view's
-    // centre, easing to 0 at CUBE_FADE_HALF_CELLS (see EDGE_FADE_BAND).
+    // Logical position of cell (row, col) at its fabric height, into `out`.
+    cell_pos(row, col, out) {
+        return out.set(col * CELL, this.fabric.height(row, col), row * CELL);
+    }
+
+    // Cube opacity at logical position pos (see EDGE_FADE_BAND).
     edge_alpha(pos) {
         const dist = Math.max(Math.abs(pos.x - this.scroll_x.value),
-            Math.abs(pos.z - this.scroll_z.value)) / (CUBE_FADE_HALF_CELLS * this.pitch);
+            Math.abs(pos.z - this.scroll_z.value)) / (CUBE_FADE_HALF_CELLS * CELL);
         return ease(clamp((1 - dist) / EDGE_FADE_BAND, 0, 1));
     }
 
-    // Fabric height at logical position pos (y ignored), at its cell.
-    wave_y(pos, elapsed_time) {
-        return this.fabric.height(Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch));
-    }
-
-    // Start fading out the current target's outline and fade one in on
-    // (row, col). If that cell's outline is still fading out, reverse it
-    // (so it brightens from where it is rather than a second one appearing
-    // over it); otherwise reuse the faintest slot not fading in.
+    // Fade out the current target's outline and fade one in on (row, col):
+    // reversing that cell's own outline if it is still fading out, else
+    // reusing the faintest slot not fading in.
     outline_target(row, col) {
         if (this.cur_outline >= 0) {
             this.outline_dir[this.cur_outline] = -1;
         }
         let k = -1;
         for (let i = 0; i < MAX_OUTLINES; i++) {
-            if (this.outline_fade[i] > 0 && this.outline_row[i] == row &&
-                    this.outline_col[i] == col) {
+            if (this.outline_fade[i] > 0 && this.outline_row[i] == row && this.outline_col[i] == col) {
                 k = i;
                 break;
             }
         }
         if (k < 0) {
             for (let i = 0; i < MAX_OUTLINES; i++) {
-                if (this.outline_dir[i] <= 0 &&
-                        (k < 0 || this.outline_fade[i] < this.outline_fade[k])) {
+                if (this.outline_dir[i] <= 0 && (k < 0 || this.outline_fade[i] < this.outline_fade[k])) {
                     k = i;
                 }
             }
@@ -862,32 +622,40 @@ export class GantryScene extends Scene {
         this.cur_outline = k;
     }
 
-    // Advance the outline fades by d_beats and place each outline on its
-    // cell at the ripple height, with alpha eased like a stamp's fill.
-    update_outlines(d_beats, elapsed_time) {
-        const pos = this.cube_pos;
+    update_outlines(d_beats) {
         for (let k = 0; k < MAX_OUTLINES; k++) {
             const rate = this.outline_dir[k] > 0 ? 1 / OUTLINE_FADE_IN_BEATS : 1 / STAMP_BEATS;
             const fade = clamp(this.outline_fade[k] + this.outline_dir[k] * d_beats * rate, 0, 1);
             this.outline_fade[k] = fade;
-            pos.set(this.cell_x(this.outline_col[k]), 0, this.cell_z(this.outline_row[k]));
-            pos.y = this.wave_y(pos, elapsed_time);
-            this.outlines.set_pos(k, pos);
+            this.outlines.set_pos(k, this.cell_pos(this.outline_row[k], this.outline_col[k], this.cube_pos));
             this.outlines.set_color(k, WHITE, ease(fade));
         }
     }
 
-    // Record a strike at (row, col) on the trail.
-    add_trail_point(row, col) {
-        const k = this.trail_next;
-        this.trail_next = (k + 1) % MAX_TRAIL;
-        this.trail_row[k] = row;
-        this.trail_col[k] = col;
-        this.trail_beat[k] = this.beats;
+    update_stamps(d_beats, color) {
+        const decay = d_beats / STAMP_BEATS;
+        for (let k = 0; k < MAX_STAMPS; k++) {
+            if (this.stamp_val[k] <= 0) {
+                continue;
+            }
+            const stamp = Math.max(0, this.stamp_val[k] - decay);
+            this.stamp_val[k] = stamp;
+            const i = this.stamp_row[k] - this.win_row;
+            const j = this.stamp_col[k] - this.win_col;
+            const shown = stamp > 0 && i >= 0 && i < NUM_CUBES_PER_SIDE &&
+                j >= 0 && j < NUM_CUBES_PER_SIDE;
+            if (shown) {
+                const pos = this.cell_pos(this.stamp_row[k], this.stamp_col[k], this.cube_pos);
+                this.stamp_fills.set_pos(k, pos);
+                this.stamp_fills.set_color(k, color,
+                    STAMP_MAX_OPACITY * ease(stamp) * this.edge_alpha(pos));
+            }
+            this.stamp_fills.set_scale(k, shown ? UNIT_SCALE : ZERO_SCALE);
+        }
     }
 
-    // Append a trail line from point a + offset oa to point b + offset ob,
-    // each end with its point's alpha (written straight into the buffers).
+    // Append a trail line from point a + offset oa to b + offset ob, each end
+    // with its point's alpha.
     trail_line(a, oa, b, ob) {
         const p = this.trail_positions, c = this.trail_colors, n = this.trail_lines++;
         p[6 * n] = a.x + oa[0];
@@ -900,12 +668,8 @@ export class GantryScene extends Scene {
         c[8 * n + 7] = b.a;
     }
 
-    // Rebuild the trail lines, oldest to newest: each live point at its
-    // block's centre and current ripple height with alpha eased down by age;
-    // its cube's edges (TRAIL_CUBES), and lines from the previous live point
-    // (one per corner, or centre to centre).
-    update_trail(elapsed_time) {
-        const pos = this.cube_pos;
+    // Rebuild the trail, oldest to newest, fading each point by age.
+    update_trail() {
         this.trail_lines = 0;
         let prev = null;
         for (let i = 0; i < MAX_TRAIL; i++) {
@@ -916,10 +680,10 @@ export class GantryScene extends Scene {
                 continue;
             }
             const pt = this.trail_pts[k];
-            pos.set(this.cell_x(this.trail_col[k]), 0, this.cell_z(this.trail_row[k]));
-            pt.x = pos.x;
-            pt.y = this.wave_y(pos, elapsed_time);
-            pt.z = pos.z;
+            this.cell_pos(this.trail_row[k], this.trail_col[k], this.cube_pos);
+            pt.x = this.cube_pos.x;
+            pt.y = this.cube_pos.y;
+            pt.z = this.cube_pos.z;
             pt.a = ease(1 - age / TRAIL_FADE_BEATS);
             if (TRAIL_CUBES) {
                 for (const [c0, c1] of this.cube_edges) {
@@ -939,37 +703,8 @@ export class GantryScene extends Scene {
         geom.attributes.color.needsUpdate = true;
     }
 
-    // Every ROLL_BEATS, apply one step of any gantry-count change: roll a
-    // parked gantry in from the window's upstream edge (it then joins the
-    // formation), or roll the most downstream one off the window.
-    handle_sync(t, bpm, beat) {
-        this.beat_idx++;
-        if (beat % ROLL_BEATS != 0) {
-            return;
-        }
-        const parked = this.gantries.find((g) => g.state == 'parked');
-        if (this.active_gantries.length < this.target_count && parked !== undefined) {
-            // (none parked while every gantry is still rolling out: retry
-            // next time)
-            parked.place_at(this.cell_x(this.target[1]), this.cell_z(this.win_row));
-            this.activate_gantry(parked);
-            this.active_gantries.unshift(parked);
-        } else if (this.active_gantries.length > this.target_count) {
-            const g = this.active_gantries.pop();
-            g.state = 'exiting';
-            g.tracking = false;
-            g.paddle_goal = 0;
-            g.move_to(g.end_sweep_pos.x,
-                this.cell_z(this.win_row + NUM_CUBES_PER_SIDE - 1));
-            this.exiting.push(g);
-            if (g === this.assignee) {
-                this.set_target(this.target);
-            }
-        }
-    }
-
-    // Kick: if the assigned gantry will be over the target by touchdown, it
-    // strikes; the drop is scheduled to touch down on the beat.
+    // Kick: if the assignee will be over the target at touchdown, it strikes,
+    // the drop timed to touch down on the beat.
     handle_beat(t, channel) {
         if (channel != 1 && channel != 5) {
             return;
@@ -982,8 +717,6 @@ export class GantryScene extends Scene {
             if (g === null || g.striking) {
                 return;
             }
-            // Parked on the block, over it at touchdown, or a small re-time
-            // makes it so.
             const late_s = Math.abs(g.secs_to_pass() - drop_secs);
             if (g.at_rest_on_target() || late_s <= STRIKE_TOLERANCE_S ||
                     (late_s <= RETIME_MAX_S && g.retime_pass(drop_secs))) {
@@ -992,23 +725,18 @@ export class GantryScene extends Scene {
         }, Math.max(0, delay - drop_secs) * 1000);
     }
 
-    // Paddle touchdown: ripple, sparks, stamp and a trail point at the struck
-    // block; the next target is chosen straight away so another gantry can
-    // start for it while this one lifts.
+    // Paddle touchdown: effects at the struck block, and the next target
+    // straight away so another gantry can set off while this one lifts.
     on_contact(g) {
         this.last_striker = g;
-        // The assignee may be passing over its block rather than parked on
-        // it, so place the hit exactly at the target block.
-        const pos = g === this.assignee ?
-            new THREE.Vector3(this.cell_x(this.target[1]), 0, this.cell_z(this.target[0])) :
-            g.mover.position;
-        this.create_sparks(new THREE.Vector3(pos.x, 1.5, pos.z), 5, 25, "white",
-            g.trolley.vel, g.bridge.vel);
-        this.kick_fabric(new THREE.Vector3(pos.x, 0, pos.z));
-        this.stamp_at(pos);
-        this.struck = [Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch)];
-        this.add_trail_point(...this.struck);
-        this.last_contact_s = g.touchdown_s;
+        // The assignee may be passing over its block, so hit exactly there.
+        const [row, col] = g === this.assignee ? this.target :
+            [Math.round(g.mover.position.z / CELL), Math.round(g.mover.position.x / CELL)];
+        this.create_sparks(col * CELL, row * CELL, g.trolley.vel, g.bridge.vel);
+        this.fabric.kick(row, col, -FABRIC_STRIKE_VEL);
+        this.stamp_at(row, col);
+        this.add_trail_point(row, col);
+        this.struck = [row, col];
         this.set_target(this.aim_from(this.struck));
     }
 
@@ -1019,27 +747,24 @@ export class GantryScene extends Scene {
     }
 
     // Make [row, col] the target and point the view there. With `reselect`
-    // (a new target after a strike, or none assigned yet) pick its gantry
-    // afresh; otherwise (the knob re-aiming it) keep the current one if it
-    // can still reach the row. Then send it.
+    // pick its gantry afresh; otherwise (the knobs re-aiming it) keep the
+    // current one if it can still reach the row.
     set_target([row, col], reselect = true) {
         const k_cur = this.cur_outline;
         if (k_cur < 0 || this.outline_row[k_cur] != row || this.outline_col[k_cur] != col) {
             this.outline_target(row, col);
         }
-        if (this.target === undefined || row != this.target[0] || col != this.target[1]) {
-            // The idle anchor slides on from wherever it is now to the new
-            // target, arriving at its predicted touchdown.
+        if (row != this.target[0] || col != this.target[1]) {
+            // The idle anchor slides on to the new target, arriving at its
+            // predicted touchdown.
             const now = this.clock.getElapsedTime();
-            const [from_row, from_col] = this.target === undefined ? [row, col] :
-                this.action_point(now);
+            const [from_row, from_col] = this.action_point(now);
             const budget = this.travel_budget_secs();
             const span = Number.isFinite(budget) ? budget + TRAVEL_SAFETY_S : this.beat_period_s();
             this.action = { from_row, from_col, t0: now, t1: now + span };
         }
         this.target = [row, col];
-        const keep = !reselect && this.assignee !== null &&
-            this.can_reach_row(this.assignee, row);
+        const keep = !reselect && this.assignee !== null && this.can_reach_row(this.assignee, row);
         if (!keep) {
             const best = this.choose_assignee(row, col);
             this.assignee = (reselect && this.plan_swap(best, row, col)) || best;
@@ -1047,49 +772,39 @@ export class GantryScene extends Scene {
         if (this.assignee !== null) {
             this.send_assignee();
         }
-        this.scroll_x.set_target(this.cell_x(col));
-        this.scroll_z.set_target(this.cell_z(row));
+        this.scroll_x.set_target(col * CELL);
+        this.scroll_z.set_target(row * CELL);
     }
 
-    // Whether g can head for `row` without crossing a neighbour's bridge.
     can_reach_row(g, row) {
-        const [lo, hi] = this.row_limits(this.active_gantries.indexOf(g));
+        const [lo, hi] = this.row_limits(this.gantries.indexOf(g));
         return row >= lo && row <= hi;
     }
 
-    // If `best` (chosen for cell (row, col)) is an outer gantry that also
-    // struck last, hand the target to its inner neighbour instead, so that a
-    // free gantry stays on each side of the action; returns that neighbour,
-    // or null if the swap can't be done cleanly. The outer gantry yields
-    // outward over the same time the inner one takes to reach the target, to
-    // a row at least MIN_ROW_GAP beyond it and at least as far as the inner
-    // one travels: both moves start together, so the gap between their
-    // bridges only grows. Only when both moves fit the beat at
-    // SWAP_CELLS_PER_S (once swapped, the inner one keeps the run), the outer
-    // one isn't moving inward, and both have room.
+    // If `best` is an outer gantry that also struck last, hand the target to
+    // its inner neighbour so a free gantry stays on each side of the action;
+    // returns that neighbour, or null if it can't be done cleanly. The outer
+    // one yields outward over the same budget, at least MIN_ROW_GAP beyond the
+    // target and as far as the inner one travels, so their gap only grows.
     plan_swap(best, row, col) {
-        const n = this.active_gantries.length;
+        const n = this.gantries.length;
         const centre = (n - 1) / 2;
-        const k = this.active_gantries.indexOf(best);
-        if (n < 3 || best === null || best !== this.last_striker ||
-                Math.abs(k - centre) <= 0.5) {
+        const k = this.gantries.indexOf(best);
+        if (n < 3 || best === null || best !== this.last_striker || Math.abs(k - centre) <= 0.5) {
             return null;
         }
         const dir = k > centre ? 1 : -1;    // outward, in rows
-        const inner = this.active_gantries[k - dir];
+        const inner = this.gantries[k - dir];
         if (inner.striking || best.bridge.vel * dir < 0) {
             return null;
         }
-        const x = this.cell_x(col);
-        const z = this.cell_z(row);
         const budget = this.travel_budget_secs();
-        const swap_secs = (cells) => 1.5 * cells / SWAP_CELLS_PER_S;
         if (!Number.isFinite(budget) ||
-                swap_secs(inner.fastest_secs_to(x, z) * MAX_HURRY_CELLS_PER_S / 1.5) > budget) {
+                min_move_secs(inner.cells_to(col * CELL, row * CELL), SWAP_CELLS_PER_S) > budget) {
             return null;
         }
         // The inner gantry's own far side must leave it room for the row.
-        const far = this.active_gantries[k - 2 * dir];
+        const far = this.gantries[k - 2 * dir];
         if (far !== undefined) {
             const span = this.row_span(far);
             if (dir > 0 ? row < span[1] + MIN_ROW_GAP : row > span[0] - MIN_ROW_GAP) {
@@ -1099,11 +814,10 @@ export class GantryScene extends Scene {
         const inner_travel = Math.max(0, (row - this.row_of(inner)) * dir);
         const yield_row = this.row_of(best) + dir * Math.max(inner_travel,
             (row - this.row_of(best)) * dir + MIN_ROW_GAP);
-        // It must get clear at least as fast as the inner one closes in.
-        if (swap_secs(Math.abs(yield_row - this.row_of(best))) > budget) {
+        if (min_move_secs(Math.abs(yield_row - this.row_of(best)), SWAP_CELLS_PER_S) > budget) {
             return null;
         }
-        const beyond = this.active_gantries[k + dir];
+        const beyond = this.gantries[k + dir];
         if (beyond !== undefined) {
             const span = this.row_span(beyond);
             if (dir > 0 ? yield_row > span[0] - MIN_ROW_GAP : yield_row < span[1] + MIN_ROW_GAP) {
@@ -1112,31 +826,28 @@ export class GantryScene extends Scene {
         }
         best.tracking = false;
         best.yield_until = this.clock.getElapsedTime() + budget;
-        // Across the columns it just eases to a stop from its current
-        // momentum (a smooth stop from v over the budget covers v * budget / 2).
-        best.move_to(best.mover.position.x + best.trolley.vel * budget / 2,
-            this.cell_z(yield_row), budget);
+        // Across the columns it eases to a stop from its current momentum
+        // (covering v * budget / 2).
+        best.move_to(best.mover.position.x + best.trolley.vel * budget / 2, yield_row * CELL, budget);
         return inner;
     }
 
-    // The gantry to strike cell (row, col), among those that can reach its
-    // row without crossing a bridge (null if none yet; anim_frame retries).
-    // Priority: making the next touchdown at a comfortable speed (else at
-    // the hurry cap), not having just struck (taking turns, for visual
-    // interest, where the bridges allow), then the shortest relaxed travel.
+    // The gantry to strike (row, col) among those that can reach its row
+    // (null if none). Priority: making the touchdown at a comfortable speed
+    // (else at the hurry cap), not having just struck, then shortest travel.
     choose_assignee(row, col) {
-        const x = this.cell_x(col);
-        const z = this.cell_z(row);
+        const x = col * CELL;
+        const z = row * CELL;
         const budget = this.travel_budget_secs();
         let best = null, best_key = null;
-        for (const g of this.active_gantries) {
+        for (const g of this.gantries) {
             if (!this.can_reach_row(g, row)) {
                 continue;
             }
-            const fastest = g.fastest_secs_to(x, z);
-            const comfortable = fastest * MAX_HURRY_CELLS_PER_S / COMFORT_CELLS_PER_S;
-            const key = [comfortable <= budget ? 0 : fastest <= budget ? 1 : 2,
-                g === this.last_striker ? 1 : 0, g.travel_secs_to(x, z)];
+            const cells = g.cells_to(x, z);
+            const speed_rank = min_move_secs(cells, COMFORT_CELLS_PER_S) <= budget ? 0 :
+                min_move_secs(cells, MAX_HURRY_CELLS_PER_S) <= budget ? 1 : 2;
+            const key = [speed_rank, g === this.last_striker ? 1 : 0, g.travel_secs_to(x, z)];
             if (best_key === null || lex_less(key, best_key)) {
                 best = g;
                 best_key = key;
@@ -1145,8 +856,7 @@ export class GantryScene extends Scene {
         return best;
     }
 
-    // Note a kick whose slam (drop_secs long) would touch down at td_s (see
-    // KICK_HISTORY).
+    // Note a kick whose slam (drop_secs long) touches down at td_s.
     record_kick(td_s, drop_secs) {
         if (this.kick_td_s !== null) {
             const interval = td_s - this.kick_td_s;
@@ -1167,12 +877,11 @@ export class GantryScene extends Scene {
         if (n < 2) {
             return 60 / this.get_local_bpm();
         }
-        const sorted = [...this.kick_intervals].sort((a, b) => a - b);
-        return sorted[n >> 1];
+        return [...this.kick_intervals].sort((a, b) => a - b)[n >> 1];
     }
 
-    // The first predicted touchdown (scene-clock s) at or after t_min: the
-    // latest kick's touchdown plus whole periods. Null before any kick.
+    // First predicted touchdown (scene-clock s) at or after t_min; null
+    // before any kick.
     next_touchdown_s(t_min) {
         if (this.kick_td_s === null) {
             return null;
@@ -1181,67 +890,51 @@ export class GantryScene extends Scene {
         return this.kick_td_s + Math.max(0, Math.ceil((t_min - this.kick_td_s) / period)) * period;
     }
 
-    // Seconds the assignee has to reach the target: until TRAVEL_SAFETY_S
-    // before the next predicted touchdown at least MIN_TRAVEL_S away.
-    // Unlimited before the first kick.
+    // Seconds the assignee has to reach the target (Infinity before any kick).
     travel_budget_secs() {
         const now = this.clock.getElapsedTime();
         const td = this.next_touchdown_s(now + MIN_TRAVEL_S + TRAVEL_SAFETY_S);
         return td === null ? Infinity : td - TRAVEL_SAFETY_S - now;
     }
 
-    // Send the assignee to the target (leaving any idle glide with its
-    // momentum). Before the first kick it travels there and stops; after that
-    // it passes over it at the predicted touchdown, still moving (see
-    // STRIKE_TOLERANCE_S).
+    // Send the assignee to the target: before any kick it travels there and
+    // stops; after, it passes over it at the predicted touchdown with its own
+    // momentum, the bridge's share capped so its overshoot stays in its rows.
     send_assignee() {
         const g = this.assignee;
         g.tracking = false;
-        const x = this.cell_x(this.target[1]);
-        const z = this.cell_z(this.target[0]);
+        const x = this.target[1] * CELL;
+        const z = this.target[0] * CELL;
         if (this.kick_td_s === null) {
             g.move_to(x, z);
             return;
         }
-        // It knows only the target, so it passes over it keeping its own
-        // momentum: the direction it approaches from, at its average speed,
-        // with the bridge's share capped so its overshoot stays in its rows.
         const arrive_secs = this.travel_budget_secs() + TRAVEL_SAFETY_S;
-        const [lo, hi] = this.row_limits(this.active_gantries.indexOf(g));
+        const [lo, hi] = this.row_limits(this.gantries.indexOf(g));
         const row = this.target[0];
-        const vz_limit = (rows) => Math.max(0, rows) * this.pitch / OVERSHOOT_S;
+        const vz_limit = (rows) => Math.max(0, rows) * CELL / OVERSHOOT_S;
         g.pass_through(x, z, arrive_secs, {
             x: (x - g.mover.position.x) / arrive_secs,
-            z: clamp((z - g.mover.position.z) / arrive_secs,
-                -vz_limit(row - lo), vz_limit(hi - row)),
+            z: clamp((z - g.mover.position.z) / arrive_secs, -vz_limit(row - lo), vz_limit(hi - row)),
         });
     }
 
-    // Paddles stay up, except the assignee's, which eases down to READY_H as
-    // the predicted next touchdown comes within ANTICIPATE_S (while still
-    // travelling) so the kick's slam only has the last stretch to go.
+    // Paddles stay up except the assignee's (see ANTICIPATE_S).
     update_paddle_goals() {
         const now = this.clock.getElapsedTime();
         let anticipation = 0;
-        // Next predicted slam start (still counting it until SLAM_GRACE_S
-        // after it was due), and when to be at READY_H.
         const td = this.next_touchdown_s(now - SLAM_GRACE_S + this.last_drop_s);
         if (td !== null) {
             const to_ready = td - this.last_drop_s - PADDLE_SMOOTH_S - now;
             anticipation = ease(clamp(1 - to_ready / ANTICIPATE_S, 0, 1));
         }
-        for (const g of this.active_gantries) {
-            const ready = g === this.assignee;
-            g.paddle_goal = ready ? READY_H * anticipation : 0;
+        for (const g of this.gantries) {
+            g.paddle_goal = g === this.assignee ? READY_H * anticipation : 0;
         }
     }
 
-    // The idle formation's anchor (fractional [row, col]) at scene time t: it
-    // slides at constant speed from where it was when the target last
-    // changed to that target, arriving at the predicted touchdown, then rests
-    // there. Built from targets only (no knob prediction): with steady
-    // strikes it moves continuously with the action, and with no new target
-    // it waits on the current one, ready to head anywhere.
+    // The idle formation's anchor (fractional [row, col]) at scene time t:
+    // sliding at constant speed from where it was to the target, then resting.
     action_point(t) {
         const a = this.action;
         const u = a.t1 > a.t0 ? clamp((t - a.t0) / (a.t1 - a.t0), 0, 1) : 1;
@@ -1249,8 +942,7 @@ export class GantryScene extends Scene {
             a.from_col + (this.target[1] - a.from_col) * u];
     }
 
-    // The anchor's velocity at scene time t, [rows/s, cols/s] (0 once it
-    // has arrived).
+    // The anchor's velocity at t, [rows/s, cols/s].
     action_velocity(t) {
         const a = this.action;
         if (!(t >= a.t0 && t < a.t1)) {
@@ -1260,11 +952,9 @@ export class GantryScene extends Scene {
         return [(this.target[0] - a.from_row) / span, (this.target[1] - a.from_col) / span];
     }
 
-    // Set every idle gantry's glide goal for this frame: bridges
-    // FORMATION_ROWS apart centred on the anchor's row by bridge order (so the
-    // middle gantries flank it and the outer ones cover either side), clamped
-    // clear of their neighbours; trolleys level with it. Both lead the anchor
-    // along its smoothed velocity (see IDLE_SMOOTH_S).
+    // Set idle gantries' glide goals: bridges FORMATION_ROWS apart centred on
+    // the anchor's row (clamped clear of their neighbours), trolleys level
+    // with it, both led by its smoothed velocity.
     update_idle_goals(dt) {
         const now = this.clock.getElapsedTime();
         const [action_row, action_col] = this.action_point(now);
@@ -1274,144 +964,108 @@ export class GantryScene extends Scene {
         av[0] += (v_row - av[0]) * k;
         av[1] += (v_col - av[1]) * k;
         const lead_row = action_row + av[0] * IDLE_SMOOTH_S;
-        const ready_x = this.cell_x(action_col + av[1] * IDLE_SMOOTH_S);
-        const centre = (this.active_gantries.length - 1) / 2;
-        for (let i = 0; i < this.active_gantries.length; i++) {
-            const g = this.active_gantries[i];
+        const ready_x = (action_col + av[1] * IDLE_SMOOTH_S) * CELL;
+        const centre = (this.gantries.length - 1) / 2;
+        for (let i = 0; i < this.gantries.length; i++) {
+            const g = this.gantries[i];
             if (g === this.assignee || g.yield_until > now) {
                 continue;
             }
             const [lo, hi] = this.row_limits(i);
-            const home = lo <= hi ?
-                clamp(lead_row + (i - centre) * FORMATION_ROWS, lo, hi) :
-                this.row_of(g);
+            const home = lo <= hi ? clamp(lead_row + (i - centre) * FORMATION_ROWS, lo, hi) : this.row_of(g);
             g.tracking = true;
             g.goal_x = ready_x;
-            g.goal_z = this.cell_z(home);
+            g.goal_z = home * CELL;
             g.end_sweep_pos.set(g.goal_x, g.base_y, g.goal_z);
         }
     }
 
-    // Put gantry g to work.
-    activate_gantry(g) {
-        g.state = 'active';
-        g.striking = false;
-        g.pound_phase = 'free';
-        g.paddle_h = 0;
-        g.paddle_glide.reset(0);
-        g.paddle_goal = 0;
-        g.set_visible(true);
-    }
-
-    cell_x(col) {
-        return col * this.pitch;
-    }
-
-    cell_z(row) {
-        return row * this.pitch;
-    }
-
-    // Fractional grid row under a gantry's bridge, and the row it's heading to.
+    // Fractional row under a gantry's bridge.
     row_of(g) {
-        return g.mover.position.z / this.pitch;
+        return g.mover.position.z / CELL;
     }
 
-    target_row_of(g) {
-        return g.end_sweep_pos.z / this.pitch;
-    }
-
-    // [min, max] rows g may occupy on its current move: from where it is to
-    // its target, plus how far a pass-through can overshoot the target
-    // (OVERSHOOT_S at its passing speed).
+    // [min, max] rows g may occupy on its current move, including a
+    // pass-through's overshoot.
     row_span(g) {
         const now = this.row_of(g);
-        const target = this.target_row_of(g);
-        const coast = g.bridge.to_vel * OVERSHOOT_S / this.pitch;
+        const target = g.end_sweep_pos.z / CELL;
+        const coast = g.bridge.to_vel * OVERSHOOT_S / CELL;
         return [Math.min(now, target, target + coast), Math.max(now, target, target + coast)];
     }
 
-    // [lo, hi] rows the k-th active gantry may head for: MIN_ROW_GAP clear of
-    // both neighbours' row spans (see row_span). With every move kept inside
-    // these limits bridges never cross, however many gantries are moving.
-    // Empty (lo > hi) if squeezed shut.
+    // [lo, hi] rows the k-th gantry may head for, MIN_ROW_GAP clear of both
+    // neighbours' spans, so bridges never cross (lo > hi if squeezed shut).
     row_limits(k) {
-        const up = this.active_gantries[k - 1];
-        const down = this.active_gantries[k + 1];
+        const up = this.gantries[k - 1];
+        const down = this.gantries[k + 1];
         const lo = up ? Math.ceil(this.row_span(up)[1] + MIN_ROW_GAP) : -Infinity;
         const hi = down ? Math.floor(this.row_span(down)[0] - MIN_ROW_GAP) : Infinity;
         return [lo, hi];
     }
 
-    // Stamp the cell under a pounding paddle (logical position `pos`).
-    stamp_at(pos) {
+    stamp_at(row, col) {
         const k = this.next_stamp;
         this.next_stamp = (k + 1) % MAX_STAMPS;
-        this.stamp_row[k] = Math.round(pos.z / this.pitch);
-        this.stamp_col[k] = Math.round(pos.x / this.pitch);
+        this.stamp_row[k] = row;
+        this.stamp_col[k] = col;
         this.stamp_val[k] = 1;
     }
 
-    // Shift every logical position by (-d_row, -d_col) cells so coordinates
-    // stay near the origin; nothing visibly moves.
+    add_trail_point(row, col) {
+        const k = this.trail_next;
+        this.trail_next = (k + 1) % MAX_TRAIL;
+        this.trail_row[k] = row;
+        this.trail_col[k] = col;
+        this.trail_beat[k] = this.beats;
+    }
+
+    // Shift every logical position by (-d_row, -d_col) cells; nothing
+    // visibly moves.
     rebase(d_row, d_col) {
-        const offset = new THREE.Vector3(-d_col * this.pitch, 0, -d_row * this.pitch);
+        const offset = new THREE.Vector3(-d_col * CELL, 0, -d_row * CELL);
         for (const g of this.gantries) {
-            g.move_system(offset);
+            g.shift(offset);
         }
-        this.fabric.shift_labels(d_row, d_col);
         for (const s of this.sparks) {
             s.position.add(offset);
         }
-        for (let k = 0; k < MAX_STAMPS; k++) {
-            this.stamp_row[k] -= d_row;
-            this.stamp_col[k] -= d_col;
+        this.fabric.shift_labels(d_row, d_col);
+        for (const [rows, cols] of [[this.stamp_row, this.stamp_col],
+                [this.outline_row, this.outline_col], [this.trail_row, this.trail_col]]) {
+            for (let k = 0; k < rows.length; k++) {
+                rows[k] -= d_row;
+                cols[k] -= d_col;
+            }
         }
         this.target = [this.target[0] - d_row, this.target[1] - d_col];
-        this.action.from_row -= d_row;
-        this.action.from_col -= d_col;
-        for (let k = 0; k < MAX_OUTLINES; k++) {
-            this.outline_row[k] -= d_row;
-            this.outline_col[k] -= d_col;
-        }
-        for (let k = 0; k < MAX_TRAIL; k++) {
-            this.trail_row[k] -= d_row;
-            this.trail_col[k] -= d_col;
-        }
         if (this.struck !== null) {
             this.struck = [this.struck[0] - d_row, this.struck[1] - d_col];
         }
+        this.action.from_row -= d_row;
+        this.action.from_col -= d_col;
         this.scroll_x.shift(offset.x);
         this.scroll_z.shift(offset.z);
     }
 
-    // A strike at pos: kick the fabric down at its cell.
-    kick_fabric(pos) {
-        this.fabric.kick(Math.round(pos.z / this.pitch), Math.round(pos.x / this.pitch),
-            -FABRIC_STRIKE_VEL);
-    }
-
-    // A ring of 16 sparks thrown up and out from pos, each slightly
-    // randomized (SPARK_*_JITTER), carried along by the striker's velocity
-    // (base_vx / base_vz, world units/s; see SPARK_INHERIT_VEL).
-    create_sparks(pos, num, avg_vel, color, base_vx = 0, base_vz = 0) {
-        for (let i = 0; i < 16; i++) {
-            const spark = this.sparks[this.cur_spark_idx];
-            // avg_vel is per axis (0.5 up, 0.5 out), so the speed is / sqrt 2.
-            const speed = avg_vel * Math.SQRT1_2 * (1 + SPARK_SPEED_JITTER * (2 * Math.random() - 1));
+    // A ring of sparks thrown up and out from logical (x, z), carried along by
+    // the striker's velocity (vx, vz).
+    create_sparks(x, z, vx, vz) {
+        for (let i = 0; i < SPARKS_PER_STRIKE; i++) {
+            const spark = this.sparks[this.next_spark];
+            this.next_spark = (this.next_spark + 1) % MAX_SPARKS;
+            const speed = SPARK_SPEED * (1 + SPARK_SPEED_JITTER * (2 * Math.random() - 1));
             const elev = SPARK_ELEVATION + SPARK_ELEVATION_JITTER * (2 * Math.random() - 1);
-            const azim = Math.PI / 8 * (i + SPARK_AZIMUTH_JITTER * (2 * Math.random() - 1));
+            const azim = 2 * Math.PI / SPARKS_PER_STRIKE *
+                (i + SPARK_AZIMUTH_JITTER * (2 * Math.random() - 1));
             const horiz = speed * Math.cos(elev);
             spark.velocity.set(
-                horiz * Math.cos(azim) + SPARK_INHERIT_VEL * base_vx,
+                horiz * Math.cos(azim) + SPARK_INHERIT_VEL * vx,
                 speed * Math.sin(elev),
-                -horiz * Math.sin(azim) + SPARK_INHERIT_VEL * base_vz);
+                -horiz * Math.sin(azim) + SPARK_INHERIT_VEL * vz);
+            spark.position.set(x, 1.5, z);
             spark.active = true;
             spark.life_s = SPARK_LIFE_S;
-            spark.position.copy(pos);
-            spark.acceleration.set(0, -40, 0);
-            spark.material.color.set(color);
-
-            this.cur_spark_idx = (this.cur_spark_idx + 1) % this.max_num_sparks;
         }
     }
 }

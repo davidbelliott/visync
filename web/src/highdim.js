@@ -3,12 +3,19 @@ import * as THREE from 'three';
 export class Tesseract extends THREE.Object3D {
     constructor(size, camera) {
         super();
+        this.size = size;
         this.rot_xy = 0.0;
         this.rot_xz = 0.0;
         this.rot_xw = 0.0;
         this.rot_yz = 0.0;
         this.rot_yw = 0.0;
         this.rot_zw = 0.0;
+        // 4D -> 3D projection: null drops w (orthographic); a distance d
+        // (scene units, along w from the centre) projects in perspective,
+        // scaling each point by (d - size/2) / (d - w): the near (w = +size/2)
+        // cube keeps its true size and the far one draws smaller inside it
+        // ("cube within cube").
+        this.w_dist = null;
         this.scale_vec = new THREE.Vector4(1, 1, 1, 1);
         this.vertices = [];
         this.edges = [];
@@ -61,10 +68,11 @@ export class Tesseract extends THREE.Object3D {
                 v = apply_rotation(v, [1, 3], this.rot_yw);
                 v = apply_rotation(v, [2, 3], this.rot_zw);
 
+                const k = this.w_dist === null ? 1 : (this.w_dist - this.size / 2) / (this.w_dist - v.w);
                 v = project_3d(v, camera);
-                points[points_idx++] = v.x;
-                points[points_idx++] = v.y;
-                points[points_idx++] = v.z;
+                points[points_idx++] = k * v.x;
+                points[points_idx++] = k * v.y;
+                points[points_idx++] = k * v.z;
             }
         }
         //this.geom.setAttribute('position', new THREE.BufferAttribute(points_arr_typed, 3));

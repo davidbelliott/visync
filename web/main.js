@@ -463,10 +463,10 @@ class GraphicsContext {
 
         // Fixed NUM_SLOTS render layers: shown_scenes[slot] is the scene
         // registry index currently occupying that slot, or undefined if
-        // empty. Rendered/dispatched in ascending slot order, so higher
-        // slots draw on top. Slot 0 is background, slot 1 is foreground
-        // (see change_scene/set_slot); slots 2-9 are only reachable from the
-        // keyboard (see keydown) and always draw above both.
+        // empty. Rendered in descending slot order, so lower slots draw on
+        // top: slot 0 is the front (foreground), slot 1 behind it
+        // (background; see change_scene/set_slot), and slots 2-9, only
+        // reachable from the keyboard (see keydown), draw behind both.
         this.shown_scenes = new Array(NUM_SLOTS).fill(undefined);
 
         // Which slot plain number-key presses target; shift+<numkey>
@@ -606,7 +606,7 @@ class GraphicsContext {
     }
 
     render() {
-            // Render slots in ascending order, so higher slots draw on top.
+            // Render slots back to front (descending), so slot 0 draws on top.
 
             // Clear buffer 0 (background)
             this.renderer.setRenderTarget(this.buffers[0]);
@@ -615,9 +615,10 @@ class GraphicsContext {
             this.renderer.setRenderTarget(null);
             this.renderer.clear();
 
-            this.shown_scenes.forEach((idx) => {
+            for (let slot = this.shown_scenes.length - 1; slot >= 0; slot--) {
+                const idx = this.shown_scenes[slot];
                 if (idx === undefined) {
-                    return;
+                    continue;
                 }
                 if (CLEAR_DEPTH_BETWEEN_SCENES) {
                     this.renderer.setRenderTarget(null);
@@ -626,7 +627,7 @@ class GraphicsContext {
                 this.scenes.get(idx).render(this.renderer, this.buffers[0]);
                 const vector = new THREE.Vector2(0, 0);
                 this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
-            });
+            }
     }
 
     on_window_resize() {
@@ -657,10 +658,9 @@ class GraphicsContext {
     }
 
     // Rewrite the HUD's scene list as <slot>:<shortname> for every occupied
-    // slot, joined with '+'. Slot order is draw order (slot 0 is the
-    // background, higher slots draw over it), so the list reads bottom layer
-    // first - which also avoids the fg/bg labels the header used to carry,
-    // and which were the wrong way round.
+    // slot, joined with '+'. Slot order is front to back (slot 0 draws on
+    // top, higher slots behind it), so the list reads front layer first -
+    // which also avoids the fg/bg labels the header used to carry.
     update_scene_hud() {
         const shown = [];
         let active_shown = false;
@@ -728,11 +728,11 @@ class GraphicsContext {
     }
 
     // Scene-change messages (MIDI/network MsgGotoScene, and the APC knobs 14
-    // / 15 bound above) always target the fixed foreground (slot 1) /
-    // background (slot 0) slots, regardless of which slot the keyboard
-    // currently has active (see keydown).
+    // / 15 bound above) always target the fixed foreground (slot 0, drawn in
+    // front) / background (slot 1, behind it) slots, regardless of which
+    // slot the keyboard currently has active (see keydown).
     change_scene(scene_idx, bg = false) {
-        this.set_slot(bg ? 0 : 1, scene_idx);
+        this.set_slot(bg ? 1 : 0, scene_idx);
     }
 
     advance_state(steps) {

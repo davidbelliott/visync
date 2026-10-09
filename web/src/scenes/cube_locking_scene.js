@@ -5,6 +5,7 @@ import {
     CH_EXPAND_X, CH_EXPAND_Y
 } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
+import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import {
     ease,
     lerp_scalar,
@@ -24,9 +25,15 @@ import {
     BeatClock
 } from '../util.js';
 
-// Free-rotation pace: this x the shared view rotation (0.4 rad/s at knob 1x),
-// the old quarter-turn-per-8-beats pace at 120 bpm.
-const ROT_SCALE = 2;
+// Rotation (rad), stepping in lockstep with the spinning robots scene: yaw
+// every 45 deg, pitch between upright views (isometric tilt up or down, or
+// level) starting tilted towards the viewer, at the shared STEPPED_SCALE.
+// The yaw base is their PI/4 plus a half turn, this scene's composed facing,
+// so both rest on the same 45 deg stops.
+const YAW_BASE = Math.PI / 4 + Math.PI;
+const PITCH_BASE = ISOMETRIC_TILT;
+const ORANGE = new THREE.Color("orange");
+const MAGENTA = new THREE.Color("magenta");
 
 // Tube geometry resolution: rings along the path x quads around each ring.
 // A ring is TUBE_RADIAL quads = TUBE_RADIAL * 6 indices; draw ranges are
@@ -188,8 +195,6 @@ export class CubeLockingScene extends Scene {
         this.cam_orth.position.set(0, 0, 100);
         this.camera = this.cam_orth;
 
-        const isom_angle = Math.asin(1 / Math.sqrt(3));     // isometric angle
-
         this.clear();
         this.beat_clock = new BeatClock(this);
 
@@ -340,9 +345,10 @@ export class CubeLockingScene extends Scene {
         this.bind(CH_EXPAND_Y, (v) => { this.tube_speed = v; },
             (norm) => 2 * norm - 1);
 
-        // Free rotation from the shared view, on top of these base angles.
-        this.yaw_base = Math.PI / 2 * 2.5;
-        this.pitch_base = isom_angle;
+        // The shared view rotation in eased steps (see YAW_BASE).
+        this.yaw_step = new SteppedRotation();
+        this.pitch_step = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.cur_color = new THREE.Color();
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 
@@ -354,26 +360,23 @@ export class CubeLockingScene extends Scene {
         const beats_per_sec = this.get_local_bpm() / 60;
         this.update_tubes(dt);
 
-        // Free rotation from the shared view. The default XYZ euler order
-        // applies yaw about the group's Y axis first, then pitch about the
-        // world X axis, so the pitch axis stays horizontal in the viewport
-        // whatever the yaw.
+        // The shared view rotation in eased steps (yaw about the group's Y,
+        // pitch about the viewport horizontal: XYZ euler order).
         {
-            this.yaw = this.yaw_base + this.view_yaw(ROT_SCALE);
-            this.base_group.rotation.x = this.pitch_base + this.view_pitch(ROT_SCALE);
-            this.base_group.rotation.y = this.yaw;
+            this.base_group.rotation.x = this.pitch_step.update(dt,
+                PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+            const yaw = YAW_BASE + this.yaw_step.update(dt, this.view_yaw(STEPPED_SCALE));
+            this.base_group.rotation.y = yaw;
 
             // Fill colour swings orange <-> magenta once per quarter turn of
-            // yaw, as it did per discrete quarter-turn step.
-            const turn = this.yaw / (Math.PI / 2) - 0.5;
+            // yaw (so it alternates between the two over successive steps).
+            const turn = yaw / (Math.PI / 2) - 0.5;
             const frac = turn - Math.floor(turn);
             const from_orange = Math.floor(turn) % 2 == 0;
-            const start_color = new THREE.Color(from_orange ? "orange" : "magenta");
-            const end_color = new THREE.Color(from_orange ? "magenta" : "orange");
-            const cur_color = new THREE.Color();
-            cur_color.lerpColors(start_color, end_color, frac);
+            this.cur_color.lerpColors(from_orange ? ORANGE : MAGENTA,
+                from_orange ? MAGENTA : ORANGE, frac);
             if (this.fill_mat != null) {
-                this.fill_mat.color.copy(cur_color);
+                this.fill_mat.color.copy(this.cur_color);
             }
         }
 

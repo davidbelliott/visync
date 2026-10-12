@@ -21,20 +21,23 @@ import { LEVEL_COLORS } from '../maze_levels.js';
 //   arch-topped opening cut down to the floor (the same machinery as the
 //   windows), so its top is flush with the walls and it joins them with no
 //   extra edges.
-// - Ramps up from the level and down from it: each a solid wedge filling
-//   its cell wall to wall, from the floor at its bottom side to the wall tops
-//   at its top side (see MazeLevels). The ramp down from a level shows as a
-//   hole in the floor (cut out of the floor fill), lined down to the level
-//   below on its two sides, with the wedge sloping down inside it.
-// - Carpets in the rooms: a single-hue rectangle, its brightness varying
-//   with simplex noise, outlined in the same hue.
+// - Staircases up from the level and down from it (see MazeLevels): solid
+//   flights filling their corridor wall to wall, from the floor at the
+//   bottom to the wall tops at the top, steps as tall as the walls are
+//   thick. The flight down from a level shows as a hole in the floor (cut
+//   out of the floor fill), lined down to the level below on its two sides,
+//   with the steps going down inside it.
+// - Carpets in the rooms: a rectangle in a single hue, outlined in it, either
+//   plain or patterned (see CARPET_PATTERNS), its brightness varying with
+//   simplex noise.
 // - The floor: a dithered fill whose opacity follows simplex noise.
 //
 // Fog of war: edges fade with distance from a point (set_viewer), eased
 // between fog_near and fog_far; the floor too. The rest is lit (e.g. by a
 // light whose range ends at fog_far), so it darkens with distance. Walls and
-// ramps cast shadows (while the level is mostly faded in: one level casts
-// at a time), and everything lit receives them.
+// stairs cast shadows (while the level is mostly faded in: one level casts
+// at a time), and everything lit receives them. Each level's walls stand its
+// own height (MazeLevels.params: a multiple of the standard height).
 
 // Window size, as a fraction of the wall span's length and height (the same
 // aspect as the wall; a round window's diameter is the height's fraction).
@@ -51,6 +54,26 @@ const CARPET_INSET = 2;
 const CARPET_Y = 0.02;
 const CARPET_DARK = 0.55;
 const CARPET_NOISE_SIZE = 4;
+// Carpet patterns, picked per room (world units): 0 plain; 1 a black and
+// white checkerboard of CHECKER_TILE squares from the carpet's corner (as the
+// drum kit's rug), drawn in its shader; 2 rows of zigzags, ZIGZAG_ROW apart,
+// ZIGZAG_AMP deep, one zig per ZIGZAG_PERIOD; 3 ice cream cones CONE_SIZE
+// tall on an equilateral triangle grid CONE_SPACING apart (wider than a cone,
+// CONE_SIZE * 0.47, so neighbours never touch), every other one along a row
+// upside down. The line patterns are 1 px wireframe (the edge lines, in the
+// carpet's hue), whole zigs and cones only, centred on the carpet, over a
+// ground PATTERN_GROUND as bright as a plain carpet; up to
+// MAX_PATTERN_LINES segments in all (past that, carpets are left plain).
+const CARPET_PATTERNS = 4;
+const CHECKER_TILE = 1;
+const ZIGZAG_ROW = 1;
+const ZIGZAG_AMP = 0.4;
+const ZIGZAG_PERIOD = 1;
+const CONE_SIZE = 1;
+const CONE_SPACING = 1.2;
+const CONE_SCOOP_SEGMENTS = 8;
+const PATTERN_GROUND = 0.2;
+const MAX_PATTERN_LINES = 16384;
 // The floor's opacity follows simplex noise: FLOOR_MIN where it is below
 // FLOOR_NOISE_LO, FLOOR_MAX above FLOOR_NOISE_HI (noise in about [-1, 1]), in
 // patches FLOOR_NOISE_SIZE world units across. FLOOR_SIZE: its extent.
@@ -65,8 +88,10 @@ const FLOOR_SIZE = 400;
 // typical; past MAX_WINDOWS the rest are left out (beyond the fog anyway),
 // which bounds the buffers.
 const MAX_WINDOWS = 64;
-const MAX_RAMPS = 16;
-const MAX_HOLES = 8;        // ramps down, of those; must match the floor shader
+const MAX_STAIRS = 16;      // per flight length
+const MAX_HOLES = 8;        // flights down; must match the floor shader
+// Flight lengths (cells, = the lower level's height in standard heights).
+const STAIR_LENGTHS = [1, 2];
 const MAX_CARPETS = 12;
 
 // GLSL: the fog (from a point's footprint position, v_xz) and the level's
@@ -83,20 +108,74 @@ const FOG_PARS = [
     '}',
 ].join('\n');
 
+// Call seg(ax, az, bx, bz) for each line of carpet pattern `pattern` (see
+// CARPET_PATTERNS; none for the shader's) on the carpet x0..x1, z0..z1.
+function carpet_pattern(pattern, x0, z0, x1, z1, seg) {
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    if (pattern == 2) {
+        // Zigzags along x: whole half-periods, rows whole within the carpet.
+        const half = ZIGZAG_PERIOD / 2;
+        const runs = Math.floor((x1 - x0) / half);
+        const rows = Math.floor((z1 - z0 - ZIGZAG_AMP) / ZIGZAG_ROW) + 1;
+        const sx = cx - runs * half / 2;
+        const sz = cz - ((rows - 1) * ZIGZAG_ROW + ZIGZAG_AMP) / 2;
+        for (let r = 0; r < rows; r++) {
+            const z = sz + r * ZIGZAG_ROW;
+            for (let k = 0; k < runs; k++) {
+                seg(sx + k * half, z + (k % 2) * ZIGZAG_AMP,
+                    sx + (k + 1) * half, z + ((k + 1) % 2) * ZIGZAG_AMP);
+            }
+        }
+    } else if (pattern == 3) {
+        // Cones on a triangle grid centred on the carpet (rows sqrt(3)/2
+        // spacings apart, odd rows shifted half a spacing), those whole
+        // within it. Shape in cone heights about its centre, +v towards +z
+        // (flipped for upside-down ones): the cone's apex, its rim, and the
+        // scoop's arc over the rim, round (0, SCOOP_V).
+        const S = CONE_SPACING, H = CONE_SIZE, pitch = S * Math.sqrt(3) / 2;
+        const APEX = -0.5, RIM_U = 0.22, RIM_V = 0.12, SCOOP_V = 0.2;
+        const scoop_r = Math.hypot(RIM_U, RIM_V - SCOOP_V);
+        const a0 = Math.atan2(RIM_V - SCOOP_V, RIM_U);
+        const half_w = Math.max(RIM_U, scoop_r) * H, half_h = 0.5 * H;
+        const rows = Math.floor((z1 - z0 - 2 * half_h) / pitch / 2);
+        const cols = Math.ceil((x1 - x0) / S / 2) + 1;
+        for (let r = -rows; r <= rows; r++) {
+            const z = cz + r * pitch, shift = Math.abs(r) % 2 ? S / 2 : 0;
+            for (let k = -cols; k <= cols; k++) {
+                const x = cx + k * S + shift;
+                if (x - half_w < x0 || x + half_w > x1) {
+                    continue;
+                }
+                const flip = (k + (shift ? 1 : 0) + 2 * cols) % 2 ? -H : H;
+                const at = (u, v) => [x + u * H, z + v * flip];
+                seg(...at(0, APEX), ...at(-RIM_U, RIM_V));
+                seg(...at(0, APEX), ...at(RIM_U, RIM_V));
+                seg(...at(-RIM_U, RIM_V), ...at(RIM_U, RIM_V));
+                for (let q = 0; q < CONE_SCOOP_SEGMENTS; q++) {
+                    const t0 = a0 + (Math.PI - 2 * a0) * q / CONE_SCOOP_SEGMENTS;
+                    const t1 = a0 + (Math.PI - 2 * a0) * (q + 1) / CONE_SCOOP_SEGMENTS;
+                    seg(...at(scoop_r * Math.cos(t0), SCOOP_V + scoop_r * Math.sin(t0)),
+                        ...at(scoop_r * Math.cos(t1), SCOOP_V + scoop_r * Math.sin(t1)));
+                }
+            }
+        }
+    }
+}
+
 export class MazeLevel extends THREE.Group {
-    // levels: MazeLevels. cell: grid pitch; thickness / height: the walls'
-    // (world units); level_height: between levels' floors. half: cells
-    // drawn either side of the centre cell.
-    constructor(levels, { cell, thickness, height, level_height, half, fog_near, fog_far }) {
+    // levels: MazeLevels. cell: grid pitch; thickness: the walls'; height:
+    // the standard wall height, which a level's own is a multiple of (world
+    // units). half: cells drawn either side of the centre cell.
+    constructor(levels, { cell, thickness, height, half, fog_near, fog_far }) {
         super();
         this.levels = levels;
         this.level = 0;
         this.walls = null;          // the walls' mesh, once the shaders load
-        this.casting = true;        // whether its walls and ramps cast shadows
+        this.casting = true;        // whether its walls and stairs cast shadows
         this.cell = cell;
         this.thickness = thickness;
-        this.height = height;
-        this.level_height = level_height;
+        this.base_height = height;
+        this.height = height;       // this level's walls (set_level)
         this.half = half;
         this.color = new THREE.Color(levels.color(0));
 
@@ -127,7 +206,7 @@ export class MazeLevel extends THREE.Group {
             // Where this group's origin is in the maze (world units), so
             // noise patterns stay fixed to the maze as the window moves.
             maze_origin: { value: new THREE.Vector2() },
-            // The holes down to ramps, cut out of the floor: (x0, z0, x1, z1)
+            // The holes down to staircases, cut out of the floor: (x0, z0, x1, z1)
             // each, the first hole_count of them.
             holes: { value: Array.from({ length: MAX_HOLES }, () => new THREE.Vector4()) },
             hole_count: { value: 0 },
@@ -135,7 +214,9 @@ export class MazeLevel extends THREE.Group {
 
         // Window panels: each kind's wall face (u along the wall, v up) cut
         // round its hole, triangulated, and the hole's outline.
-        this.window_shapes = [null, this.window_shape(1), this.window_shape(2), this.arch_shape()];
+        // They depend on the wall height, so are made per height.
+        this.shapes_by_height = new Map();
+        this.window_shapes = this.shapes_for(this.height);
 
         // Worst cases: every span's top, every boundary a side face (a window
         // panel at most a few dozen triangles more), edges along every
@@ -152,7 +233,7 @@ export class MazeLevel extends THREE.Group {
             this.fill_geom.setAttribute(name, attr);
         }
         const max_lines = 2 * boundaries + (m + 1) * (m + 1) + 2 * WINDOW_ROUND_SEGMENTS * MAX_WINDOWS +
-            4 * MAX_CARPETS + 2 * MAX_HOLES;
+            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES;
         this.line_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'line_color']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_lines * 6), 3);
@@ -160,7 +241,8 @@ export class MazeLevel extends THREE.Group {
             this.line_geom.setAttribute(name, attr);
         }
         this.carpet_geom = new THREE.BufferGeometry();
-        for (const name of ['position', 'normal', 'color']) {
+        // carpet_info: (u, v) world units from the carpet's corner, pattern.
+        for (const name of ['position', 'normal', 'color', 'carpet_info']) {
             const attr = new THREE.BufferAttribute(new Float32Array(MAX_CARPETS * 18), 3);
             attr.setUsage(THREE.DynamicDrawUsage);
             this.carpet_geom.setAttribute(name, attr);
@@ -195,11 +277,20 @@ export class MazeLevel extends THREE.Group {
         lines.frustumCulled = false;
         this.add(lines);
 
-        // Ramps: a unit wedge, posed and stretched per ramp.
-        this.ramps = new InstancedProps(this.wedge_geometry(),
-            { color: this.color, max: MAX_RAMPS, shadows: true });
-        this.add(this.ramps);
-        this.ramp_list = [];        // [Matrix4, x, z] per ramp in the window
+        // Staircases: a unit flight per length (steps as tall as the walls
+        // are thick, so twice as many on a two-cell flight), posed and
+        // stretched per staircase; and the ones in the window, per length,
+        // as [Matrix4, x, z].
+        this.stairs = new Map();
+        this.stair_lists = new Map();
+        for (const k of STAIR_LENGTHS) {
+            const steps = Math.round(k * height / thickness);
+            const props = new InstancedProps(this.flight_geometry(steps),
+                { color: this.color, max: MAX_STAIRS, shadows: true });
+            this.stairs.set(k, props);
+            this.stair_lists.set(k, []);
+            this.add(props);
+        }
         this.matrix_pool = [];
         this.dummy = new THREE.Object3D();
         this.dummy.rotation.order = 'YXZ';
@@ -258,16 +349,42 @@ export class MazeLevel extends THREE.Group {
             this.walls.receiveShadow = true;
             this.add(this.walls);
 
-            // Carpets: per-vertex hue, darkened by noise in maze coordinates.
+            // Carpets: per-vertex hue and pattern (see CARPET_PATTERNS),
+            // darkened by noise in maze coordinates.
             const carpet_mat = fill_material({ vertexColors: true }, 1, fade);
             const carpet_frag = carpet_mat.onBeforeCompile;
+            const f = (x) => x.toFixed(3);
             carpet_mat.onBeforeCompile = (shader) => {
                 carpet_frag(shader);
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <common>',
+                    'attribute vec3 carpet_info;\nvarying vec3 v_carpet;\n#include <common>'
+                ).replace(
+                    '#include <begin_vertex>',
+                    '#include <begin_vertex>\nv_carpet = carpet_info;'
+                );
                 shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    [
+                        '#include <common>',
+                        'varying vec3 v_carpet;',
+                    ].join('\n')
+                ).replace(
                     '#include <color_fragment>',
-                    '#include <color_fragment>\n' +
-                    `diffuseColor.rgb *= mix(${CARPET_DARK.toFixed(2)}, 1.0, ` +
-                    `0.5 + 0.5 * snoise((v_xz + maze_origin) / ${CARPET_NOISE_SIZE.toFixed(1)}));`
+                    [
+                        '#include <color_fragment>',
+                        'float pattern = v_carpet.z;',
+                        'if (pattern > 1.5) {',
+                        // Lines (drawn as edges): a dark ground.
+                        `    diffuseColor.rgb *= ${f(PATTERN_GROUND)};`,
+                        '} else if (pattern > 0.5) {',
+                        // Checkerboard, black and white.
+                        `    vec2 t = floor(v_carpet.xy / ${f(CHECKER_TILE)});`,
+                        '    diffuseColor.rgb = vec3(mod(t.x + t.y, 2.0));',
+                        '}',
+                        `diffuseColor.rgb *= mix(${f(CARPET_DARK)}, 1.0, ` +
+                        `0.5 + 0.5 * snoise((v_xz + maze_origin) / ${f(CARPET_NOISE_SIZE)}));`,
+                    ].join('\n')
                 );
             };
             carpet_mat.customProgramCacheKey = () => 'carpet' + fade;
@@ -301,7 +418,11 @@ export class MazeLevel extends THREE.Group {
     set_level(level) {
         this.level = level;
         this.color.set(this.levels.color(level));
-        this.ramps.set_color(this.color);
+        for (const props of this.stairs.values()) {
+            props.set_color(this.color);
+        }
+        this.height = this.base_height * this.levels.params(level).height;
+        this.window_shapes = this.shapes_for(this.height);
         this.wall_mat?.color.copy(this.color);
         this.floor_mat?.color.copy(this.color);
     }
@@ -319,7 +440,9 @@ export class MazeLevel extends THREE.Group {
         if (this.walls) {
             this.walls.castShadow = this.casting;
         }
-        this.ramps.cast_shadows(this.casting);
+        for (const props of this.stairs.values()) {
+            props.cast_shadows(this.casting);
+        }
     }
 
     // Per frame: fade the props with the fog and the level.
@@ -330,11 +453,26 @@ export class MazeLevel extends THREE.Group {
             const f = Math.min(1, Math.max(0, (fog_far.value - d) / (fog_far.value - fog_near.value)));
             return (0.5 - 0.5 * Math.cos(Math.PI * f)) * opacity_all.value;
         };
-        this.ramps.begin();
-        for (const [matrix, x, z] of this.ramp_list) {
-            this.ramps.add_instance(matrix, fog(x, z));
+        for (const [k, props] of this.stairs) {
+            props.begin();
+            for (const [matrix, x, z] of this.stair_lists.get(k)) {
+                props.add_instance(matrix, fog(x, z));
+            }
+            props.end();
         }
-        this.ramps.end();
+    }
+
+    // The window panels for walls `height` tall: [none, rect, round, arch].
+    shapes_for(height) {
+        let shapes = this.shapes_by_height.get(height);
+        if (shapes === undefined) {
+            const keep = this.height;
+            this.height = height;
+            shapes = [null, this.window_shape(1), this.window_shape(2), this.arch_shape()];
+            this.height = keep;
+            this.shapes_by_height.set(height, shapes);
+        }
+        return shapes;
     }
 
     // A window panel for kind (1 rect, 2 round): { points, tris, hole }, in
@@ -386,14 +524,20 @@ export class MazeLevel extends THREE.Group {
         };
     }
 
-    // A unit wedge: x across -0.5..0.5, z along 0..1, its top rising from
-    // y = 0 at z = 0 to y = 1 at z = 1 (a right-angled triangle, extruded
-    // across x).
-    wedge_geometry() {
+    // A unit flight of `steps` stairs: x across -0.5..0.5, z along 0..1,
+    // solid beneath, the top step at y = 1 ending at z = 1 (its side profile
+    // extruded across x).
+    flight_geometry(steps) {
         const shape = new THREE.Shape();
         shape.moveTo(0, 0);
         shape.lineTo(1, 0);
         shape.lineTo(1, 1);
+        for (let k = steps; k >= 1; k--) {
+            shape.lineTo((k - 1) / steps, k / steps);
+            if (k > 1) {
+                shape.lineTo((k - 1) / steps, (k - 1) / steps);
+            }
+        }
         shape.lineTo(0, 0);
         // The shape's x (along) becomes z; the extrusion becomes x.
         const geom = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
@@ -481,33 +625,38 @@ export class MazeLevel extends THREE.Group {
             }
         }
 
-        // Ramps up from this level (rising to +level_height) and down from
-        // it (to -level_height).
-        this.ramp_list.length = 0;
-        this.holes = [];            // [i, j, uphill] per ramp down, for emit()
+        // Staircases up from this level (rising its wall height) and down
+        // from it (sunk the lower level's), both a flight as many cells long
+        // as the height they climb is standard heights.
+        for (const list of this.stair_lists.values()) {
+            list.length = 0;
+        }
+        this.holes = [];            // [i, j, uphill, k] per flight down, for emit()
         let n = 0;
-        for (let i = lo; i <= hi; i++) {
-            for (let j = lo; j <= hi; j++) {
-                for (const [low_level, base] of [[level, 0], [level - 1, -this.level_height]]) {
-                    const uphill = levels.ramp(low_level, ci + i, cj + j);
-                    if (uphill === null || this.ramp_list.length >= MAX_RAMPS) {
+        for (const [low_level, below] of [[level, false], [level - 1, true]]) {
+            for (const st of levels.stairs_in(low_level, ci + lo, cj + lo, ci + hi, cj + hi)) {
+                const [i, j] = [st.cells[0][0] - ci, st.cells[0][1] - cj];
+                const list = this.stair_lists.get(st.k);
+                if (i < lo || i > hi || j < lo || j > hi || list.length >= MAX_STAIRS) {
+                    continue;
+                }
+                const rise = st.k * this.base_height;
+                if (below) {
+                    if (this.holes.length >= MAX_HOLES) {
                         continue;
                     }
-                    if (base < 0) {
-                        if (this.holes.length >= MAX_HOLES) {
-                            continue;
-                        }
-                        this.holes.push([i, j, uphill]);
-                    }
-                    n = this.add_ramp(n, uphill, i, j, base);
+                    this.holes.push([i, j, st.dir, st.k]);
                 }
+                n = this.add_stairs(n, st, i, j, below ? -rise : 0, rise);
             }
         }
         // The holes' openings, between the walls round them, for the floor.
         const half_in = (cell - t) / 2;
-        this.holes.forEach(([i, j], k) => {
-            this.uniforms.holes.value[k].set(
-                i * cell - half_in, j * cell - half_in, i * cell + half_in, j * cell + half_in);
+        this.holes.forEach(([i, j, [di, dj], k], h) => {
+            const far_i = i + di * (k - 1), far_j = j + dj * (k - 1);
+            this.uniforms.holes.value[h].set(
+                Math.min(i, far_i) * cell - half_in, Math.min(j, far_j) * cell - half_in,
+                Math.max(i, far_i) * cell + half_in, Math.max(j, far_j) * cell + half_in);
         });
         this.uniforms.hole_count.value = this.holes.length;
 
@@ -516,19 +665,22 @@ export class MazeLevel extends THREE.Group {
         this.emit();
     }
 
-    // Pose the wedge filling relative cell (i, j), rising along uphill
-    // ([di, dj]) from height base to base + level_height: from the wall line
-    // on its bottom side to the face of the wall on its top side, and between
-    // the faces of the walls on either side.
-    add_ramp(n, [di, dj], i, j, base) {
-        const cell = this.cell, t = this.thickness;
+    // Pose staircase st, its first cell at relative (i, j), from height base
+    // up `rise` along its uphill direction: from the wall line at its bottom
+    // to the face of the wall past its last cell, and between the faces of
+    // the walls either side.
+    add_stairs(n, st, i, j, base, rise) {
+        const cell = this.cell, t = this.thickness, [di, dj] = st.dir;
         const dummy = this.dummy;
         dummy.rotation.set(0, Math.atan2(di, dj), 0);
-        dummy.scale.set(cell - t, this.level_height, cell - t / 2);
+        dummy.scale.set(cell - t, rise, st.k * cell - t / 2);
         const x = i * cell, z = j * cell;
         dummy.position.set(x - di * cell / 2, base, z - dj * cell / 2);
         dummy.updateMatrix();
-        this.ramp_list.push([this.pooled_matrix(n).copy(dummy.matrix), x, z]);
+        // Fogged by its middle.
+        const mid = (st.k - 1) / 2;
+        this.stair_lists.get(st.k).push([this.pooled_matrix(n).copy(dummy.matrix),
+            x + di * mid * cell, z + dj * mid * cell]);
         return n + 1;
     }
 
@@ -662,18 +814,19 @@ export class MazeLevel extends THREE.Group {
             }
         }
 
-        // The holes down to ramps: their two sides lined down a level (the
-        // faces of the lower level's walls along the ramp, from its open
-        // bottom end to the wall at its top), an edge where each ends at the
-        // bottom; the wedge fills the rest. The rim is the bottom of this
-        // level's walls round the hole, and the wedge's top edge.
-        const lh = this.level_height, half_in = (this.cell - this.thickness) / 2;
-        for (const [i, j, [di, dj]] of this.holes) {
+        // The holes down to staircases: their two sides lined down to the
+        // level below (the faces of its walls along the flight, from its open
+        // bottom end to the wall past its top), an edge where each ends at
+        // the bottom; the steps fill the rest. The rim is the bottom of this
+        // level's walls round the hole, and the top step's edge.
+        const half_in = (this.cell - this.thickness) / 2;
+        for (const [i, j, [di, dj], k] of this.holes) {
+            const lh = k * this.base_height;
             const cx = i * this.cell, cz = j * this.cell;
-            // Along the ramp (u, from its bottom end to its top) and across
-            // it (w): to x, z.
+            // Along the flight (u, from its bottom end up, from its first
+            // cell's centre) and across it (w): to x, z.
             const at = (u, w, y) => [cx + di * u - dj * w, y, cz + dj * u + di * w];
-            const u0 = -this.cell / 2, u1 = half_in;
+            const u0 = -this.cell / 2, u1 = (k - 1) * this.cell + half_in;
             for (const side of [-1, 1]) {
                 const w = side * half_in;
                 // Facing into the hole: across, away from this side.
@@ -684,27 +837,41 @@ export class MazeLevel extends THREE.Group {
         }
 
         // Carpets: a quad each in its hue (a palette colour other than the
-        // level's, fixed per room), outlined in the same hue.
+        // level's) and pattern, both fixed per room, outlined in the hue.
         const cpos = this.carpet_geom.getAttribute('position').array;
         const cnrm = this.carpet_geom.getAttribute('normal').array;
         const ccol = this.carpet_geom.getAttribute('color').array;
+        const cinfo = this.carpet_geom.getAttribute('carpet_info').array;
         const origin = this.uniforms.maze_origin.value;
         const maze = this.levels.maze(this.level);
         const own = LEVEL_COLORS.indexOf(this.levels.color(this.level));
         const hue = new THREE.Color();
-        let c = 0;
+        let c = 0, pattern_lines = 0;
         for (const room of this.carpets) {
             const pick = Math.floor(maze.cell_random(room.i, room.j, 77) * (LEVEL_COLORS.length - 1));
             hue.set(LEVEL_COLORS[pick >= own ? pick + 1 : pick]);
+            let pattern = Math.floor(maze.cell_random(room.i, room.j, 79) * CARPET_PATTERNS);
             const x0 = (room.i - 0.5) * this.cell - origin.x + this.thickness / 2 + CARPET_INSET;
             const z0 = (room.j - 0.5) * this.cell - origin.y + this.thickness / 2 + CARPET_INSET;
             const x1 = (room.i + room.w - 0.5) * this.cell - origin.x - this.thickness / 2 - CARPET_INSET;
             const z1 = (room.j + room.h - 0.5) * this.cell - origin.y - this.thickness / 2 - CARPET_INSET;
             const y = CARPET_Y;
+            // Its line pattern, if the budget has room for it all.
+            let n = 0;
+            carpet_pattern(pattern, x0, z0, x1, z1, () => n++);
+            if (pattern_lines + n > MAX_PATTERN_LINES) {
+                pattern = 0;
+            } else {
+                pattern_lines += n;
+                line_color = hue;
+                carpet_pattern(pattern, x0, z0, x1, z1, (ax, az, bx, bz) => line(ax, y, az, bx, y, bz));
+                line_color = this.color;
+            }
             for (const [px, pz] of [[x0, z0], [x0, z1], [x1, z1], [x0, z0], [x1, z1], [x1, z0]]) {
                 cpos[c] = px; cpos[c + 1] = y; cpos[c + 2] = pz;
                 cnrm[c] = 0; cnrm[c + 1] = 1; cnrm[c + 2] = 0;
                 ccol[c] = hue.r; ccol[c + 1] = hue.g; ccol[c + 2] = hue.b;
+                cinfo[c] = px - x0; cinfo[c + 1] = pz - z0; cinfo[c + 2] = pattern;
                 c += 3;
             }
             line_color = hue;
@@ -722,7 +889,7 @@ export class MazeLevel extends THREE.Group {
         this.line_geom.getAttribute('position').needsUpdate = true;
         this.line_geom.getAttribute('line_color').needsUpdate = true;
         this.carpet_geom.setDrawRange(0, c / 3);
-        for (const name of ['position', 'normal', 'color']) {
+        for (const name of ['position', 'normal', 'color', 'carpet_info']) {
             this.carpet_geom.getAttribute(name).needsUpdate = true;
         }
     }

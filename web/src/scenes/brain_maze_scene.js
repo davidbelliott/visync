@@ -18,13 +18,12 @@ const YAW_BASE = Math.PI / 4;
 const PITCH_BASE = ISOMETRIC_TILT;
 
 // The maze (see MazeLevels, MazeLevel), world units: the walls' thickness
-// and height, and the rise between stacked levels' floors (a wall's height,
-// so each level stands on the one below). Each level has its own layout and
-// colour; only the brain's level shows, crossfading to the next as it takes
-// a ramp.
+// and standard height (a level's walls are a multiple of it, and each level
+// stands on top of the walls of the one below). Each level has its own
+// layout, colour and character; only the brain's level shows, crossfading to
+// the next as it takes a staircase.
 const WALL_T = 0.5;
 const WALL_H = 4;
-const LEVEL_H = WALL_H;
 // The brain stands as tall as the walls (the model is ~162 units tall and
 // ~153 wide, so ~3.8 wide here, and ~4.7 long: it still turns in a cell).
 const BRAIN_MODEL_HEIGHT = 162;
@@ -66,11 +65,12 @@ const CONE_SPIN = Math.PI / 8;
 const BOB_HEIGHT = 0.75;
 const BOB_BEATS = 4;
 // The brain heads straight for what it can see down a straight run of open
-// cells, up to SIGHT_CELLS away (the nearest if several): first a ramp it
-// has not taken, else a cone.
+// cells, up to SIGHT_CELLS away (the nearest if several): first a staircase
+// it has not taken, else a cone.
 const SIGHT_CELLS = WINDOW_HALF;
 const MAX_CONES = 32;               // in view at once (two levels); ~5 typical
-// Cells whose cone has been picked up, and ramps taken, oldest forgotten
+// Cells whose cone has been picked up, and staircases taken, oldest
+// forgotten
 // first.
 const MAX_COLLECTED = 4096;
 const MAX_TAKEN = 1024;
@@ -96,10 +96,10 @@ const SPARK_COLOR = 'white';
 
 // The brain walks the maze one cell per MOVE_BEATS, arriving in each cell on
 // the beat, turning only at right angles (it faces the way it goes, turning
-// over the first TURN_FRACTION of a step). A ramp is crossed in one move of
-// two cells (over twice MOVE_BEATS), from the cell before it to the one past
-// it, rising or sinking a level only while over the wedge, the levels
-// crossfading as it does; the brain never stops on a ramp. With nothing in
+// over the first TURN_FRACTION of a step). A staircase is crossed in one move,
+// from the cell before it to the one past it (its k cells and one more, over
+// as many MOVE_BEATS), rising or sinking a level only while on the steps,
+// the levels crossfading as it does; the brain never stops on the stairs. With nothing in
 // sight (see SIGHT_CELLS) it picks the open way that best follows its heading, never
 // turning straight back unless at a dead end, and shunning cells by
 // VISIT_PENALTY per earlier visit so it backs out of dead ends and doesn't
@@ -119,17 +119,18 @@ const MAX_REMEMBERED = 2048;
 // towards +z; DEFAULT_HEADING until the knob moves.
 const DEFAULT_HEADING = Math.PI / 4;
 
-// The only light, riding just over the brain (in brain_group's frame, origin
-// at the brain's underside; the brain is WALL_H tall). Decay 1 for a soft
-// falloff, cut off at FOG_FAR (see the fog of war). A spotlight pointing
-// straight down, its cone reaching FOG_FAR across the floor, so it casts
-// shadows in one pass (a point light would need six): walls block it, so
-// only what the brain can see is lit. LIGHT_PENUMBRA softens the cone's rim
-// (out in the fog anyway).
-const LIGHT_POS = new THREE.Vector3(0, WALL_H + 2, 0);
+// The only light, riding over the brain (in brain_group's frame, origin at
+// the brain's underside), LIGHT_ABOVE_WALLS world units above the tops of its
+// level's walls, so it rises with taller levels (blending between levels'
+// heights on the stairs). Decay 1 for a soft falloff, cut off at FOG_FAR (see
+// the fog of war). A spotlight pointing straight down, its cone (widened to
+// suit its height) reaching FOG_FAR across the floor, so it casts shadows in
+// one pass (a point light would need six): walls block it, so only what the
+// brain can see is lit. LIGHT_PENUMBRA softens the cone's rim (out in the
+// fog anyway).
+const LIGHT_ABOVE_WALLS = 2;
 const LIGHT_INTENSITY = 6;
 const LIGHT_DECAY = 1;
-const LIGHT_ANGLE = Math.atan2(FOG_FAR, LIGHT_POS.y);
 const LIGHT_PENUMBRA = 0.2;
 // Shadow map resolution (px a side; lower it on slow hardware), and biases
 // against self-shadowing acne on the walls.
@@ -156,7 +157,7 @@ export class BrainMazeScene extends Scene {
 
         // base_group turns about the brain's centre; world_group drops the
         // floor the brain stands on (and the brain) so that centre is at the
-        // origin, following the brain up and down ramps; maze_group slides
+        // origin, following the brain up and down stairs; maze_group slides
         // the maze under the brain, its origin on the brain's level's floor
         // under the window's centre cell.
         this.base_group = new THREE.Group();
@@ -175,25 +176,23 @@ export class BrainMazeScene extends Scene {
         this.world_group.add(this.brain_group);
         this.brain = new ScannedBrain(BRAIN_SCALE, { shadows: true });
         this.brain_group.add(this.brain);
-        const light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
-            LIGHT_ANGLE, LIGHT_PENUMBRA, LIGHT_DECAY);
-        light.position.copy(LIGHT_POS);
+        // Placed (height and cone) each frame by place_light.
+        const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
+            Math.PI / 4, LIGHT_PENUMBRA, LIGHT_DECAY);
         this.brain_group.add(light, light.target);     // target at the brain's feet
         light.castShadow = true;
         light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         light.shadow.camera.near = 0.5;
-        light.shadow.camera.far = FOG_FAR + LIGHT_POS.y;
         light.shadow.bias = SHADOW_BIAS;
         light.shadow.normalBias = SHADOW_NORMAL_BIAS;
 
-        // Two level views: the brain's level, and the one a ramp leads to
+        // Two level views: the brain's level, and the one a staircase leads to
         // (shown, crossfading, only while taking it).
         this.levels = new MazeLevels();
         const view_options = {
             cell: CELL,
             thickness: WALL_T,
             height: WALL_H,
-            level_height: LEVEL_H,
             half: WINDOW_HALF,
             fog_near: FOG_NEAR,
             fog_far: FOG_FAR,
@@ -260,10 +259,10 @@ export class BrainMazeScene extends Scene {
         }
 
         // The walk: the level and cell the brain set out from, the step it
-        // is taking (MAZE_DIRS entry) and its climb (+1 up a ramp, -1 down,
+        // is taking (MAZE_DIRS entry) and its climb (+1 up a staircase, -1 down,
         // 0 level), beats elapsed and when the step began, its facing (rad)
         // turning from facing_from to facing_to, how often it has entered
-        // each remembered cell ("level,i,j" -> count), and the ramps taken.
+        // each remembered cell ("level,i,j" -> count), and the staircases taken.
         this.heading = DEFAULT_HEADING;
         this.bind(CH_EXPAND_Y, (a) => { this.heading = a; },
             (norm) => norm * 2 * Math.PI);
@@ -272,7 +271,8 @@ export class BrainMazeScene extends Scene {
         this.cell_j = 0;
         this.step = [0, 0];
         this.climb = 0;
-        this.cells = 1;                 // cells the step covers (2 for a ramp)
+        this.cells = 1;                 // cells the step covers (more on stairs)
+        this.rise_h = 0;                // world units a staircase step climbs
         this.beats = 0;
         this.step_start = 0;
         this.visits = new Map();
@@ -295,11 +295,11 @@ export class BrainMazeScene extends Scene {
         const frac = (this.beats - this.step_start) / (MOVE_BEATS * this.cells);
 
         // Slide the maze under the brain, which is part way along its step
-        // from the window's centre cell (and up or down a ramp).
+        // from the window's centre cell (and up or down stairs).
         const along = EASED_STEPS ? ease(frac) : frac;
         const bx = this.step[0] * along * this.cells * CELL;
         const bz = this.step[1] * along * this.cells * CELL;
-        const rise = this.ramp_rise(along);
+        const rise = this.stairs_rise(along);
         this.maze_group.position.set(-bx, 0, -bz);
         this.brain_group.position.y = rise;
         this.floor.position.y = rise;
@@ -308,10 +308,11 @@ export class BrainMazeScene extends Scene {
         this.brain_group.rotation.y = lerp_scalar(this.facing_from, this.facing_to,
             ease(clamp(frac / TURN_FRACTION, 0, 1)));
 
-        // On a ramp, the levels crossfade as the brain climbs.
-        const fade = Math.abs(rise) / LEVEL_H;
+        // On stairs, the levels crossfade as the brain climbs.
+        const fade = this.rise_h > 0 ? Math.abs(rise) / this.rise_h : 0;
         this.view.set_opacity(1 - fade);
         this.next_view.set_opacity(fade);
+        this.place_light(fade);
         for (const view of [this.view, this.next_view]) {
             view.set_viewer(bx, bz);
             view.update();
@@ -330,36 +331,51 @@ export class BrainMazeScene extends Scene {
         }
     }
 
-    // Height (world units) along a ramp move `along` (0..1) of the way from
-    // the cell before the wedge to the cell past it: level ground up to the
-    // wedge's foot (the wall line half a cell on), then up its slope (to the
-    // face of the wall at its top, a cell less half a wall on), then level
-    // again; a move down is the same run backwards. 0 off ramps.
-    ramp_rise(along) {
-        const up = (u) => clamp((u * 2 * CELL - CELL / 2) / (CELL - WALL_T / 2), 0, 1);
+    // Set the light LIGHT_ABOVE_WALLS over the walls of the brain's level,
+    // blended `fade` (0..1) of the way to the next level's on the stairs,
+    // its cone reaching FOG_FAR across the floor from there.
+    place_light(fade) {
+        const wall_h = (level) => WALL_H * this.levels.params(level).height;
+        let h = wall_h(this.level);
+        if (this.climb != 0) {
+            h = lerp_scalar(h, wall_h(this.level + this.climb), fade);
+        }
+        const y = h + LIGHT_ABOVE_WALLS;
+        this.light.position.set(0, y, 0);
+        this.light.angle = Math.atan2(FOG_FAR, y);
+    }
+
+    // Height (world units) along a staircase move `along` (0..1) of the way
+    // from the cell before the flight to the cell past it: level ground up to
+    // its foot (the wall line half a cell on), then up its pitch (to the face
+    // of the wall past its top, its k cells less half a wall on), then level
+    // again; a move down is the same run backwards. 0 off stairs.
+    stairs_rise(along) {
+        const k = this.cells - 1;
+        const up = (u) => clamp((u * this.cells * CELL - CELL / 2) / (k * CELL - WALL_T / 2), 0, 1);
         if (this.climb > 0) {
-            return LEVEL_H * up(along);
+            return this.rise_h * up(along);
         }
         if (this.climb < 0) {
-            return -LEVEL_H * (1 - up(1 - along));
+            return -this.rise_h * (1 - up(1 - along));
         }
         return 0;
     }
 
     // Lay out both views around the brain's cell: its level, and (if the
-    // step under way is a ramp) the level it leads to, offset up or down.
+    // step under way is a staircase) the level it leads to, offset up or down.
     build_views() {
         this.view.build(this.cell_i, this.cell_j);
         if (this.climb != 0) {
             this.next_view.set_level(this.level + this.climb);
-            this.next_view.position.y = this.climb * LEVEL_H;
+            this.next_view.position.y = this.climb * this.rise_h;
             this.next_view.build(this.cell_i, this.cell_j);
         }
         this.list_cones();
     }
 
     // List the uneaten cones in view: around the brain's cell on its level,
-    // and on the level a ramp under way leads to.
+    // and on the level a staircase under way leads to.
     list_cones() {
         this.cone_cells.length = 0;
         for (const offset of this.climb != 0 ? [0, this.climb] : [0]) {
@@ -390,7 +406,7 @@ export class BrainMazeScene extends Scene {
         for (const [di, dj, phase, offset] of this.cone_cells) {
             const x = di * CELL, z = dj * CELL;
             const lift = BOB_HEIGHT * (0.5 - 0.5 * Math.cos(bob_angle + phase));
-            dummy.position.set(x, offset * LEVEL_H - CONE_TIP_Z * CONE_SCALE + lift, z);
+            dummy.position.set(x, offset * this.rise_h - CONE_TIP_Z * CONE_SCALE + lift, z);
             dummy.updateMatrix();
             const d = Math.hypot(x - bx, z - bz);
             const level_alpha = offset == 0 ? 1 - fade : fade;
@@ -415,15 +431,15 @@ export class BrainMazeScene extends Scene {
     }
 
     // The step is done: stand in the next cell (on the next level, after a
-    // ramp), remember it, eat any cone, pick the next step, and re-centre the
+    // staircase), remember it, eat any cone, pick the next step, and re-centre the
     // views on the new cell.
     arrive() {
         const [si, sj] = this.step;
-        const climb = this.climb, cells = this.cells;
+        const climb = this.climb, cells = this.cells, rise_h = this.rise_h;
         this.cell_i += si * cells;
         this.cell_j += sj * cells;
         if (climb != 0) {
-            // The view the ramp led to becomes the brain's level.
+            // The view the staircase led to becomes the brain's level.
             this.level += climb;
             [this.view, this.next_view] = [this.next_view, this.view];
             this.view.position.y = 0;
@@ -435,7 +451,7 @@ export class BrainMazeScene extends Scene {
         for (const spark of this.sparks) {
             spark.position.x -= si * cells * CELL;
             spark.position.z -= sj * cells * CELL;
-            spark.position.y -= climb * LEVEL_H;
+            spark.position.y -= climb * rise_h;
         }
 
         const key = `${this.level},${this.cell_i},${this.cell_j}`;
@@ -458,12 +474,14 @@ export class BrainMazeScene extends Scene {
         this.build_views();
     }
 
-    // Start step = [di, dj, climb, ramp key, cells]: note a ramp as taken,
-    // and turn to face it, the short way round from the current facing.
-    set_step([di, dj, climb, key, cells]) {
+    // Start step = [di, dj, climb, stairs key, cells, height (standard
+    // heights)]: note a staircase as taken, and turn to face it, the short
+    // way round from the current facing.
+    set_step([di, dj, climb, key, cells, height]) {
         this.step = [di, dj];
         this.climb = climb;
         this.cells = cells;
+        this.rise_h = height * WALL_H;
         if (key !== null) {
             this.taken.add(key);
             if (this.taken.size > MAX_TAKEN) {
@@ -477,28 +495,28 @@ export class BrainMazeScene extends Scene {
         this.facing_to = to;
     }
 
-    // Whether cell (i, j) of level L holds an uneaten cone (never a ramp's
+    // Whether cell (i, j) of level L holds an uneaten cone (never a staircase's
     // cell, which the brain can't stand in).
     has_cone(level, i, j) {
         return this.levels.maze(level).cell_random(i, j) < CONE_P &&
-            !this.collected.has(`${level},${i},${j}`) && !this.levels.ramp_cell(level, i, j);
+            !this.collected.has(`${level},${i},${j}`) && !this.levels.stairs_cell(level, i, j);
     }
 
-    // The ways on from the current cell: [di, dj, climb, ramp key, cells]
-    // for each passable direction.
+    // The ways on from the current cell: [di, dj, climb, stairs key, cells,
+    // height] (see set_step) for each passable direction.
     ways_on() {
         const ways = [];
         for (const [di, dj] of MAZE_DIRS) {
             const step = this.levels.step(this.level, this.cell_i, this.cell_j, di, dj);
             if (step !== null) {
-                ways.push([di, dj, step.climb, step.key, step.cells]);
+                ways.push([di, dj, step.climb, step.key, step.cells, step.height]);
             }
         }
         return ways;
     }
 
-    // The way on from the current cell: an untaken ramp from here, else
-    // towards the nearest untaken ramp in sight, else the nearest cone in
+    // The way on from the current cell: an untaken staircase from here,
+    // else towards the nearest untaken staircase in sight, else the nearest cone in
     // sight (see SIGHT_CELLS), else by the rule at MOVE_BEATS.
     choose_step() {
         const ways = this.ways_on();
@@ -507,8 +525,8 @@ export class BrainMazeScene extends Scene {
             return untaken;
         }
         // Look down each level run of open cells.
-        let ramp_dist = SIGHT_CELLS + 1, cone_dist = SIGHT_CELLS + 1;
-        let to_ramp = null, to_cone = null;
+        let stairs_dist = SIGHT_CELLS + 1, cone_dist = SIGHT_CELLS + 1;
+        let to_stairs = null, to_cone = null;
         for (const way of ways) {
             const [di, dj, climb] = way;
             if (climb != 0) {
@@ -522,12 +540,12 @@ export class BrainMazeScene extends Scene {
                     cone_dist = k;
                     to_cone = way;
                 }
-                if (k < ramp_dist && MAZE_DIRS.some(([ri, rj]) => {
+                if (k < stairs_dist && MAZE_DIRS.some(([ri, rj]) => {
                     const step = this.levels.step(this.level, i, j, ri, rj);
                     return step !== null && step.climb != 0 && !this.taken.has(step.key);
                 })) {
-                    ramp_dist = k;
-                    to_ramp = way;
+                    stairs_dist = k;
+                    to_stairs = way;
                 }
                 const on = this.levels.step(this.level, i, j, di, dj);
                 if (on === null || on.climb != 0) {
@@ -535,8 +553,8 @@ export class BrainMazeScene extends Scene {
                 }
             }
         }
-        if (to_ramp !== null) {
-            return to_ramp;
+        if (to_stairs !== null) {
+            return to_stairs;
         }
         if (to_cone !== null) {
             return to_cone;
@@ -564,9 +582,10 @@ export class BrainMazeScene extends Scene {
                 return best;
             }
         }
-        // Never reached: every open way is passable (a ramp's cell is a dead
-        // end on both levels, open only to the cells that cross it).
-        return [0, 0, 0, null, 1];
+        // Never reached: every open way is passable (a staircase's cells
+        // are a dead end on both levels, open only to the cells that cross
+        // it).
+        return [0, 0, 0, null, 1, 0];
     }
 
     handle_beat(t, channel) {

@@ -5,7 +5,7 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 
-export class TriangularPrismScene extends Scene {
+export class RollingCubeScene extends Scene {
     constructor(context) {
         super(context, 'rollingcube', 2, 180);
 

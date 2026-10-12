@@ -11,31 +11,30 @@ import { LightningStrike } from './src/lightning_strike.js';
 import { Tesseract } from './src/highdim.js';
 import { Scene } from './src/scenes/scene.js';
 import { GantryScene } from './src/scenes/gantry_scene.js';
-import { HexagonScene } from './src/scenes/hexagon_scene.js';
+import { CubeFractalScene } from './src/scenes/cubefractal_scene.js';
 import { SpectrumScene } from './src/scenes/spectrum_scene.js';
-import { IntroScene } from './src/scenes/intro_scene.js';
+import { TesseractScene } from './src/scenes/tesseract_scene.js';
 import { IceCreamScene } from './src/scenes/ice_cream_scene.js';
-import { FastCubeScene } from './src/scenes/fast_cube_scene.js';
-import { ChineseScene } from './src/scenes/chinese_scene.js';
+import { CubemanScene } from './src/scenes/cubeman_scene.js';
+import { GlyphWalkScene } from './src/scenes/glyph_walk_scene.js';
 import { TessellateScene } from './src/scenes/tessellate_scene.js';
-import { FastCarScene } from './src/scenes/fast_car_scene.js';
-import { CubeLockingScene } from './src/scenes/cube_locking_scene.js';
+import { CubeTubesScene } from './src/scenes/cubetubes_scene.js';
 import { YellowRobotScene } from './src/scenes/yellow_robot_scene.js';
 import { SpinningRobotsScene } from './src/scenes/spinning_robots_scene.js';
-import { DrumboxScene } from './src/scenes/drumboxes_scene.js';
+import { DrumboxScene } from './src/scenes/drumbox_scene.js';
 import { TracersScene } from './src/scenes/tracers_scene.js';
 import { DDRScene } from './src/scenes/ddr_scene.js';
-import { HomeBackgroundScene } from './src/scenes/home_background_scene.js';
+import { CubeBounceScene } from './src/scenes/cube_bounce_scene.js';
 import { SurfacesScene } from './src/scenes/surfaces_scene.js';
-import { BackgroundSurfacesScene } from './src/scenes/bg_surfaces_scene.js';
+import { ParamSurfaceScene } from './src/scenes/param_surface_scene.js';
 import { HelixScene } from './src/scenes/helix_scene.js';
-import { TriangularPrismScene } from './src/scenes/triangular_prism_scene.js';
+import { RollingCubeScene } from './src/scenes/rolling_cube_scene.js';
 import { SphereGridScene } from './src/scenes/sphere_grid_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
 import { BuildingScene } from './src/scenes/building_scene.js';
-import { VectorFieldScene } from './src/scenes/vector_field.js';
-import { DrumKitScene } from './src/scenes/drum_scene.js';
+import { VectorFieldScene } from './src/scenes/vector_field_scene.js';
+import { DrumKitScene } from './src/scenes/drum_kit_scene.js';
 import { DebugScene } from './src/scenes/debug_scene.js';
 import { PoseScene } from './src/scenes/pose_scene.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
@@ -100,6 +99,9 @@ const HUD_SPIN_GLYPHS = ['\u2598', '\u259D', '\u2597', '\u2596'];
 const HUD_SPIN_HZ = 6;
 // Beat length assumed before any sync has set a tempo, in seconds (120 bpm).
 const HUD_FALLBACK_BEAT_S = 0.5;
+// How often the header's fps and latency fields refresh, in seconds: fps
+// counts the frames in each window, and slower refreshes keep both readable.
+const HUD_STATS_INTERVAL_S = 0.5;
 
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
@@ -179,11 +181,6 @@ function connect() {
 
         //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
         //console.log(`Latency: ${context.est_avg_latency}`);
-
-        // Update the overlay with latency
-        const latency_elem = document.getElementById('latency');
-        const latency_str = (est_tot_latency * 1000).toFixed(1);
-        latency_elem.innerHTML = latency_str;
 
         if (type == MSG_TYPE_SYNC) {
             context.handle_sync(est_tot_latency, msg.sync_rate_hz, msg.sync_idx);
@@ -355,9 +352,16 @@ function handle_move(evt) {
 
 
 function init() {
+    // Frame-time graph, shown by clicking the header's fps field, just below
+    // the header.
     stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
     stats.dom.style.visibility = 'hidden';
     document.body.appendChild( stats.dom );
+    document.getElementById('fps-toggle').addEventListener('click', () => {
+        const hidden = stats.dom.style.visibility == 'hidden';
+        stats.dom.style.top = `${document.getElementById('header').offsetHeight}px`;
+        stats.dom.style.visibility = hidden ? 'visible' : 'hidden';
+    });
     context = new GraphicsContext();
     document.addEventListener('keydown', (e) => { context.keydown(e); });
     connect();
@@ -381,15 +385,22 @@ class GraphicsContext {
         this.last_quarter_t = null;    // when it arrived, seconds
         this.beat_period_s = HUD_FALLBACK_BEAT_S;
 
+        // Header fps/latency fields (see update_stats_hud).
+        this.hud_frames = 0;
+        this.hud_window_start = performance.now() / 1000;
+        // Clickable header fields (see index.html). Scene list entries are
+        // rebuilt on every change, so their clicks are caught on the list.
+        document.getElementById('mode').addEventListener('click',
+            () => this.toggle_beat_mode());
+        document.getElementById('scenes').addEventListener('click', (e) => {
+            const entry = e.target.closest('[data-slot]');
+            if (entry) {
+                this.active_slot = Number(entry.dataset.slot);
+                this.update_scene_hud();
+            }
+        });
+
         // Set up DOM and renderer
-        this.debug_overlay = document.getElementById("debug-overlay");
-        this.overlay_indicators = [];
-        for (let i = 1; i <= 16; i++) {
-            const elem = document.createElement("div");
-            this.debug_overlay.appendChild(elem);
-            this.overlay_indicators.push(elem);
-        }
-        this.debug_overlay.style.visibility = "hidden";
         this.container = document.createElement( 'div' );
         document.body.appendChild(this.container);
         this.renderer = new THREE.WebGLRenderer({
@@ -422,31 +433,31 @@ class GraphicsContext {
         // Create scenes
         this.scenes = new Map([
             [1, new GantryScene(this)], // more interactive
-            [2, new HexagonScene(this)],    // more interactive
+            [2, new CubeFractalScene(this)],    // more interactive
             [3, new SpinningRobotsScene(this)],  // overlap unaesthetic
-            [4, new CubeLockingScene(this)],    // more interactive
+            [4, new CubeTubesScene(this)],    // more interactive
             [5, new IceCreamScene(this)],   // more interactive, models too static
             [6, new DDRScene(this)],    // more interactive, basically no interactivity
             [7, new DrumboxScene(this)],    // more interactive, basically no interactivity
             [8, new YellowRobotScene(this)],    // interactivity needs work, better dance
-            [9, new ChineseScene(this)],    // more interactive, ideally draw random walks live
+            [9, new GlyphWalkScene(this)],    // more interactive, ideally draw random walks live
             [10, new SurfacesScene(this)],  // boring
-            [11, new BackgroundSurfacesScene(this)],    // boring
+            [11, new ParamSurfaceScene(this)],    // boring
             [12, new SpectrumScene(this)],  // more interactive, get rid of separate 2d and 3d states and have a knob continuously morph
-            [13, new FastCubeScene(this)],  // boring, needs more interactivity
+            [13, new CubemanScene(this)],  // boring, needs more interactivity
             [14, new TessellateScene(this)],
-            [15, new HomeBackgroundScene(this)],
-            [16, new IntroScene(this)],
+            [15, new CubeBounceScene(this)],
+            [16, new TesseractScene(this)],
             [17, new TracersScene(this)],
             [18, new HelixScene(this)], // boring, should react to spectrum instead and have knobs control stuff more
-            [19, new TriangularPrismScene(this)],
+            [19, new RollingCubeScene(this)],
             [20, new SphereGridScene(this)],
             [21, new VectorFieldScene(this)],
             [22, new CellularAutomataScene(this)],
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
             [25, new PoseScene(this)],
-            // The hexagon scene's old background: knob A sizes the hexes
+            // The cube fractal scene's old background: knob A sizes the hexes
             // (render-buffer px between centres, 15..100, at 40 until moved),
             // knob B the swirl (0..1, at the original 0.5 until moved).
             [26, new ShaderScene(this, 'glsl/hex_background.frag', {
@@ -595,6 +606,7 @@ class GraphicsContext {
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.update_conn_indicator();
+        this.update_stats_hud();
         this.view.update(dt);
         this.for_each_shown_scene((scene) => {
             scene.anim_frame(dt);
@@ -602,20 +614,21 @@ class GraphicsContext {
         });
     }
 
-    indicator_on(i, color) {
-        this.overlay_indicators[i].style.backgroundColor = color;
-    }
-
-    indicator_off(i) {
-        this.overlay_indicators[i].style.backgroundColor = 'transparent';
-    }
-
-    indicator_toggle(i, color) {
-        if (this.overlay_indicators[i].style.backgroundColor == 'transparent') {
-            this.overlay_indicators[i].style.backgroundColor = color;
-        } else {
-            this.overlay_indicators[i].style.backgroundColor = 'transparent';
+    // Every HUD_STATS_INTERVAL_S, write the frame rate over that window and
+    // the relay's smoothed one-way latency (half the ack round trip the
+    // adapter measures, see connect()) into the header.
+    update_stats_hud() {
+        this.hud_frames++;
+        const now = performance.now() / 1000;
+        const elapsed = now - this.hud_window_start;
+        if (elapsed < HUD_STATS_INTERVAL_S) {
+            return;
         }
+        document.getElementById('fps').innerHTML = (this.hud_frames / elapsed).toFixed(0);
+        document.getElementById('latency').innerHTML = this.est_avg_latency === undefined ?
+            '-' : (this.est_avg_latency * 1000).toFixed(1);
+        this.hud_frames = 0;
+        this.hud_window_start = now;
     }
 
     recreate_buffers(width, height) {
@@ -691,20 +704,30 @@ class GraphicsContext {
     // top, higher slots behind it), so the list reads front layer first -
     // which also avoids the fg/bg labels the header used to carry.
     update_scene_hud() {
+        // One clickable entry per slot (see the constructor), its index in
+        // the primary colour when it's the active slot.
+        const entry = (slot, name) => {
+            const index_class = slot == this.active_slot ? ' class="emph"' : '';
+            return `<span class="clickable" data-slot="${slot}"><span${index_class}>${slot}:</span>${name}</span>`;
+        };
         const shown = [];
         let active_shown = false;
         this.shown_scenes.forEach((idx, slot) => {
             if (slot > this.active_slot && !active_shown) {
-                shown.push(`${this.active_slot}:`);
+                shown.push(entry(this.active_slot, ''));
                 active_shown = true;
             }
             if (idx != undefined) {
-                shown.push(`${slot}:${this.scenes.get(idx).shortname}`);
+                shown.push(entry(slot, this.scenes.get(idx).shortname));
                 if (slot == this.active_slot) {
                     active_shown = true;
                 }
             }
         });
+        // An empty active slot behind every occupied one.
+        if (!active_shown) {
+            shown.push(entry(this.active_slot, ''));
+        }
         document.getElementById('scenes').innerHTML = shown.join('+');
     }
 
@@ -791,16 +814,7 @@ class GraphicsContext {
             this.active_slot = this.key_digit_to_slot(shift_chars.indexOf(e.key));
             this.update_scene_hud();
         } else if (e.code == "Space") {
-            this.immediate_mode = !this.immediate_mode;
-            this.update_mode_hud();
-        } else if (e.code == "KeyD") {
-            if (this.debug_overlay.style.visibility == 'hidden') {
-                this.debug_overlay.style.visibility = 'visible';
-                stats.dom.style.visibility = 'visible';
-            } else {
-                this.debug_overlay.style.visibility = 'hidden';
-                stats.dom.style.visibility = 'hidden';
-            }
+            this.toggle_beat_mode();
         } else if (e.key == "ArrowLeft") {
             this.advance_state(-1);
         } else if (e.key == "ArrowRight") {
@@ -844,6 +858,13 @@ class GraphicsContext {
             this.last_quarter_t = performance.now() / 1000;
             this.beat_period_s = 60 / bpm;
         }
+    }
+
+    // Space, or clicking the header's mode field: immediate vs delayed
+    // (latency-compensated) beats.
+    toggle_beat_mode() {
+        this.immediate_mode = !this.immediate_mode;
+        this.update_mode_hud();
     }
 
     update_mode_hud() {

@@ -33,7 +33,7 @@ const TRACER_OPACITY = 0.3;
 
 const TURN_ROT = 'rot_' + TURN_PLANE;
 
-export class IntroScene extends Scene {
+export class TesseractScene extends Scene {
     constructor(context) {
         super(context, 'tesseract');
 

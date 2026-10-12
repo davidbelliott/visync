@@ -17,7 +17,7 @@ const OSC_DECAY = 5;
 const OSC_PHASE = 0;
 
 
-export class HomeBackgroundScene extends Scene {
+export class CubeBounceScene extends Scene {
     constructor(context) {
         super(context, 'cube-bounce');
 

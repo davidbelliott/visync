@@ -111,7 +111,7 @@ const FILL_OPACITY = 0.5;
 const YAW_BASE = Math.PI / 4;
 const PITCH_BASE = ISOMETRIC_TILT;
 
-export class FastCubeScene extends Scene {
+export class CubemanScene extends Scene {
     constructor(context) {
         super(context, 'cubeman');
 

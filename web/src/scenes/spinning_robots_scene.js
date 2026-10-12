@@ -62,7 +62,7 @@ const CUBE_SCALES = [
 ];
 
 // Beat channels that flash a visor: the Analog Rytm's closed (9) and open (10)
-// hi-hat tracks, as in the ice cream / bg surfaces scenes.
+// hi-hat tracks, as in the ice cream / param surface scenes.
 const HIHAT_CHANNELS = [9, 10];
 // Beats a hi-hat visor flash takes to dither back out from solid white.
 const VISOR_FLASH_BEATS = 1;

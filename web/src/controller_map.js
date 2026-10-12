@@ -5,7 +5,7 @@
 // hard-coding knob numbers, so the physical layout is described in one place.
 
 // Per-axis expansion knobs. Used for grid spacing (e.g. the yellow-robot dance
-// grid, X/Y) and for the tesseract's per-axis scale (intro scene), where each
+// grid, X/Y) and for the tesseract's per-axis scale (tesseract scene), where each
 // knob's normalized 0..1 value drives one axis's scale directly (0 collapses
 // the axis, 1 is full size). The tesseract is 4D, so it also uses Z and W.
 export const CH_EXPAND_X = 3;

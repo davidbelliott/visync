@@ -6,16 +6,17 @@
         <title>BAZNOQ.VIZ</title>
     </head>
     <body>
-        <!-- performer, relay state, bpm, latency, beat mode, then the scene
+        <!-- performer, relay state, bpm, fps, latency, beat mode, then the scene
              list (draw order, background first). Every span is filled from
              main.js. The scene list stays last because it's the one field with
              no bounded width, so nothing after it gets pushed around as slots
              change. The performer is replaced by MsgPerformer. #conn is one
              block character, animated per frame by update_conn_indicator; it
-             starts on a spinner frame. -->
-             <div id="header" style="display: inline-block"><span class="emph">&gt; </span><span class="emph" id="performer">VISYNC</span> <span class="muted" id="conn">&#x2598;</span>    <span class="muted"># <span id="bpm">-</span>bpm / <span id="latency">-</span>ms / <span id="mode">imm</span> / <span id="scenes"></span></span></div>
-        <div id="debug-overlay">
-        </div>
+             starts on a spinner frame. Clickable: the fps field toggles the
+             frame-time graph (three.js Stats), the mode toggles immediate vs
+             delayed beats, and a slot in the scene list makes it the active
+             slot. -->
+             <div id="header" style="display: inline-block"><span class="emph">&gt; </span><span class="emph" id="performer">VISYNC</span> <span class="muted" id="conn">&#x2598;</span>    <span class="muted"># <span id="bpm">-</span>bpm / <span class="clickable" id="fps-toggle"><span id="fps">-</span>fps</span> / <span id="latency">-</span>ms / <span class="clickable" id="mode">imm</span> / <span id="scenes"></span></span></div>
         <script type="module" src="/main.js"></script>
     </body>
 </html>

@@ -13,8 +13,8 @@ import {
 
 // Free yaw (STEPPED_VIEW false): this x the shared view yaw.
 const YAW_SCALE = 1;
-// true: rotate in lockstep with the other stepped scenes (gantry, fast cube,
-// cube locking, spinning robots...): eased 45 deg yaw steps and upright pitch
+// true: rotate in lockstep with the other stepped scenes (gantry, cubeman,
+// cubetubes, spinning robots...): eased 45 deg yaw steps and upright pitch
 // stops, same pace and base angles. false: free yaw at YAW_SCALE under a
 // fixed isometric tilt (pitch locked).
 const STEPPED_VIEW = true;
@@ -115,9 +115,9 @@ function spacing_for_spread(g) {
     return FULL_SPACING * (g - 1) / 2;
 }
 
-export class HexagonScene extends Scene {
+export class CubeFractalScene extends Scene {
     constructor(context) {
-        super(context, 'hexagons');
+        super(context, 'cubefractal');
 
         const width = window.innerWidth;
         const height = window.innerHeight;

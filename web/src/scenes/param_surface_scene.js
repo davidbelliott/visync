@@ -23,7 +23,7 @@ function radial_wave(u, v, target, t) {
 }
 
 
-export class BackgroundSurfacesScene extends Scene {
+export class ParamSurfaceScene extends Scene {
     constructor(context) {
         super(context, 'param-surface');
 

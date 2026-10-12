@@ -16,7 +16,7 @@ import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader";
 const USE_SHADER = true;
 const SVG_SIZE = 80;
 
-export class ChineseScene extends Scene {
+export class GlyphWalkScene extends Scene {
     constructor(context) {
         super(context, 'rwalkglyphs');
 
@@ -51,7 +51,7 @@ export class ChineseScene extends Scene {
             // load a SVG resource
             loader.load(
                 // resource URL
-                'img/chinese.svg',
+                'img/glyph_walk.svg',
                 // called when the resource is loaded
                 (data) => {
                     const paths = data.paths;
@@ -116,8 +116,8 @@ export class ChineseScene extends Scene {
         }
 
         // Create top-level scene
-        this.shader_loader = new ResourceLoader(['glsl/chinese.vert', 'glsl/chinese.frag']);
-        Promise.all([this.shader_loader.load(), load_texture('img/chinese.png')]).then(
+        this.shader_loader = new ResourceLoader(['glsl/glyph_walk.vert', 'glsl/glyph_walk.frag']);
+        Promise.all([this.shader_loader.load(), load_texture('img/glyph_walk.png')]).then(
             ([[vertex_shader, fragment_shader], texture]) => {
             texture.minFilter = THREE.NearestFilter;
             texture.magFilter = THREE.NearestFilter;

@@ -176,7 +176,7 @@ class CustomSinCurve extends THREE.Curve {
 }
 
 
-export class CubeLockingScene extends Scene {
+export class CubeTubesScene extends Scene {
     constructor(context) {
         super(context, 'cubetubes', 3);
 

@@ -79,12 +79,12 @@ const FLIP_BEATS = 1;
 const VIEW_DROP = -4;
 
 // The brain is drawn as a scan (see ContourScan). Contour spacing, model
-// units: the brain is ~160 tall, so ~27 slices. Contours scroll up this many
+// units: the brain is ~160 tall, so ~18 slices. Contours scroll up this many
 // slices per beat. Each kick sweeps a scan contour up the brain over
 // SCAN_BEATS, lighting the contours below it over SCAN_TRAIL model units.
 // Contours on faces turned away from the viewer are BRAIN_BACK_GAIN as
 // bright (with the black fill in front, only visible at the silhouette).
-const SLICE_SPACING = 6;
+const SLICE_SPACING = 9;
 const SLICE_SCROLL_PER_BEAT = 0.25;
 const SCAN_BEATS = 1;
 const SCAN_TRAIL = 30;
@@ -93,10 +93,6 @@ const BRAIN_LINE_COLOR = new THREE.Color('cyan');
 // The brain's solid fill under the contours: lit and dithered like the
 // cones, dark enough that the contours stay the brightest thing on it.
 const BRAIN_FILL_COLOR = new THREE.Color(0.0, 0.25, 0.25);
-// The fill only occupies every other band between contours (the bands
-// scroll with them); each solid band's cut faces are drawn flat in this
-// colour, a touch brighter than the shaded sides so they read as cut faces.
-const BRAIN_CAP_COLOR = new THREE.Color(0.0, 0.35, 0.35);
 const BRAIN_SCAN_COLOR = new THREE.Color('white');
 
 export class IceCreamScene extends Scene {
@@ -145,7 +141,6 @@ export class IceCreamScene extends Scene {
         this.brain_fill_uniforms = {
             slice_offset: { value: 0 },
             slice_spacing: { value: SLICE_SPACING },
-            cap_color: { value: BRAIN_CAP_COLOR },
         };
         this.scan_height = 0;       // model units
 
@@ -231,14 +226,11 @@ export class IceCreamScene extends Scene {
                 this.update_cones();
                 this.base_group.add(this.cones);
 
-                // Solid fill behind the contours, hiding the far side's, in
-                // every other band between them (see BRAIN_CAP_COLOR).
-                // Pushed back so the near contours, which lie exactly on its
-                // surface, pass the depth test. Caps without a stencil
-                // buffer: the fill is double-sided, so looking into a cut
-                // band shows the inside of its far wall, and those back faces
-                // drawn flat in the cap colour read as the band's solid top
-                // or bottom (a flat face under a flat colour).
+                // Fill behind the contours, hiding the far side's, in every
+                // other band between them: a stack of open rings, its inside
+                // showing (double-sided) through the gaps. Pushed back so the
+                // near contours, which lie exactly on its surface, pass the
+                // depth test.
                 const brain_fill_mat = new THREE.MeshLambertMaterial({
                     color: BRAIN_FILL_COLOR,
                     side: THREE.DoubleSide,
@@ -259,11 +251,8 @@ export class IceCreamScene extends Scene {
                     shader.fragmentShader = shader.fragmentShader.replace(
                         'void main() {',
                         'uniform float slice_offset;\nuniform float slice_spacing;\n' +
-                        'uniform vec3 cap_color;\nvarying float v_height;\nvoid main() {\n' +
+                        'varying float v_height;\nvoid main() {\n' +
                         'if (mod(floor((v_height - slice_offset) / slice_spacing), 2.0) > 0.5) discard;'
-                    ).replace(
-                        '#include <opaque_fragment>',
-                        '#include <opaque_fragment>\nif (!gl_FrontFacing) gl_FragColor.rgb = cap_color;'
                     );
                 };
                 const brain_fill = new THREE.Mesh(brain_geom, brain_fill_mat);

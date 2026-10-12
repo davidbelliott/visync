@@ -14,6 +14,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
+import { shuffle_foot, shuffle_bob } from '../shuffle.js';
 
 
 // Wireframe opacity [0, 1] for the robots on the grid's outer ring; the center
@@ -242,6 +243,7 @@ export class SpinningRobotsScene extends Scene {
         this.spinner_quat = new THREE.Quaternion();
         this.spinner_color = new THREE.Color();
         this.tmp_vec = new THREE.Vector3();
+        this.shuffle_out = [[0, 0, 0], [0, 0, 0]];     // per side, for shuffle_foot
 
         // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
@@ -260,8 +262,8 @@ export class SpinningRobotsScene extends Scene {
 
         // Every robot shuffles in lockstep: one offset per side per frame.
         const shuffles = [
-            this.get_foot_shuffle_offset(0, half_beat_time),
-            this.get_foot_shuffle_offset(1, half_beat_time)
+            shuffle_foot(0, half_beat_time, this.shuffle_out[0]),
+            shuffle_foot(1, half_beat_time, this.shuffle_out[1])
         ];
         const torso_y = this.pose[CubeParts.TORSO].y;
 
@@ -319,8 +321,8 @@ export class SpinningRobotsScene extends Scene {
     // half_beat_time is normalized time since the half-note beat, throw_time
     // beats since the last spinner throw (both from the scene's BeatClocks).
     compute_robot_pose(half_beat_time, throw_time) {
-        const body_offset = this.get_body_shuffle_offset(half_beat_time);
-        const arms_offset = this.get_arms_pump_offset(half_beat_time);
+        const body_offset = 0.8 * shuffle_bob(half_beat_time);
+        const arms_offset = 0.6 * shuffle_bob(half_beat_time);
 
         // Parabolic throw arc: 0 at the ends, THROW_HEIGHT at the midpoint.
         const throw_frac = clamp(throw_time / THROW_MOVEMENT_BEATS, 0, 1);
@@ -337,46 +339,6 @@ export class SpinningRobotsScene extends Scene {
             this.pose[CubeParts.SPINNERS[side]].set(
                 sign * 2.75, arm_y + cur_throw_y, 2.75);
         }
-    }
-
-    get_foot_shuffle_offset(side_idx, t) {
-        // get shuffle offset for this side as an array [x, y, z]
-        // side_idx: 0 for left, 1 for right
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
-            [0, ease(Math.max(0, 1 - dt / t_mov)), ease(Math.min(1, dt / t_mov))],
-            [0, 0, ease(Math.max(0, 1 - dt / t_mov))],
-            [0, 0, ease(Math.max(-1, -dt / t_mov))]];
-        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % position_options.length;
-        return position_options[pos_idx];
-    }
-
-    get_body_shuffle_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.8;
-    }
-
-    get_arms_pump_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.6;
     }
 
     handle_sync(t, bpm, beat) {

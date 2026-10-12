@@ -14,6 +14,7 @@ import {
     BeatClock
 } from '../util.js';
 import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
+import { shuffle_bob } from '../shuffle.js';
 
 const BODY_COLOR = new THREE.Color("red");
 // Beats to lerp the clap arm orientation (front vs. overhead) after each
@@ -121,34 +122,6 @@ class DDRRobot extends THREE.Object3D {
         return position_options[pos_idx];
     }
 
-    get_body_shuffle_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.8;
-    }
-
-    get_arms_pump_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 1.0;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return new THREE.Vector3(0, position_options[pos_idx] * 0.6, 0);
-    }
-
     get_arms_clap_offset(side, t) {
         // t: normalized time since half-note beat that clap happens on (0 - 1)
         // Phase-shifted half a cycle: the hands-together pose below falls at
@@ -190,8 +163,8 @@ class DDRRobot extends THREE.Object3D {
             measure_time * 4 / CLAP_DIR_TRANSITION_BEATS, 0, 1));
         this.clap_dir_cur = lerp_scalar(this.prev_clap_dir, this.clap_dir, clap_dir_frac);
 
-        const body_offset = this.get_body_shuffle_offset(half_beat_time);
-        const arms_offset = this.get_arms_pump_offset(half_beat_time);
+        const body_offset = 0.8 * shuffle_bob(half_beat_time);
+        const arms_offset = new THREE.Vector3(0, 0.6 * shuffle_bob(half_beat_time, 1), 0);
 
         for (let side = 0; side < 2; side++) {
             const shuffle_offset = this.get_foot_offset(side, half_beat_time);

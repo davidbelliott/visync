@@ -8,6 +8,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
+import { shuffle_foot, shuffle_bob } from '../shuffle.js';
 
 
 // Each robot is built from this many cubes. They used to live in a THREE
@@ -140,53 +141,13 @@ export class YellowRobot extends Component {
             (j - center) * this._spread_y);
     }
 
-    get_foot_shuffle_offset(side_idx, t) {
-        // get shuffle offset for this side as an array [x, y, z]
-        // side_idx: 0 for left, 1 for right
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            [0, ease(Math.min(1, dt / t_mov)), ease(Math.min(0, -1 + dt / t_mov))],
-            [0, ease(Math.max(0, 1 - dt / t_mov)), ease(Math.min(1, dt / t_mov))],
-            [0, 0, ease(Math.max(0, 1 - dt / t_mov))],
-            [0, 0, ease(Math.max(-1, -dt / t_mov))]];
-        const pos_idx = (Math.floor(t / t_period) + 2 * side_idx) % position_options.length;
-        return position_options[pos_idx];
-    }
-
-    get_body_shuffle_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.8;
-    }
-
-    get_arms_pump_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.6;
-    }
-
     // Compute one robot's pose at dance-time t: an array of CUBES_PER_ROBOT
     // { pos, scale } in robot-local space. The body bob shifts every
     // torso-descendant (head, eyes, arms, hands, legs) in y; the feet stay on
     // the ground. Replicated across the grid by build()/anim_frame().
     compute_robot_pose(t) {
-        const body = this.get_body_shuffle_offset(t);
-        const arms = this.get_arms_pump_offset(t);
+        const body = 0.8 * shuffle_bob(t);
+        const arms = 0.6 * shuffle_bob(t);
 
         const pose = [
             // torso, head, eyes (centered; descendants of torso get +body in y)
@@ -198,7 +159,7 @@ export class YellowRobot extends Component {
         let furthest = null;
         for (let side = 0; side < 2; side++) {
             const sign = 2 * side - 1;   // -1 for left, +1 for right
-            const shuffle = this.get_foot_shuffle_offset(side, t);   // [0, y, z]
+            const shuffle = shuffle_foot(side, t);   // [0, y, z]
 
             const leg_base_height = 1.5;
             const leg_scale_y = 1 + (body - shuffle[1]) / leg_base_height;

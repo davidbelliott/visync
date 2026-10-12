@@ -255,20 +255,6 @@ export class CubemanScene extends Scene {
         return position_options[pos_idx];
     }
 
-    get_body_shuffle_offset(t) {
-        // t: normalized time since half-note beat (0 - 1)
-        const t_period = 1.0 / 4.0;
-        const t_mov = t_period * 0.8;
-        const dt = Math.max(0, (t % t_period) - (t_period - t_mov));
-        const position_options = [
-            ease(Math.min(1, dt / t_mov)),
-            ease(Math.max(0, 1 - dt / t_mov))];
-        /*const pos_idx = (Math.floor(t / t_period) +
-            ((side_idx + beat_idx) % 2) * 2) % position_options.length;*/
-        const pos_idx = Math.floor(t / t_period) % position_options.length;
-        return position_options[pos_idx] * 0.8;
-    }
-
     anim_frame(dt) {
         this.cur_frame++;
         this.base_group.rotation.x = this.stepped_pitch();

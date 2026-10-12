@@ -15,14 +15,16 @@ const SEGMENTS = 128;          // circle smoothness
 const DIAL_COLOR = 0xffffff;
 const HALF_PI = Math.PI / 2;
 
-// Audio spectrum + amplitude readout (MsgAudioInfo), laid across the bottom of
-// the frame. World units: orthographic frustum_size 20 => y in [-10, 10], and x
-// roughly [-14, 14] over the dial grid. Amplitude 0..1 (0 = silence, 1 = the
-// full-scale maximum a float32 device can capture) maps to baseline..full-scale
-// height on a logarithmic (dB) scale (see amp_to_y); the same vertical scale is
-// shared by the amp bar and the spectrum line so their heights are comparable.
-const AUDIO_BASELINE_Y = -9.5;      // world y of the dB floor (AUDIO_DB_MIN)
-const AUDIO_FULL_SCALE_H = 18.0;     // world height of amplitude 1.0 (0 dB)
+// Audio spectrum + amplitude readout (MsgAudioInfo), over the whole frame,
+// in front of the dials. World units: orthographic frustum_size 20
+// => y in [-10, 10], x across the window's width (see AudioDisplay.set_edges).
+// Amplitude 0..1 (0 = silence, 1 = the full-scale maximum a float32 device can
+// capture) maps to baseline..full-scale height on a logarithmic (dB) scale
+// (see db_to_y), from the bottom of the window to the top; the same vertical
+// scale is shared by the amp bar and the spectrum line so their heights are
+// comparable.
+const AUDIO_BASELINE_Y = -10;       // world y of the dB floor (AUDIO_DB_MIN)
+const AUDIO_FULL_SCALE_H = 20;      // world height of amplitude 1.0 (0 dB)
 const AUDIO_Z = 0.1;                // sit in front of the dials
 
 // Vertical axis range, in dBFS. The adapter already sends levels in dB (see
@@ -33,24 +35,25 @@ const AUDIO_DB_MIN = -90;
 const AUDIO_DB_MAX = 0;
 
 // Left-side amplitude bar: full-scale outline frame, average fill, peak tick.
-const AMP_BAR_X = -13.5;
-const AMP_BAR_W = 0.8;
+// Pinned against the screen's left edge (see AudioDisplay.set_edges), as
+// wide as a dial's ring, so it stays clear of the dial grid (whose left edge
+// is at x ~ -13.7) on any screen at least 4:3 wide.
+const AMP_BAR_W = OUTER_R - INNER_R;
 
-// Spectrum polyline: the fft bins span this x-range, one point per bin, evenly
-// spaced by bin index (so x is linear in frequency), low to high.
-const SPECTRUM_X0 = -12.5;
-const SPECTRUM_WIDTH = 26.0;
+// Spectrum polylines: the fft bins span the rest of the window's width, from
+// the amp bar to the right edge, one point per bin, evenly spaced by bin
+// index (so x is linear in frequency), low to high.
 
 // Which of the two spectrum traces to draw; independent, either or both (or
 // neither). The averaged one (adapter/audio_info.py's SPECTRUM_SMOOTH_TAU_S,
 // computed on linear amplitude before the dB conversion) settles the low-level
 // bins onto the true noise floor; the raw one shows transients as they land.
-// When both are on, the averaged trace draws behind the raw one.
+// When both are on, the averaged trace draws in front of the raw one.
 const SHOW_RAW_SPECTRUM = true;
-const SHOW_SMOOTHED_SPECTRUM = false;
+const SHOW_SMOOTHED_SPECTRUM = true;
 
 const SPECTRUM_COLOR = 0x555555;    // instantaneous spectrum line
-const SMOOTH_COLOR = 0xff8800;      // time-averaged spectrum line
+const SMOOTH_COLOR = 0xffffff;      // time-averaged spectrum line
 const AVG_COLOR = 0xffffff;         // average fill
 const PEAK_COLOR = 0xffffff;        // peak tick
 const AUDIO_REF_COLOR = 0x555555;   // dim baseline + full-scale frame + ticks
@@ -116,22 +119,26 @@ class Dial {
 // y=AUDIO_FULL_SCALE_H is full scale (0 dB); amplitudes map to y logarithmically
 // (see amp_to_y_db). Left: an amplitude bar (dim full-scale frame, average fill,
 // peak tick). Right: two 1px polylines of the fft spectrum, one point per bin --
-// white for the instantaneous magnitude, orange for its time average.
+// grey for the instantaneous magnitude, white for its time average.
 class AudioDisplay {
     constructor() {
         this.group = new THREE.Group();
         this.group.position.set(0, AUDIO_BASELINE_Y, AUDIO_Z);
 
         const H = AUDIO_FULL_SCALE_H;
-        const bx0 = AMP_BAR_X - AMP_BAR_W / 2;
-        const bx1 = AMP_BAR_X + AMP_BAR_W / 2;
-        const spec_x1 = SPECTRUM_X0 + SPECTRUM_WIDTH;
+        const bx0 = -AMP_BAR_W / 2;
+        const bx1 = AMP_BAR_W / 2;
+        // The bar's parts, centred on x = 0 here, the group moved to the
+        // screen's edge (see set_edges).
+        this.bar_group = new THREE.Group();
+        this.group.add(this.bar_group);
 
         const ref_mat = new THREE.LineBasicMaterial({ color: AUDIO_REF_COLOR });
-        // Baseline spanning bar + spectrum, and a full-scale frame around the bar
+        // Baseline under the spectrum, and a full-scale frame around the bar
         // so the amplitude=1 reference height is visible.
-        this.group.add(new THREE.Line(segment_geometry(bx0, 0, spec_x1, 0), ref_mat));
-        this.group.add(new THREE.LineLoop(
+        this.baseline_geom = segment_geometry(0, 0, 1, 0);
+        this.group.add(new THREE.Line(this.baseline_geom, ref_mat));
+        this.bar_group.add(new THREE.LineLoop(
             new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(bx0, 0, 0), new THREE.Vector3(bx1, 0, 0),
                 new THREE.Vector3(bx1, H, 0), new THREE.Vector3(bx0, H, 0),
@@ -143,13 +150,12 @@ class AudioDisplay {
         fill_geom.translate(0, 0.5, 0);
         this.avg_fill = new THREE.Mesh(
             fill_geom, new THREE.MeshBasicMaterial({ color: AVG_COLOR }));
-        this.avg_fill.position.set(AMP_BAR_X, 0, 0);
         this.avg_fill.scale.y = 1e-4;   // start effectively empty
-        this.group.add(this.avg_fill);
+        this.bar_group.add(this.avg_fill);
 
         // Peak tick: a horizontal 1px line across the bar, raised to peak * H.
         this.peak_geom = segment_geometry(bx0, 0, bx1, 0);
-        this.group.add(new THREE.Line(
+        this.bar_group.add(new THREE.Line(
             this.peak_geom, new THREE.LineBasicMaterial({ color: PEAK_COLOR })));
 
         // Enabled spectrum polylines are built lazily on the first message, once
@@ -161,6 +167,8 @@ class AudioDisplay {
         this.spectrum_pos = null;   // Float32Array backing the raw line
         this.smooth_pos = null;     // Float32Array backing the averaged line
         this.bin_count = 0;         // 0 until the lines are built
+        this.spectrum_x0 = 0;       // the spectrum's x-range, world units
+        this.spectrum_x1 = 1;       // (see set_edges)
     }
 
     // Build one spectrum polyline of n points: a Float32Array of positions with
@@ -168,9 +176,7 @@ class AudioDisplay {
     // plus the THREE.Line drawing it. Returns [line, positions].
     build_line(n, material, z) {
         const pos = new Float32Array(n * 3);
-        for (let j = 0; j < n; j++) {
-            pos[j * 3] = SPECTRUM_X0 + (j / (n - 1)) * SPECTRUM_WIDTH;
-        }
+        this.layout_line(pos);
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         const line = new THREE.Line(geom, material);
@@ -196,14 +202,42 @@ class AudioDisplay {
         this.spectrum_pos = this.smooth_pos = null;
         this.bin_count = n;
 
-        // Averaged trace first, set back in z so the raw one draws over it.
+        // Averaged trace in front in z, so it stays visible over the raw one.
         if (SHOW_SMOOTHED_SPECTRUM) {
             [this.smooth_line, this.smooth_pos] =
-                this.build_line(n, this.smooth_mat, -0.01);
+                this.build_line(n, this.smooth_mat, 0.01);
         }
         if (SHOW_RAW_SPECTRUM) {
             [this.spectrum_line, this.spectrum_pos] =
                 this.build_line(n, this.spectrum_mat, 0);
+        }
+    }
+
+    // Space a line's points evenly across the spectrum's x-range.
+    layout_line(pos) {
+        const n = pos.length / 3;
+        for (let j = 0; j < n; j++) {
+            pos[j * 3] = this.spectrum_x0 + (j / (n - 1)) * (this.spectrum_x1 - this.spectrum_x0);
+        }
+    }
+
+    // Fit to the window, whose left and right edges are at world x left and
+    // right: the amp bar flush against the left edge, the spectrum (and its
+    // baseline) filling the rest.
+    set_edges(left, right) {
+        this.bar_group.position.x = left + AMP_BAR_W / 2;
+        this.spectrum_x0 = left + AMP_BAR_W;
+        this.spectrum_x1 = right;
+        const bp = this.baseline_geom.attributes.position;
+        bp.setX(0, this.spectrum_x0);
+        bp.setX(1, this.spectrum_x1);
+        bp.needsUpdate = true;
+        for (const [line, pos] of [[this.spectrum_line, this.spectrum_pos],
+                [this.smooth_line, this.smooth_pos]]) {
+            if (line) {
+                this.layout_line(pos);
+                line.geometry.attributes.position.needsUpdate = true;
+            }
         }
     }
 
@@ -275,6 +309,19 @@ export class DebugScene extends Scene {
 
         this.audio = new AudioDisplay();
         this.add(this.audio.group);
+        this.fit_audio(window.innerWidth / window.innerHeight);
+    }
+
+    // The camera's side edges move with the aspect ratio; keep the audio
+    // readout spanning them.
+    fit_audio(aspect) {
+        const half_width = this.frustum_size * aspect / 2;
+        this.audio.set_edges(-half_width, half_width);
+    }
+
+    handle_resize(width, height) {
+        super.handle_resize(width, height);
+        this.fit_audio(width / height);
     }
 
     // All levels in dBFS (see adapter/audio_info.py): avg/peak for the interval,

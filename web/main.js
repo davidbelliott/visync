@@ -114,6 +114,14 @@ const BG_COLOR = 'black';
 
 const SCENES_PER_BANK = 10;
 const NUM_SLOTS = 10;
+// A scene change crossfades within its slot over this many beats (four
+// bars), so swaps land musically and scale with tempo.
+const CROSSFADE_BEATS = 16;
+// While a slot crossfades, its header entry shows the incoming scene
+// (highlighted) for this fraction of each beat, in step with the
+// connection indicator's pulse (see hud_beat_phase), and the outgoing one
+// for the rest: the incoming name lights with the solid glyph on the beat.
+const HUD_BLINK_ON_FRACTION = 0.5;
 
 // Longest frame delta (seconds) passed to scene animation. rAF stops while
 // the tab/window is hidden, so an unclamped delta can span minutes and blow
@@ -486,13 +494,54 @@ class GraphicsContext {
                 (idx) => this.change_scene(idx, true), to_scene_idx);
         }
 
-        // Fixed NUM_SLOTS render layers: shown_scenes[slot] is the scene
-        // registry index currently occupying that slot, or undefined if
-        // empty. Rendered in descending slot order, so lower slots draw on
-        // top: slot 0 is the front (foreground), slot 1 behind it
-        // (background; see change_scene/set_slot), and slots 2-9, only
-        // reachable from the keyboard (see keydown), draw behind both.
-        this.shown_scenes = new Array(NUM_SLOTS).fill(undefined);
+        // Fixed NUM_SLOTS render layers, rendered in descending slot order,
+        // so lower slots draw on top: slot 0 is the front (foreground), slot
+        // 1 behind it (background; see change_scene/set_slot), and slots 2-9,
+        // only reachable from the keyboard (see keydown), draw behind both.
+        // Each slot holds `scene`, the registry index of its scene (undefined
+        // if empty), and while a change crossfades in, `outgoing`, the scene
+        // it replaces: `fade` runs 0..1 over CROSSFADE_BEATS, drawing scene
+        // at opacity fade and outgoing at 1 - fade, and outgoing is cleared
+        // at 1. Every scene drawn is in here, and in the header.
+        this.slots = Array.from({ length: NUM_SLOTS },
+            () => ({ scene: undefined, outgoing: undefined, fade: 1 }));
+        this.hud_blink_on = false;  // which side of a crossfade the header shows
+
+        // Fading scenes render alone into fade_buffer (see render_faded),
+        // which this quad then blends over the screen at their opacity. Its
+        // vertices are already in clip space; the image is already in the
+        // screen's encoding (see recreate_buffers) and premultiplied (scenes
+        // render over transparent black), so it passes through as is.
+        this.fade_buffer = null;    // sized in recreate_buffers
+        this.fade_material = new THREE.ShaderMaterial({
+            uniforms: { image: { value: null }, opacity: { value: 1 } },
+            vertexShader: [
+                'varying vec2 v_uv;',
+                'void main() {',
+                '    v_uv = uv;',
+                '    gl_Position = vec4(position.xy, 0.0, 1.0);',
+                '}',
+            ].join('\n'),
+            fragmentShader: [
+                'uniform sampler2D image;',
+                'uniform float opacity;',
+                'varying vec2 v_uv;',
+                'void main() {',
+                '    gl_FragColor = texture2D(image, v_uv) * opacity;',
+                '}',
+            ].join('\n'),
+            blending: THREE.CustomBlending,
+            blendSrc: THREE.OneFactor,
+            blendDst: THREE.OneMinusSrcAlphaFactor,
+            depthTest: false,
+            depthWrite: false,
+        });
+        this.fade_scene = new THREE.Scene();
+        const fade_quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.fade_material);
+        fade_quad.frustumCulled = false;
+        this.fade_scene.add(fade_quad);
+        this.fade_camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.prev_clear_color = new THREE.Color();
 
         // Which slot plain number-key presses target; shift+<numkey>
         // changes this instead of changing a scene (see keydown).
@@ -586,27 +635,71 @@ class GraphicsContext {
         this.recreate_buffers(width, height);
     }
 
-    // Call fn(scene) once for each scene on screen, front to back. A scene
-    // can occupy several slots, but it is one object with one state: it
-    // animates and takes events once, and draws only in its front-most slot
-    // (see render).
-    for_each_shown_scene(fn) {
-        this.shown_scenes.forEach((idx, slot) => {
-            if (idx !== undefined && this.front_slot_of(idx) == slot) {
-                fn(this.scenes.get(idx));
+    // The scenes on screen as {idx, opacity}, back to front, each once. A
+    // scene can sit in several slots, or be both incoming and outgoing, but
+    // it is one object with one state: it draws once, at the front-most
+    // place it appears and at the highest opacity it has anywhere.
+    visible_layers() {
+        const layers = [];      // front to back while building
+        for (let slot = 0; slot < NUM_SLOTS; slot++) {
+            const { scene, outgoing, fade } = this.slots[slot];
+            for (const [idx, opacity] of [[scene, fade], [outgoing, 1 - fade]]) {
+                if (idx === undefined) {
+                    continue;
+                }
+                const seen = layers.find((layer) => layer.idx === idx);
+                if (seen) {
+                    seen.opacity = Math.max(seen.opacity, opacity);
+                } else {
+                    layers.push({ idx, opacity });
+                }
             }
-        });
+        }
+        return layers.reverse();
     }
 
-    // The front-most (lowest) slot showing scene idx, or -1.
-    front_slot_of(idx) {
-        return this.shown_scenes.indexOf(idx);
+    // Call fn(scene) once for each scene on screen, front to back: each
+    // animates and takes events once (see visible_layers).
+    for_each_shown_scene(fn) {
+        const layers = this.visible_layers();
+        for (let i = layers.length - 1; i >= 0; i--) {
+            fn(this.scenes.get(layers[i].idx));
+        }
+    }
+
+    // Advance every slot's crossfade by dt seconds, finishing those that
+    // reach the end, and blink the header's entries for those still going.
+    update_crossfades(dt) {
+        let hud_changed = false;
+        let crossfading = false;
+        for (const slot of this.slots) {
+            if (slot.fade >= 1) {
+                continue;
+            }
+            slot.fade += dt / this.beat_period_s / CROSSFADE_BEATS;
+            if (slot.fade >= 1) {
+                slot.fade = 1;
+                slot.outgoing = undefined;
+                hud_changed = true;
+            } else {
+                crossfading = true;
+            }
+        }
+        const blink_on = crossfading && this.hud_beat_phase() < HUD_BLINK_ON_FRACTION;
+        if (blink_on != this.hud_blink_on) {
+            this.hud_blink_on = blink_on;
+            hud_changed = true;
+        }
+        if (hud_changed) {
+            this.update_scene_hud();
+        }
     }
 
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.update_conn_indicator();
         this.update_stats_hud();
+        this.update_crossfades(dt);
         this.view.update(dt);
         this.for_each_shown_scene((scene) => {
             scene.anim_frame(dt);
@@ -643,6 +736,28 @@ class GraphicsContext {
             }));
         }
         this.cur_buffer_idx = 0;
+        // At the canvas's real resolution (main.js renders below
+        // devicePixelRatio), like the screen the scenes normally draw to.
+        const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+        this.fade_buffer?.dispose();
+        this.fade_buffer = new THREE.WebGLRenderTarget(size.x, size.y, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            depthBuffer: true,
+            stencilBuffer: false
+        });
+        // Scenes must render into it exactly as they would to the screen:
+        // three writes linear colour into ordinary render targets, which
+        // would change anything working on the final colour (the house
+        // dither runs after the output conversion, so it came out dimmer
+        // until the fade finished). It only writes the target's own colour
+        // space into ones flagged as XR targets, and the flag changes nothing
+        // else here (it also allows tone mapping, which is off). Stored as
+        // plain RGBA8, so nothing decodes it on the way out either.
+        this.fade_buffer.texture.colorSpace = THREE.SRGBColorSpace;
+        this.fade_buffer.texture.internalFormat = 'RGBA8';
+        this.fade_buffer.isXRRenderTarget = true;
     }
 
     render() {
@@ -655,21 +770,43 @@ class GraphicsContext {
             this.renderer.setRenderTarget(null);
             this.renderer.clear();
 
-            for (let slot = this.shown_scenes.length - 1; slot >= 0; slot--) {
-                const idx = this.shown_scenes[slot];
-                // Empty, or the scene also sits in a slot in front of this
-                // one and draws there instead.
-                if (idx === undefined || this.front_slot_of(idx) != slot) {
+            for (const { idx, opacity } of this.visible_layers()) {
+                if (opacity <= 0) {
                     continue;
                 }
                 if (CLEAR_DEPTH_BETWEEN_SCENES) {
                     this.renderer.setRenderTarget(null);
                     this.renderer.clearDepth();
                 }
-                this.scenes.get(idx).render(this.renderer, this.buffers[0]);
+                const scene = this.scenes.get(idx);
+                if (opacity >= 1) {
+                    scene.render(this.renderer, this.buffers[0]);
+                } else {
+                    this.render_faded(scene, opacity);
+                }
                 const vector = new THREE.Vector2(0, 0);
                 this.renderer.copyFramebufferToTexture(vector, this.buffers[0].texture);
             }
+    }
+
+    // Draw scene over the screen at opacity (0..1): render it alone into
+    // fade_buffer, cleared to transparent, then blend that image over the
+    // screen. Fading the finished image rather than each material works the
+    // same for every scene (custom shaders, dither, lines, feedback) and
+    // never shows a scene's insides through itself.
+    render_faded(scene, opacity) {
+        const renderer = this.renderer;
+        renderer.getClearColor(this.prev_clear_color);
+        const prev_clear_alpha = renderer.getClearAlpha();
+        renderer.setRenderTarget(this.fade_buffer);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        scene.render(renderer, this.buffers[0]);
+        renderer.setRenderTarget(null);
+        renderer.setClearColor(this.prev_clear_color, prev_clear_alpha);
+        this.fade_material.uniforms.image.value = this.fade_buffer.texture;
+        this.fade_material.uniforms.opacity.value = opacity;
+        renderer.render(this.fade_scene, this.fade_camera);
     }
 
     on_window_resize() {
@@ -691,18 +828,38 @@ class GraphicsContext {
     set_slot(slot, scene_idx) {
         if (scene_idx == 0) {
             scene_idx = undefined;
-        } else if (!this.scenes.has(scene_idx) || this.shown_scenes[slot] === scene_idx) {
+        } else if (!this.scenes.has(scene_idx)) {
             return;
         }
-
-        this.shown_scenes[slot] = scene_idx;
+        const s = this.slots[slot];
+        if (s.scene === scene_idx) {
+            return;
+        }
+        if (scene_idx !== undefined && s.outgoing === scene_idx) {
+            // Changed back mid-crossfade: run it in reverse from where it is.
+            s.outgoing = s.scene;
+            s.fade = 1 - s.fade;
+        } else {
+            // Fade out whichever scene shows most; a third scene can't fit,
+            // so the other side of an unfinished crossfade drops out.
+            if (s.outgoing === undefined || s.fade >= 0.5) {
+                s.outgoing = s.scene;
+            }
+            s.fade = 0;
+        }
+        s.scene = scene_idx;
+        if (s.outgoing === undefined && s.scene === undefined) {
+            s.fade = 1;
+        }
         this.update_scene_hud();
     }
 
     // Rewrite the HUD's scene list as <slot>:<shortname> for every occupied
     // slot, joined with '+'. Slot order is front to back (slot 0 draws on
     // top, higher slots behind it), so the list reads front layer first -
-    // which also avoids the fg/bg labels the header used to carry.
+    // which also avoids the fg/bg labels the header used to carry. A slot
+    // mid-crossfade blinks between its incoming scene, highlighted, and its
+    // outgoing one (see update_crossfades).
     update_scene_hud() {
         // One clickable entry per slot (see the constructor), its index in
         // the primary colour when it's the active slot.
@@ -710,15 +867,21 @@ class GraphicsContext {
             const index_class = slot == this.active_slot ? ' class="emph"' : '';
             return `<span class="clickable" data-slot="${slot}"><span${index_class}>${slot}:</span>${name}</span>`;
         };
+        const name_of = (idx) => idx === undefined ? '' : this.scenes.get(idx).shortname;
         const shown = [];
         let active_shown = false;
-        this.shown_scenes.forEach((idx, slot) => {
+        this.slots.forEach(({ scene, outgoing, fade }, slot) => {
             if (slot > this.active_slot && !active_shown) {
                 shown.push(entry(this.active_slot, ''));
                 active_shown = true;
             }
-            if (idx != undefined) {
-                shown.push(entry(slot, this.scenes.get(idx).shortname));
+            if (scene !== undefined || outgoing !== undefined) {
+                let name = name_of(scene);
+                if (fade < 1) {
+                    name = this.hud_blink_on ?
+                        `<span class="emph">${name}</span>` : name_of(outgoing);
+                }
+                shown.push(entry(slot, name));
                 if (slot == this.active_slot) {
                     active_shown = true;
                 }
@@ -768,15 +931,22 @@ class GraphicsContext {
         }
 
         const last = HUD_BEAT_GLYPHS.length - 1;
-        let i = last;                  // sparsest until a beat has landed
-        if (this.last_quarter_t !== null) {
-            const phase = (now - this.last_quarter_t) / this.beat_period_s;
-            // Clamped, so a stalled clock holds the sparsest glyph instead of
-            // wrapping back to solid as if a beat had arrived.
-            i = Math.min(last, Math.floor(clamp(phase, 0, 1) * HUD_BEAT_GLYPHS.length));
-        }
+        const i = Math.min(last, Math.floor(this.hud_beat_phase() * HUD_BEAT_GLYPHS.length));
         elem.innerHTML = HUD_BEAT_GLYPHS[i];
         elem.className = 'emph';
+    }
+
+    // How far through the current beat the header is, 0..1, from the last
+    // quarter note's arrival: the connection indicator's pulse and the scene
+    // list's crossfade blink both step off this, so they stay in time. 1
+    // (the end of the beat) until a beat has landed; clamped, so a stalled
+    // clock holds there instead of wrapping round as if a beat had arrived.
+    hud_beat_phase() {
+        if (this.last_quarter_t === null) {
+            return 1;
+        }
+        const now = performance.now() / 1000;
+        return clamp((now - this.last_quarter_t) / this.beat_period_s, 0, 1);
     }
 
     // Scene-change messages (MIDI/network MsgGotoScene, and the APC knobs 14

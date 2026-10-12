@@ -6,6 +6,7 @@ import { MAZE_DIRS } from '../infinite_maze.js';
 import { MazeLevels } from '../maze_levels.js';
 import { MazeLevel } from '../components/maze_level.js';
 import { InstancedProps } from '../components/instanced_props.js';
+import { CutoutDancers } from '../components/cutout_dancers.js';
 import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
 import { lerp_scalar, ease, clamp, Spark } from '../util.js';
@@ -148,6 +149,20 @@ const SHADOW_NORMAL_BIAS = 0.02;
 // on the brain's floor: this dark where fully shadowed.
 const FLOOR_SHADOW_OPACITY = 0.6;
 
+// Cutout dancers (CutoutDancers), somewhat rare: each time the brain enters
+// a cell, with DANCER_SPAWN_P (if fewer than MAX_DANCERS), one fades in on its
+// level, in a cell DANCER_SPAWN_MIN.. cells from the brain's (either axis)
+// and inside the window, wandering until it leaves the window or the brain
+// leaves the level. The brain never walks into them unless it's the only
+// way, and they never walk into it. Their arms swap on claps
+// (CLAP_CHANNEL: the Rytm's CP track), their eyes flash on hi-hats
+// (HIHAT_CHANNELS: closed and open).
+const MAX_DANCERS = 3;
+const DANCER_SPAWN_P = 0.15;
+const DANCER_SPAWN_MIN = 3;
+const CLAP_CHANNEL = 4;
+const HIHAT_CHANNELS = [9, 10];
+
 export class BrainMazeScene extends Scene {
     constructor(context) {
         super(context, 'brainmaze');
@@ -225,10 +240,14 @@ export class BrainMazeScene extends Scene {
                 polygonOffsetFactor: 4,
                 polygonOffsetUnits: 4,
             }));
-        this.floor.renderOrder = -1;
+        this.floor.renderOrder = -2;
         this.world_group.add(this.floor);
         // The shadow-only plane on the floor (see FLOOR_SHADOW_OPACITY),
         // pushed back between the levels' floor fills and the black floor.
+        // It too writes no depth, so it must draw before the edges (which
+        // don't either) or it darkens those in shadow wherever the dithered
+        // floor fill leaves a gap: a flickering dither pattern along them,
+        // as the translucent sort by distance swaps the two while moving.
         this.shadow_floor = new THREE.Mesh(
             new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE).rotateX(-Math.PI / 2),
             new THREE.ShadowMaterial({
@@ -239,6 +258,7 @@ export class BrainMazeScene extends Scene {
                 polygonOffsetUnits: 3,
             }));
         this.shadow_floor.receiveShadow = true;
+        this.shadow_floor.renderOrder = -1;
         this.world_group.add(this.shadow_floor);
 
         // Cones, posed each frame from the lists of cones in view: [di, dj,
@@ -265,6 +285,20 @@ export class BrainMazeScene extends Scene {
             this.maze_group.add(spark);
             this.sparks.push(spark);
         }
+
+        // Dancers, in maze_group's frame like the cones; they keep out of
+        // the brain's cell and the one it's heading for (brain_cells). Their
+        // fills fade with the fog and their level's crossfade, their edges
+        // with the crossfade only unless FOG_EDGES.
+        this.dancers = new CutoutDancers(this.levels, { cell: CELL, thickness: WALL_T, max: MAX_DANCERS });
+        this.maze_group.add(this.dancers);
+        this.brain_cells = [[0, 0], [0, 0]];
+        this.viewer = new THREE.Vector2();
+        this.level_fade = 0;
+        const fog = (x, z) => ease(clamp(
+            (FOG_FAR - Math.hypot(x - this.viewer.x, z - this.viewer.y)) / (FOG_FAR - FOG_NEAR), 0, 1));
+        this.dancer_alpha = (x, z) => fog(x, z) * (1 - this.level_fade);
+        this.dancer_edge_alpha = FOG_EDGES ? this.dancer_alpha : () => 1 - this.level_fade;
 
         // The walk: the level and cell the brain set out from, the step it
         // is taking (MAZE_DIRS entry) and its climb (+1 up a staircase, -1 down,
@@ -330,6 +364,11 @@ export class BrainMazeScene extends Scene {
         this.base_group.rotation.x = this.stepped_pitch();
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
         this.update_cones(bx, bz, fade);
+        this.viewer.set(bx, bz);
+        this.level_fade = fade;
+        this.dancers.cast_shadows(fade < 0.5);
+        this.dancers.update(this.beats, d_beats, this.cell_i, this.cell_j, this.brain_cells,
+            this.dancer_alpha, this.dancer_edge_alpha);
         for (const spark of this.sparks) {
             if (spark.active) {
                 spark.life_s -= dt;
@@ -480,6 +519,30 @@ export class BrainMazeScene extends Scene {
         this.step_start += MOVE_BEATS * cells;
         this.set_step(this.choose_step());
         this.build_views();
+        this.dancers.cull(this.level, this.cell_i, this.cell_j, WINDOW_HALF - 1);
+        if (Math.random() < DANCER_SPAWN_P) {
+            this.spawn_dancer();
+        }
+    }
+
+    // Fade in a dancer in a random cell of the brain's level (see
+    // DANCER_SPAWN_P), if one is free: a few tries, else none.
+    spawn_dancer() {
+        const span = WINDOW_HALF - 1 - DANCER_SPAWN_MIN;
+        for (let tries = 0; tries < 8; tries++) {
+            const pick = () => (DANCER_SPAWN_MIN + Math.floor(Math.random() * (span + 1))) *
+                (Math.random() < 0.5 ? 1 : -1);
+            // One axis at least DANCER_SPAWN_MIN off, the other anywhere.
+            let di = pick(), dj = Math.floor(Math.random() * (2 * WINDOW_HALF - 1)) - (WINDOW_HALF - 1);
+            if (Math.random() < 0.5) {
+                [di, dj] = [dj, di];
+            }
+            const i = this.cell_i + di, j = this.cell_j + dj;
+            if (!this.levels.stairs_cell(this.level, i, j) && !this.dancers.occupies(i, j)) {
+                this.dancers.spawn(this.level, i, j, this.brain_cells);
+                return;
+            }
+        }
     }
 
     // Start step = [di, dj, climb, stairs key, cells, height (standard
@@ -489,6 +552,10 @@ export class BrainMazeScene extends Scene {
         this.step = [di, dj];
         this.climb = climb;
         this.cells = cells;
+        this.brain_cells[0][0] = this.cell_i;
+        this.brain_cells[0][1] = this.cell_j;
+        this.brain_cells[1][0] = this.cell_i + di * cells;
+        this.brain_cells[1][1] = this.cell_j + dj * cells;
         this.rise_h = height * WALL_H;
         if (key !== null) {
             this.taken.add(key);
@@ -527,7 +594,11 @@ export class BrainMazeScene extends Scene {
     // else towards the nearest untaken staircase in sight, else the nearest cone in
     // sight (see SIGHT_CELLS), else by the rule at MOVE_BEATS.
     choose_step() {
-        const ways = this.ways_on();
+        // Not into a dancer's cell, unless there's no other way.
+        const all_ways = this.ways_on();
+        const free = all_ways.filter(([di, dj, climb]) =>
+            climb != 0 || !this.dancers.occupies(this.cell_i + di, this.cell_j + dj));
+        const ways = free.length > 0 ? free : all_ways;
         const untaken = ways.find(([, , climb, key]) => climb != 0 && !this.taken.has(key));
         if (untaken) {
             return untaken;
@@ -597,10 +668,14 @@ export class BrainMazeScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 1) {
-            setTimeout(() => {
+        setTimeout(() => {
+            if (channel == 1) {
                 this.brain.start_scan();
-            }, this.get_beat_delay(t) * 1000);
-        }
+            } else if (channel == CLAP_CHANNEL) {
+                this.dancers.clap();
+            } else if (HIHAT_CHANNELS.includes(channel)) {
+                this.dancers.hihat();
+            }
+        }, this.get_beat_delay(t) * 1000);
     }
 }

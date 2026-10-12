@@ -50,6 +50,7 @@ import {
     arr_eq,
     clamp
 } from './src/util.js';
+import { CH_SHADER_A, CH_SHADER_B } from './src/controller_map.js';
 import { BoxDef } from './src/geom_def.js';
 import { ViewTransform } from './src/view_transform.js';
 import { WebsocketController, create_knobs, apply_control_change }
@@ -65,7 +66,7 @@ import "./src/style.css";
 // through (and black-fill) parts of the scenes above; the scenes' cameras
 // differ, so where that happens is incidental, but it can interleave layers
 // in a way that looks good.
-const CLEAR_DEPTH_BETWEEN_SCENES = false;
+const CLEAR_DEPTH_BETWEEN_SCENES = true;
 
 const MSG_TYPE_SYNC = 0;
 const MSG_TYPE_BEAT = 1;
@@ -445,6 +446,19 @@ class GraphicsContext {
             [23, new DrumKitScene(this)],
             [24, new DebugScene(this)],
             [25, new PoseScene(this)],
+            // The hexagon scene's old background: knob A sizes the hexes
+            // (render-buffer px between centres, 15..100, at 40 until moved),
+            // knob B the swirl (0..1, at the original 0.5 until moved).
+            [26, new ShaderScene(this, 'glsl/hex_background.frag', {
+                shortname: 'hexbg',
+                textures: { palette: 'img/romaO.png' },
+                knobs: [
+                    { channel: CH_SHADER_A, uniform: 'hex_size', initial: 40,
+                        transform: (v) => lerp_scalar(15, 100, v) },
+                    { channel: CH_SHADER_B, uniform: 'warp_amount', initial: 0.5,
+                        transform: (v) => v },
+                ],
+            })],
 
             //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
         ]);
@@ -561,15 +575,28 @@ class GraphicsContext {
         this.recreate_buffers(width, height);
     }
 
+    // Call fn(scene) once for each scene on screen, front to back. A scene
+    // can occupy several slots, but it is one object with one state: it
+    // animates and takes events once, and draws only in its front-most slot
+    // (see render).
+    for_each_shown_scene(fn) {
+        this.shown_scenes.forEach((idx, slot) => {
+            if (idx !== undefined && this.front_slot_of(idx) == slot) {
+                fn(this.scenes.get(idx));
+            }
+        });
+    }
+
+    // The front-most (lowest) slot showing scene idx, or -1.
+    front_slot_of(idx) {
+        return this.shown_scenes.indexOf(idx);
+    }
+
     anim_frame() {
         const dt = Math.min(this.clock.getDelta(), MAX_FRAME_DT);
         this.update_conn_indicator();
         this.view.update(dt);
-        this.shown_scenes.forEach((idx) => {
-            if (idx === undefined) {
-                return;
-            }
-            const scene = this.scenes.get(idx);
+        this.for_each_shown_scene((scene) => {
             scene.anim_frame(dt);
             scene.update_zoom();
         });
@@ -617,7 +644,9 @@ class GraphicsContext {
 
             for (let slot = this.shown_scenes.length - 1; slot >= 0; slot--) {
                 const idx = this.shown_scenes[slot];
-                if (idx === undefined) {
+                // Empty, or the scene also sits in a slot in front of this
+                // one and draws there instead.
+                if (idx === undefined || this.front_slot_of(idx) != slot) {
                     continue;
                 }
                 if (CLEAR_DEPTH_BETWEEN_SCENES) {
@@ -737,12 +766,7 @@ class GraphicsContext {
 
     advance_state(steps) {
         console.log(`advance ${steps} steps`);
-        this.shown_scenes.forEach((idx) => {
-            const scene = idx !== undefined ? this.scenes.get(idx) : undefined;
-            if (scene) {
-                scene.advance_state(steps);
-            }
-        });
+        this.for_each_shown_scene((scene) => scene.advance_state(steps));
     }
 
     // Physical left-to-right key order for both the digit->bank-position and
@@ -786,12 +810,7 @@ class GraphicsContext {
         } else if (e.key == "ArrowDown") {
             this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
         } else {
-            this.shown_scenes.forEach((idx) => {
-                const scene = this.scenes.get(idx);
-                if (scene) {
-                    scene.handle_key(e.key);
-                }
-            });
+            this.for_each_shown_scene((scene) => scene.handle_key(e.key));
         }
     }
 
@@ -837,22 +856,12 @@ class GraphicsContext {
         // Beats only go to on-screen scenes. Hidden scenes never damp their
         // physics (anim_frame doesn't run for them), so delivering hits
         // would wind their springs up unboundedly until re-shown.
-        this.shown_scenes.forEach((idx) => {
-            if (idx === undefined) {
-                return;
-            }
-            this.scenes.get(idx).handle_beat(latency, channel);
-        });
+        this.for_each_shown_scene((scene) => scene.handle_beat(latency, channel));
     }
 
     handle_pose(skeletons) {
         // Same reasoning as handle_beat: only on-screen scenes need it.
-        this.shown_scenes.forEach((idx) => {
-            if (idx === undefined) {
-                return;
-            }
-            this.scenes.get(idx).handle_pose(skeletons);
-        });
+        this.for_each_shown_scene((scene) => scene.handle_pose(skeletons));
     }
 
     // All levels are dBFS, converted adapter-side (see adapter/audio_info.py).
@@ -862,13 +871,8 @@ class GraphicsContext {
     // k * samplerate / FFT_SIZE Hz). Sent by adapter.py's -a/--audio mode.
     handle_audio_info(avg, peak, spectrum, smoothed, samplerate) {
         // Same reasoning as handle_beat: only on-screen scenes need it.
-        this.shown_scenes.forEach((idx) => {
-            if (idx === undefined) {
-                return;
-            }
-            this.scenes.get(idx).handle_audio_info(
-                avg, peak, spectrum, smoothed, samplerate);
-        });
+        this.for_each_shown_scene((scene) => scene.handle_audio_info(
+            avg, peak, spectrum, smoothed, samplerate));
     }
 
     get_avg_skew() {

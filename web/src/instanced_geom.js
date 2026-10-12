@@ -224,6 +224,9 @@ export class InstancedGeometryCollection {
         this.instancedGeometry.setAttribute('instanceScale', this.scales);
         this.instancedGeometry.setAttribute('instanceQuaternion', this.quaternions);
 
+        // Resolves once mat and mesh exist (fills load shader chunks
+        // first), for callers that adjust them.
+        this.ready = Promise.resolve();
         if (this.draw_type == 'Lines') {
             this.mat = create_wireframe_mat();
             this.mesh = new THREE.LineSegments(this.instancedGeometry, this.mat);
@@ -239,7 +242,7 @@ export class InstancedGeometryCollection {
                 this.draw_type == 'Triangles' ? create_fill_mat(transparent_fill) :
                 this.draw_type == 'LitDitherFill' ? create_fill_mat(false, true) :
                 create_dither_fill_mat();
-            mat_promise.then((mat) => {
+            this.ready = mat_promise.then((mat) => {
                 this.mat = mat;
                 this.mesh = new THREE.Mesh(this.instancedGeometry, this.mat);
                 this.mesh.frustumCulled = false;

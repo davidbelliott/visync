@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { ResourceLoader } from '../util.js';
+import { ResourceLoader, load_texture } from '../util.js';
 
 const shader_preamble = [
-'uniform vec3 iResolution;       // Viewport resolution (width, height, aspect ratio)',
+'uniform vec3 iResolution;       // Render buffer size, px (width, height, 1); matches gl_FragCoord',
 'uniform float iTime;            // Shader playback time (in seconds)',
+'uniform float iBeats;           // Beats elapsed while shown, at the live bpm',
 'uniform float iTimeDelta;       // Time since last frame',
 'uniform int iFrame;             // Shader playback frame',
 'uniform vec4 iMouse;            // Mouse position (xy: current, zw: click)',
@@ -17,10 +18,33 @@ const shader_epilogue = ['void main() {',
 '}',
 ].join('\n');
 
+// A full-screen fragment shader as a scene, Shadertoy style: the shader
+// file defines mainImage(out vec4, in vec2) and may declare uniforms of its
+// own, supplied through `options`:
+//   shortname: HUD name (default: shader:<url>),
+//   textures: { uniform: image url } for sampler2D uniforms,
+//   knobs: [{ channel, uniform, transform, initial }]: a float uniform set
+//     to transform(knob value) whenever the knob changes, and to `initial`
+//     until it first does.
+// Output alpha blends over the scenes behind it.
 export class ShaderScene extends Scene {
-    constructor(context, fragmentShaderUrl) {
-        super(context, `shader:${fragmentShaderUrl}`);
-        
+    constructor(context, fragmentShaderUrl, options = {}) {
+        const { shortname = `shader:${fragmentShaderUrl}`, textures = {}, knobs = [] } = options;
+        super(context, shortname);
+
+        // The shader file's own uniforms; bindings and texture loads write
+        // into these, which the material shares once it exists.
+        this.custom_uniforms = {};
+        for (const [name, url] of Object.entries(textures)) {
+            this.custom_uniforms[name] = { value: null };
+            load_texture(url).then((texture) => { this.custom_uniforms[name].value = texture; });
+        }
+        for (const { channel, uniform, transform, initial } of knobs) {
+            this.custom_uniforms[uniform] = { value: initial };
+            this.bind(channel, (v) => { this.custom_uniforms[uniform].value = v; }, transform);
+        }
+        this.buffer_size = new THREE.Vector2();
+
         // Setup basic scene with a full-screen quad
         this.clear();
         this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -50,11 +74,14 @@ export class ShaderScene extends Scene {
                     iTimeDelta: { value: 0.0 },
                     iFrame: { value: 0 },
                     iMouse: { value: new THREE.Vector4(0, 0, 0, 0) },
+                    iBeats: { value: 0.0 },
                     iChannel0: { value: null },  // This will hold the previous frame
-                    iBackgroundTexture: { value: null } // This will hold the background scene render
+                    iBackgroundTexture: { value: null }, // This will hold the background scene render
+                    ...this.custom_uniforms,
                 },
                 vertexShader: vertexShader,
-                fragmentShader: fragmentShader
+                fragmentShader: fragmentShader,
+                transparent: true,
             });
             
             // Create a plane that fills the entire view
@@ -111,6 +138,7 @@ export class ShaderScene extends Scene {
         const uniforms = this.material.uniforms;
         uniforms.iTimeDelta.value = dt;
         uniforms.iTime.value += dt;
+        uniforms.iBeats.value += dt * this.get_local_bpm() / 60;
         uniforms.iFrame.value += 1;
     }
     
@@ -142,6 +170,10 @@ render(renderer, underlying_buffer) {
     
     // Set the background texture as a uniform so the shader can access it
     this.material.uniforms.iBackgroundTexture.value = underlying_buffer.texture;
+    // The real buffer size (main.js renders below devicePixelRatio), so
+    // fragCoord / iResolution.xy spans 0..1.
+    renderer.getDrawingBufferSize(this.buffer_size);
+    this.material.uniforms.iResolution.value.set(this.buffer_size.x, this.buffer_size.y, 1.0);
     
     //this.material.uniforms.iChannel0.value = this.prevRender.texture;
 

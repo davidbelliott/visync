@@ -13,14 +13,20 @@ export const CH_EXPAND_Y = 4;
 export const CH_EXPAND_Z = 5;
 export const CH_EXPAND_W = 6;
 
-// The shared view rotation (see view_transform.js): knob 8 -> signed yaw
-// rate, knob 9 -> signed pitch rate, integrated once for every scene.
+// The shared view rotation (see view_transform.js): knob 8 -> yaw angle,
+// knob 9 -> pitch angle (centred = base view), applied once for every scene.
 export const CH_ROT_Y = 8;
 export const CH_ROT_X = 9;
 
 // Shared view zoom (see view_transform.js): next to the rotation knobs, so the three view
 // controls sit together on the controller.
 export const CH_ZOOM = 10;
+
+// Parameter knobs for shader scenes (ShaderScene's `knobs` option, wired up
+// in main.js): free on every other scene, so a shader layered behind a
+// scene can be tweaked without disturbing it.
+export const CH_SHADER_A = 11;
+export const CH_SHADER_B = 12;
 
 // A bind_to `transform` mapping a knob's normalized 0..1 value to a signed
 // multiplier in [-2, 2]: the midpoint (0.5) stops a continuous rotation and the

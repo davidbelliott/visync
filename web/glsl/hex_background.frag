@@ -1,7 +1,11 @@
-uniform vec3      resolution;           // viewport resolution (in pixels)
-uniform float time;
-uniform float pixel_ratio;
-uniform sampler2D palette;
+// Swirling rainbow hexagon background, for ShaderScene (which declares the
+// iResolution/iBeats/... uniforms and calls mainImage). Fixed to the screen.
+uniform sampler2D palette;      // colour ramp the outlines cycle through
+// Knob-set (see main.js): hex size, render-buffer px between neighbouring
+// hex centres before the slow pulse (+-25%); and how hard the noise swirls
+// the grid (0 = a plain polar-wrapped grid, 0.5 = the original amount).
+uniform float hex_size;
+uniform float warp_amount;
 
 //#define FLAT_TOP_HEXAGON
 
@@ -315,21 +319,22 @@ float noise (in vec2 st) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord)
 {
+    // Slow time: one unit per 16 beats.
+    float time = iBeats / 16.0;
     // Aspect correct screen coordinates.
-    float hex_size = 40. + 10. * sin(time * PI / 2.0);
+    float size = hex_size * (1.0 + 0.25 * sin(time * PI / 2.0));
     float complexity = 1.5 + 1.0 * sin(time * PI / 8.0);
-    //vec2 u = (fragCoord - resolution.xy / 2.0 + 0.5) / hex_size;
 
-    vec2 st = fragCoord.xy / resolution.xy / pixel_ratio;
+    vec2 st = fragCoord.xy / iResolution.xy;
     vec2 to_center = vec2(0.5) - st;
     
-    vec2 u = (fragCoord - resolution.xy / pixel_ratio / 2.0 + 0.5);
+    vec2 u = (fragCoord - iResolution.xy / 2.0 + 0.5);
     float radius_px = length(u);
 
-    float y_noise = 0.5 * simplex3d(vec3(to_center.x, to_center.y, time * PI));
-    float x_noise = 0.5 * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
+    float y_noise = warp_amount * simplex3d(vec3(to_center.x, to_center.y, time * PI));
+    float x_noise = warp_amount * simplex3d(vec3(to_center.x, to_center.y, time * PI / 2.0));
     float theta = atan(u.y * (1.0 + y_noise), u.x * (1.0 + x_noise)) + time * PI / 8.0;
-    u = vec2(cos(theta), sin(theta)) * radius_px / hex_size;
+    u = vec2(cos(theta), sin(theta)) * radius_px / size;
 
     // Scaling, translating, then converting it to a hexagonal grid cell coordinate and
     // a unique coordinate ID. The resultant vector contains everything you need to produce a
@@ -352,11 +357,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
                 //mod(color_noise * 2.0 - time * 2.0, 1.), 0.5, 1.0));
     vec2 coord = vec2(mod(color_noise * 2.0 - time * 2.0, 1.), 0.5);
     vec3 rainbow_color = texture2D(palette, coord).xyz;
-    fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * hex_size + width / 2.));    
+    fragColor = mix(vec4(0), vec4(rainbow_color.xyz, alpha), step(0., (eDist - .5) * size + width / 2.));    
     //fragColor.a *= sin(time * 2. * PI);
 }
-
-void main() {
-    mainImage(gl_FragColor, gl_FragCoord.xy);
-}
-

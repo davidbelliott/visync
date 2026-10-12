@@ -5,9 +5,10 @@
 // stop nearest it (multiples of `step`, or a given set of `stops` per turn)
 // with an ease-in/ease-out tween. A move always runs to completion before the
 // next starts (heading for wherever the target is by then), so every move
-// starts and stops from rest; it always takes the short way round, so a scene
-// shown again after the source has turned a lot doesn't spin through the
-// missed turns.
+// starts and stops from rest; it always takes the short way round. Updates
+// only run while the owning scene is on screen, so after a gap (the scene
+// was hidden) it jumps straight to the current stop instead of easing over
+// from where it was left, which would read as a lurch on every scene change.
 //
 // Usage, per rotation axis:
 //   this.yaw = new SteppedRotation();
@@ -29,14 +30,17 @@ const ISO = ISOMETRIC_TILT;
 // wrapping round a full turn.
 export const UPRIGHT_PITCHES = [-ISO, 0, ISO];
 
-// Pace of every stepped scene: this x the shared view rotation (0.15 rad/s
-// at knob 1x, a 45 deg step roughly every 5 s). One value for all of them so
+// Scale of every stepped scene: this x the shared view angles (so the yaw
+// knob's full sweep covers 270 deg, six 45 deg steps). One value for all of them so
 // their steps happen together and land on the same stops: scenes whose base
 // angles agree mod 45 deg stay aligned (e.g. gantry and spinning robots both
 // on odd 45 deg multiples).
 export const STEPPED_SCALE = 0.75;
 
 const TURN = 2 * Math.PI;
+// A gap between updates longer than this, s, means the scene was hidden
+// rather than just a slow frame (main.js caps frame dt at a fraction of it).
+const STALE_SECONDS = 0.25;
 
 export class SteppedRotation {
     // step: visible step size in rad (PI/4 keeps isometric-friendly angles),
@@ -57,6 +61,7 @@ export class SteppedRotation {
         this.from = this.angle;     // current move's start/end angles, rad
         this.to = this.angle;
         this.frac = 1;              // progress through the current move, 0..1
+        this.last_update_ms = -Infinity;    // performance.now() of the last update
     }
 
     // The stop nearest `angle` (rad).
@@ -95,6 +100,14 @@ export class SteppedRotation {
     // the visible angle in rad.
     update(dt, source) {
         const target = this.snap(source);
+        const now = performance.now();
+        const stale = now - this.last_update_ms > STALE_SECONDS * 1000;
+        this.last_update_ms = now;
+        if (stale) {
+            this.angle = this.from = this.to = target;
+            this.frac = 1;
+            return this.angle;
+        }
         if (this.frac >= 1 && target !== this.to) {
             // Same orientation, whole turns closer: the short way round.
             this.angle += Math.round((target - this.angle) / TURN) * TURN;

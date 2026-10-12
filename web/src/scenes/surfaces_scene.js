@@ -1,5 +1,4 @@
 import { Scene } from "./scene.js";
-import { VIEW_NOM_ROT_RATE } from '../view_transform.js';
 import * as THREE from "three";
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import {
@@ -8,6 +7,10 @@ import {
     make_point_cloud,
     clamp,
 } from "../util.js";
+
+// How far the tumble turns per rad of shared yaw, as multiples of rot_vec
+// (it used to tumble rot_vec rad/s while the yaw drifted at 0.2 rad/s).
+const TUMBLE_PER_YAW = 5;
 
 function radial_wave(u, v, target, t) {
     const r = 50;
@@ -78,8 +81,8 @@ export class SurfacesScene extends Scene {
 
     anim_frame(dt) {
         // Tumble about rot_vec (re-randomised on beats) as the shared view
-        // yaw advances: rot_vec rad/s at 1x (VIEW_NOM_ROT_RATE of yaw).
-        const turn = this.context.view.yaw_delta / VIEW_NOM_ROT_RATE;
+        // yaw turns (see TUMBLE_PER_YAW).
+        const turn = this.context.view.yaw_delta * TUMBLE_PER_YAW;
         this.base_group.rotation.x += this.rot_vec.x * turn;
         this.base_group.rotation.y += this.rot_vec.y * turn;
         this.base_group.rotation.z += this.rot_vec.z * turn;

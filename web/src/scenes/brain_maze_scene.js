@@ -96,9 +96,11 @@ const SPARK_COLOR = 'white';
 
 // The brain walks the maze one cell per MOVE_BEATS, arriving in each cell on
 // the beat, turning only at right angles (it faces the way it goes, turning
-// over the first TURN_FRACTION of a step); a ramp step climbs or descends a
-// level as it goes, crossfading the levels. With nothing in sight (see
-// SIGHT_CELLS) it picks the open way that best follows its heading, never
+// over the first TURN_FRACTION of a step). A ramp is crossed in one move of
+// two cells (over twice MOVE_BEATS), from the cell before it to the one past
+// it, rising or sinking a level only while over the wedge, the levels
+// crossfading as it does; the brain never stops on a ramp. With nothing in
+// sight (see SIGHT_CELLS) it picks the open way that best follows its heading, never
 // turning straight back unless at a dead end, and shunning cells by
 // VISIT_PENALTY per earlier visit so it backs out of dead ends and doesn't
 // circle; a little JITTER keeps the route from being too predictable.
@@ -236,6 +238,7 @@ export class BrainMazeScene extends Scene {
         this.cell_j = 0;
         this.step = [0, 0];
         this.climb = 0;
+        this.cells = 1;                 // cells the step covers (2 for a ramp)
         this.beats = 0;
         this.step_start = 0;
         this.visits = new Map();
@@ -252,17 +255,17 @@ export class BrainMazeScene extends Scene {
     anim_frame(dt) {
         const d_beats = dt * this.get_local_bpm() / 60;
         this.beats += d_beats;
-        while (this.beats - this.step_start >= MOVE_BEATS) {
+        while (this.beats - this.step_start >= MOVE_BEATS * this.cells) {
             this.arrive();
         }
-        const frac = (this.beats - this.step_start) / MOVE_BEATS;
+        const frac = (this.beats - this.step_start) / (MOVE_BEATS * this.cells);
 
         // Slide the maze under the brain, which is part way along its step
         // from the window's centre cell (and up or down a ramp).
         const along = EASED_STEPS ? ease(frac) : frac;
-        const bx = this.step[0] * along * CELL;
-        const bz = this.step[1] * along * CELL;
-        const rise = this.climb * along * LEVEL_H;
+        const bx = this.step[0] * along * this.cells * CELL;
+        const bz = this.step[1] * along * this.cells * CELL;
+        const rise = this.ramp_rise(along);
         this.maze_group.position.set(-bx, 0, -bz);
         this.brain_group.position.y = rise;
         this.floor.position.y = rise;
@@ -271,7 +274,7 @@ export class BrainMazeScene extends Scene {
             ease(clamp(frac / TURN_FRACTION, 0, 1)));
 
         // On a ramp, the levels crossfade as the brain climbs.
-        const fade = this.climb != 0 ? along : 0;
+        const fade = Math.abs(rise) / LEVEL_H;
         this.view.set_opacity(1 - fade);
         this.next_view.set_opacity(fade);
         for (const view of [this.view, this.next_view]) {
@@ -290,6 +293,22 @@ export class BrainMazeScene extends Scene {
             }
             spark.anim_frame(dt, this.camera);
         }
+    }
+
+    // Height (world units) along a ramp move `along` (0..1) of the way from
+    // the cell before the wedge to the cell past it: level ground up to the
+    // wedge's foot (the wall line half a cell on), then up its slope (to the
+    // face of the wall at its top, a cell less half a wall on), then level
+    // again; a move down is the same run backwards. 0 off ramps.
+    ramp_rise(along) {
+        const up = (u) => clamp((u * 2 * CELL - CELL / 2) / (CELL - WALL_T / 2), 0, 1);
+        if (this.climb > 0) {
+            return LEVEL_H * up(along);
+        }
+        if (this.climb < 0) {
+            return -LEVEL_H * (1 - up(1 - along));
+        }
+        return 0;
     }
 
     // Lay out both views around the brain's cell: its level, and (if the
@@ -365,9 +384,9 @@ export class BrainMazeScene extends Scene {
     // views on the new cell.
     arrive() {
         const [si, sj] = this.step;
-        const climb = this.climb;
-        this.cell_i += si;
-        this.cell_j += sj;
+        const climb = this.climb, cells = this.cells;
+        this.cell_i += si * cells;
+        this.cell_j += sj * cells;
         if (climb != 0) {
             // The view the ramp led to becomes the brain's level.
             this.level += climb;
@@ -379,8 +398,8 @@ export class BrainMazeScene extends Scene {
         // maze_group re-centred a cell on (and maybe a level up or down):
         // keep the sparks where they were.
         for (const spark of this.sparks) {
-            spark.position.x -= si * CELL;
-            spark.position.z -= sj * CELL;
+            spark.position.x -= si * cells * CELL;
+            spark.position.z -= sj * cells * CELL;
             spark.position.y -= climb * LEVEL_H;
         }
 
@@ -399,16 +418,17 @@ export class BrainMazeScene extends Scene {
         }
 
         this.facing_from = this.facing_to;
+        this.step_start += MOVE_BEATS * cells;
         this.set_step(this.choose_step());
-        this.step_start += MOVE_BEATS;
         this.build_views();
     }
 
-    // Start step = [di, dj, climb, ramp key]: note a ramp as taken, and turn
-    // to face it, the short way round from the current facing.
-    set_step([di, dj, climb, key]) {
+    // Start step = [di, dj, climb, ramp key, cells]: note a ramp as taken,
+    // and turn to face it, the short way round from the current facing.
+    set_step([di, dj, climb, key, cells]) {
         this.step = [di, dj];
         this.climb = climb;
+        this.cells = cells;
         if (key !== null) {
             this.taken.add(key);
             if (this.taken.size > MAX_TAKEN) {
@@ -422,20 +442,21 @@ export class BrainMazeScene extends Scene {
         this.facing_to = to;
     }
 
-    // Whether cell (i, j) of level L holds an uneaten cone.
+    // Whether cell (i, j) of level L holds an uneaten cone (never a ramp's
+    // cell, which the brain can't stand in).
     has_cone(level, i, j) {
         return this.levels.maze(level).cell_random(i, j) < CONE_P &&
-            !this.collected.has(`${level},${i},${j}`);
+            !this.collected.has(`${level},${i},${j}`) && !this.levels.ramp_cell(level, i, j);
     }
 
-    // The ways on from the current cell: [di, dj, climb, ramp key] for each
-    // passable direction.
+    // The ways on from the current cell: [di, dj, climb, ramp key, cells]
+    // for each passable direction.
     ways_on() {
         const ways = [];
         for (const [di, dj] of MAZE_DIRS) {
             const step = this.levels.step(this.level, this.cell_i, this.cell_j, di, dj);
             if (step !== null) {
-                ways.push([di, dj, step.climb, step.key]);
+                ways.push([di, dj, step.climb, step.key, step.cells]);
             }
         }
         return ways;
@@ -492,12 +513,12 @@ export class BrainMazeScene extends Scene {
         let best_score = -Infinity;
         for (const allow_back of [false, true]) {
             for (const way of ways) {
-                const [di, dj, climb] = way;
+                const [di, dj, climb, , cells] = way;
                 if (!allow_back && di == -pi && dj == -pj) {
                     continue;
                 }
                 const visits = this.visits.get(
-                    `${this.level + climb},${this.cell_i + di},${this.cell_j + dj}`) || 0;
+                    `${this.level + climb},${this.cell_i + di * cells},${this.cell_j + dj * cells}`) || 0;
                 const score = di * hx + dj * hz - VISIT_PENALTY * visits + JITTER * Math.random();
                 if (score > best_score) {
                     best_score = score;
@@ -508,11 +529,9 @@ export class BrainMazeScene extends Scene {
                 return best;
             }
         }
-        // Walled in (only by ramps entered from the wrong side, which
-        // MazeLevels avoids): step any open way, through the ramp's end.
-        const [di, dj] = MAZE_DIRS.find(([di, dj]) =>
-            this.levels.maze(this.level).open(this.cell_i, this.cell_j, di, dj));
-        return [di, dj, 0, null];
+        // Never reached: every open way is passable (a ramp's cell is a dead
+        // end on both levels, open only to the cells that cross it).
+        return [0, 0, 0, null, 1];
     }
 
     handle_beat(t, channel) {

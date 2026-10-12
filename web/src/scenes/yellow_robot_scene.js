@@ -6,7 +6,7 @@ import {
 import { Scene } from './scene.js';
 import { YellowRobot } from '../components/yellow_robot.js';
 import { Tesseract } from '../highdim.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import {
     CH_EXPAND_X, CH_EXPAND_Y, knob_with_zero_zone
 } from '../controller_map.js';
@@ -42,8 +42,7 @@ export class YellowRobotScene extends Scene {
             -this.frustum_size / 2, -8, 1000);
         this.clear();
         // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
 
         this.tesseract_group = new THREE.Group();
         this.tesseract = new Tesseract(this.tesseract_group, 4);
@@ -85,9 +84,8 @@ export class YellowRobotScene extends Scene {
         this.tesseract.rot_xw -= 0.05;
         this.tesseract.update_geom();
 
-        this.robot.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.robot.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.robot.rotation.x = this.stepped_pitch();
+        this.robot.rotation.y = YAW_BASE + this.stepped_yaw();
 
         // Drive the robot grid's dance (and any other child components).
         super.anim_frame(dt);

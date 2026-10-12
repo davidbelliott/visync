@@ -7,7 +7,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 
 // Hue drift rate of the drum color (cycles/sec).
 const COLOR_CHANGE_RATE = 0.08;
@@ -376,8 +376,7 @@ export class DrumboxScene extends Scene {
         this.spring_constant = 200;
 
         // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
 
@@ -447,9 +446,8 @@ export class DrumboxScene extends Scene {
         }
         this.last_frame_ms = now_ms;
 
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         this.drift += DRIFT_VEL * dt;
         const max_offset = WRAP_CELLS * this.spacing * Math.sqrt(2);

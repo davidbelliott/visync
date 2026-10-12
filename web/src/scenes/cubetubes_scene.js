@@ -5,7 +5,7 @@ import {
     CH_EXPAND_X, CH_EXPAND_Y
 } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES } from '../stepped_rotation.js';
 import {
     ease,
     lerp_scalar,
@@ -31,7 +31,6 @@ import {
 // The yaw base is their PI/4 plus a half turn, this scene's composed facing,
 // so both rest on the same 45 deg stops.
 const YAW_BASE = Math.PI / 4 + Math.PI;
-const PITCH_BASE = ISOMETRIC_TILT;
 const ORANGE = new THREE.Color("orange");
 const MAGENTA = new THREE.Color("magenta");
 
@@ -346,8 +345,7 @@ export class CubeTubesScene extends Scene {
             (norm) => 2 * norm - 1);
 
         // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw_step = new SteppedRotation();
-        this.pitch_step = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.cur_color = new THREE.Color();
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
@@ -363,9 +361,8 @@ export class CubeTubesScene extends Scene {
         // The shared view rotation in eased steps (yaw about the group's Y,
         // pitch about the viewport horizontal: XYZ euler order).
         {
-            this.base_group.rotation.x = this.pitch_step.update(dt,
-                PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-            const yaw = YAW_BASE + this.yaw_step.update(dt, this.view_yaw(STEPPED_SCALE));
+            this.base_group.rotation.x = this.stepped_pitch();
+            const yaw = YAW_BASE + this.stepped_yaw();
             this.base_group.rotation.y = yaw;
 
             // Fill colour swings orange <-> magenta once per quarter turn of

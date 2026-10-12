@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -209,8 +209,7 @@ export class CubemanScene extends Scene {
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 
         // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
 
@@ -272,9 +271,8 @@ export class CubemanScene extends Scene {
 
     anim_frame(dt) {
         this.cur_frame++;
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         let half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         let full_beat_time = this.full_beat_clock.getElapsedBeats() / 4.0;

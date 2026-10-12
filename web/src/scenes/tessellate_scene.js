@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -75,8 +75,7 @@ export class TessellateScene extends Scene {
         this.base_group = new THREE.Group();
         this.base_group.rotation.x = -Math.PI / 2;
         this.view_group.add(this.base_group);
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.view_group.rotation.x = PITCH_BASE;
         this.view_group.rotation.y = YAW_BASE;
 
@@ -147,9 +146,8 @@ export class TessellateScene extends Scene {
         this.evolve_time += evolve_dt;
         // The shared view rotation in eased steps (see YAW_BASE). Colour
         // stays tied to the yaw (cur_rot).
-        this.view_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        const cur_rot = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.view_group.rotation.x = this.stepped_pitch();
+        const cur_rot = this.stepped_yaw();
         this.view_group.rotation.y = YAW_BASE + cur_rot;
 
         if (this.lizards === null) {

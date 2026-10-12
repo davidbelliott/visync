@@ -85,7 +85,7 @@ function metaballs(x, y, z, time) {
 
 export class SphereGridScene extends Scene {
     constructor(context) {
-        super(context, 'spheregrid', 2, 180);
+        super(context, 'spheregrid', 2);
 
 
         const aspect = window.innerWidth / window.innerHeight;

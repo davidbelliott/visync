@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y, CH_EXPAND_Z } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import {
@@ -137,8 +137,7 @@ export class CubeFractalScene extends Scene {
         this.base_group = new THREE.Group();
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.add(this.base_group);
 
         const [wire_geom, fill_geom] = create_instanced_cube_templates(1, 1, 1);
@@ -312,9 +311,8 @@ export class CubeFractalScene extends Scene {
 
     anim_frame(dt) {
         if (STEPPED_VIEW) {
-            this.base_group.rotation.x = this.pitch.update(dt,
-                PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-            this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+            this.base_group.rotation.x = this.stepped_pitch();
+            this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
         } else {
             this.base_group.rotation.y = this.view_yaw(YAW_SCALE);
         }

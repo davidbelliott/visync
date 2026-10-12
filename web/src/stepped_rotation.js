@@ -5,17 +5,14 @@
 // stop nearest it (multiples of `step`, or a given set of `stops` per turn)
 // with an ease-in/ease-out tween. A move always runs to completion before the
 // next starts (heading for wherever the target is by then), so every move
-// starts and stops from rest; it always takes the short way round. Updates
-// only run while the owning scene is on screen, so after a gap (the scene
-// was hidden) it jumps straight to the current stop instead of easing over
-// from where it was left, which would read as a lurch on every scene change.
+// starts and stops from rest; it always takes the short way round. After a
+// gap in updates (say the tab was hidden) it jumps straight to the current
+// stop instead of easing over from where it was left.
 //
-// Usage, per rotation axis:
-//   this.yaw = new SteppedRotation();
-//   ...in anim_frame:  group.rotation.y = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
-// and for an upright pitch (isometric views and level), starting at the tilt:
-//   this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
-//   ...group.rotation.x = this.pitch.update(dt, PITCH_BASE + this.view_pitch(STEPPED_SCALE));
+// Stepped scenes don't own these: they share one SteppedView (below), so
+// they all show the same orientation, as views into one space. A stepped
+// scene sets `this.stepped_pitches` (the pitches it allows) and applies
+// YAW_BASE + this.stepped_yaw() and this.stepped_pitch() (see Scene).
 import { lerp_scalar, ease } from './util.js';
 
 // The isometric tilt (rad): the elevation of a view straight down a cube's
@@ -69,6 +66,9 @@ export class SteppedRotation {
         if (this.stops === null) {
             return Math.round(angle / this.step) * this.step;
         }
+        if (this.stops.length == 1) {
+            return this.stops[0];
+        }
         if (this.bounce) {
             // Reflect into [lo, hi], then the nearest stop.
             const lo = Math.min(...this.stops);
@@ -120,5 +120,31 @@ export class SteppedRotation {
             this.angle = lerp_scalar(this.from, this.to, ease(this.frac));
         }
         return this.angle;
+    }
+}
+
+// The one stepped view all stepped scenes share: a yaw in 45 deg steps and
+// an upright pitch (starting at the isometric tilt), both from the shared
+// view angles at STEPPED_SCALE. The context updates it once per frame before
+// any scene, whether or not one is showing. Every stepped scene allows the
+// same yaw stops (their bases differ by multiples of 45 deg), but some lock
+// their pitch, so the pitch is limited to the stops every stepped scene on
+// screen allows: while a pitch-locked scene shows, the others ease to its
+// pitch and stay there with it.
+export class SteppedView {
+    constructor() {
+        this.yaw_rotation = new SteppedRotation();
+        this.pitch_rotation = new SteppedRotation(
+            { stops: UPRIGHT_PITCHES, bounce: true, start: ISOMETRIC_TILT });
+        this.yaw = 0;                   // rad, from the stepped scenes' bases
+        this.pitch = ISOMETRIC_TILT;    // rad
+    }
+
+    // Advance by dt seconds. view: the ViewTransform; pitch_stops: the
+    // pitches allowed now (rad; see GraphicsContext.anim_frame).
+    update(dt, view, pitch_stops) {
+        this.pitch_rotation.stops = pitch_stops;
+        this.yaw = this.yaw_rotation.update(dt, view.yaw * STEPPED_SCALE);
+        this.pitch = this.pitch_rotation.update(dt, ISOMETRIC_TILT + view.pitch * STEPPED_SCALE);
     }
 }

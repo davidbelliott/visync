@@ -11,7 +11,7 @@ import {
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SpringFabric } from '../spring_fabric.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
 
 // Grid cells (scene units): cube size, and the spacing between cube centres.
@@ -371,8 +371,7 @@ export class GantryScene extends Scene {
         this.base_group = new THREE.Group();
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.cur_color = new THREE.Color();
         // Everything sits at logical positions (cell (row, col) at z = row *
         // CELL, x = col * CELL) in world_group, offset by -scroll so the
@@ -513,9 +512,8 @@ export class GantryScene extends Scene {
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
 
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        const yaw = this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        const yaw = this.stepped_yaw();
         this.base_group.rotation.y = YAW_BASE + yaw;
         const cur_color = this.cur_color.lerpColors(COLOR_A, COLOR_B, (1 - Math.cos(2 * yaw)) / 2);
 

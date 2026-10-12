@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Scene } from './scene.js';
 import { CH_EXPAND_W, knob_with_zero_zone } from '../controller_map.js';
 import { BeatClock, ease, clamp } from '../util.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { Tesseract } from '../highdim.js';
 
 // View rotation (rad), in lockstep with the spinning robots scene.
@@ -50,8 +50,7 @@ export class TesseractScene extends Scene {
         this.base_group = new THREE.Group();
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.add(this.base_group);
 
         this.tesseract = new Tesseract(TESSERACT_SIZE);
@@ -83,9 +82,8 @@ export class TesseractScene extends Scene {
     }
 
     anim_frame(dt) {
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         const d_beats = dt * this.get_local_bpm() / 60;
         let turning = false;

@@ -4,7 +4,7 @@ import { Scene } from './scene.js';
 import {
     CH_EXPAND_X, CH_EXPAND_Y, knob_with_zero_zone
 } from '../controller_map.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -97,8 +97,7 @@ export class SpinningRobotsScene extends Scene {
 
         // The shared view rotation turns and tilts the grid in eased steps:
         // yaw every 45 deg, pitch between -35.26, 0 and +35.26 deg.
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
 
         const width = window.innerWidth;
         const height = window.innerHeight;
@@ -250,9 +249,8 @@ export class SpinningRobotsScene extends Scene {
 
     anim_frame(dt) {
         const beats_per_sec = this.get_local_bpm() / 60;
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         const half_beat_time = this.half_beat_clock.getElapsedBeats() / 2.0;
         const throw_time = this.throw_clock.getElapsedBeats();

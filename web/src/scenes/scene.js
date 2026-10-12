@@ -11,22 +11,20 @@ import {
     clamp
 } from '../util.js';
 
+// MIDI clock: 24 sync messages per quarter note (the standard rate, which
+// the adapter's clock also uses). Always one beat per quarter note: scenes
+// never re-divide the clock, so none drops into half-time at fast tempos.
+export const MIDI_SYNCS_PER_BEAT = 24;
+
 export class Scene extends THREE.Scene {
-    constructor(context, shortname='scene', num_states=1, max_bpm=140) {
+    constructor(context, shortname='scene', num_states=1) {
         super();
         this.shortname = shortname;
         this.context = context;
-        this.cur_divisor = 24;
-        this.target_divisor = this.cur_divisor;
         this.bpm = 120;
-        this.sync_rate_hz = this.bpm / 60 * this.cur_divisor;
-        this.max_bpm = max_bpm;
-        this.min_bpm = max_bpm / 2;
+        this.sync_rate_hz = this.bpm / 60 * MIDI_SYNCS_PER_BEAT;
         this.num_states = num_states;
         this.cur_state_idx = 0;
-        this.div_change_hysteresis_bpm = 5;
-        this.div_change_debounce_cnt = 4;
-        this.div_change_debounce = 0;
         this.cam_persp = new THREE.PerspectiveCamera(45, window.innerHeight / window.innerWidth, 0.1, 4000);
         this.cam_orth = new THREE.OrthographicCamera(-10, 10, 10, -10, -100, 100);
         this.frustum_size = 20;
@@ -36,6 +34,10 @@ export class Scene extends THREE.Scene {
         this.controls.enableDamping = false;
         this.prev_sync_idx = 0;
         this.zoom_base = null;      // set by bind_zoom
+        // A stepped scene's allowed pitches (rad; e.g. UPRIGHT_PITCHES, or
+        // [ISOMETRIC_TILT] to lock it), which limit the shared stepped view's
+        // while it shows (see SteppedView); null for scenes that don't use it.
+        this.stepped_pitches = null;
     }
 
     // Bind one of the context's knobs to a scene property. `apply` receives
@@ -55,6 +57,16 @@ export class Scene extends THREE.Scene {
 
     view_pitch(scale = 1) {
         return this.context.view.pitch * scale;
+    }
+
+    // The shared stepped view (see SteppedView), rad: add the scene's
+    // YAW_BASE to the yaw.
+    stepped_yaw() {
+        return this.context.stepped_view.yaw;
+    }
+
+    stepped_pitch() {
+        return this.context.stepped_view.pitch;
     }
 
     // Opt in to the shared zoom (see view_transform.js). base_zoom is the
@@ -88,37 +100,12 @@ export class Scene extends THREE.Scene {
         });
     }
 
+    // sync_rate_hz: MIDI clocks per second; sync_idx counts them.
     handle_sync_raw(sync_rate_hz, sync_idx) {
         this.sync_rate_hz = sync_rate_hz;
-        let this_sync_divisor = this.cur_divisor;
+        this.bpm = 60 * sync_rate_hz / MIDI_SYNCS_PER_BEAT;
 
-        this.cur_divisor = 24;
-
-        while (60 * sync_rate_hz / this_sync_divisor > this.max_bpm + this.div_change_hysteresis_bpm) {
-            this_sync_divisor *= 2;
-        }
-        while (60 * sync_rate_hz / this_sync_divisor < this.min_bpm - this.div_change_hysteresis_bpm) {
-            this_sync_divisor /= 2;
-        }
-
-        if (this_sync_divisor != this.cur_divisor) {
-            if (this_sync_divisor == this.target_divisor) {
-                // Decrement debounce counter or change divisor if it reached 0
-                if (this.div_change_debounce > 0) {
-                    this.div_change_debounce--;
-                } else {
-                    this.cur_divisor = this.target_divisor;
-                }
-            } else {
-                // Restart debounce counter
-                this.target_divisor = this_sync_divisor;
-                this.div_change_debounce = this.div_change_debounce_cnt;
-            }
-        }
-
-        this.bpm = 60 * sync_rate_hz / this.cur_divisor;
-
-        const cur_beat = Math.floor(sync_idx / this.cur_divisor);
+        const cur_beat = Math.floor(sync_idx / MIDI_SYNCS_PER_BEAT);
         if (cur_beat != this.prev_beat) {
             //console.log(`beat: ${cur_beat}`);
             this.handle_sync(0, this.bpm, cur_beat);
@@ -135,8 +122,8 @@ export class Scene extends THREE.Scene {
     // a quarter note earlier in the grid than the actual beats. Accounts for
     // latency passed in as an argument.
     get_beat_delay(est_latency=0) {
-        // 24 MIDI syncs per quarter note
-        return this.context.immediate_mode ? 0.0 : 1.0 / this.sync_rate_hz * 24 - est_latency;
+        return this.context.immediate_mode ? 0.0 :
+            MIDI_SYNCS_PER_BEAT / this.sync_rate_hz - est_latency;
     }
 
     handle_sync(latency, sync_rate_hz, sync_idx) {

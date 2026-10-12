@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Scene } from './scene.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import {
     lerp_scalar,
     ease,
@@ -93,7 +93,7 @@ const NOISE_AMPL = 0.3;
 
 export class SpectrumScene extends Scene {
     constructor(context) {
-        super(context, 'spectrum', 1, 200);
+        super(context, 'spectrum', 1);
 
 
         const width = window.innerWidth;
@@ -178,8 +178,7 @@ export class SpectrumScene extends Scene {
             this.base_group.add(front_mesh);
         }
 
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
 
@@ -222,9 +221,8 @@ export class SpectrumScene extends Scene {
 
         // The shared view rotation in eased steps (yaw about the group's Y,
         // pitch about the viewport horizontal: XYZ euler order).
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         let frequencyData = this.get_frequency_data(NOISE_AMPL);
 

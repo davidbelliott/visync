@@ -47,6 +47,12 @@ export class InfiniteMaze {
         this.blocks = new Map();    // "bi,bj" -> carved block
     }
 
+    // A fixed random number in [0, 1) for cell (i, j), for placing things
+    // in the maze; salt picks independent ones.
+    cell_random(i, j, salt = 0) {
+        return hash01(i, j, this.seed * 4 + 1000 + salt);
+    }
+
     // Whether cell (i, j) opens towards (i + di, j + dj), a neighbour.
     open(i, j, di, dj) {
         if (di == 1) return this.east_open(i, j);

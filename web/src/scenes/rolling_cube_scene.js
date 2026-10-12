@@ -7,7 +7,7 @@ import { InstancedGeometryCollection } from '../instanced_geom.js';
 
 export class RollingCubeScene extends Scene {
     constructor(context) {
-        super(context, 'rollingcube', 2, 180);
+        super(context, 'rollingcube', 2);
 
         const aspect = window.innerWidth / window.innerHeight;
         this.frustumSize = 10;

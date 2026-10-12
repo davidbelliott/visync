@@ -32,6 +32,7 @@ import { RollingCubeScene } from './src/scenes/rolling_cube_scene.js';
 import { SphereGridScene } from './src/scenes/sphere_grid_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
+import { MIDI_SYNCS_PER_BEAT } from './src/scenes/scene.js';
 import { BrainMazeScene } from './src/scenes/brain_maze_scene.js';
 import { BuildingScene } from './src/scenes/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field_scene.js';
@@ -53,6 +54,7 @@ import {
 import { CH_SHADER_A, CH_SHADER_B } from './src/controller_map.js';
 import { BoxDef } from './src/geom_def.js';
 import { ViewTransform } from './src/view_transform.js';
+import { SteppedView, UPRIGHT_PITCHES } from './src/stepped_rotation.js';
 import { WebsocketController, create_knobs, apply_control_change }
     from './src/controller.js';
 
@@ -438,6 +440,7 @@ class GraphicsContext {
         //this.controller = new WebsocketController(this, "ws://localhost:8766", this.knobs);
         // The shared rotation and zoom every scene reads (knobs 8, 9, 10).
         this.view = new ViewTransform(this.knobs);
+        this.stepped_view = new SteppedView();
 
         // Create scenes
         this.scenes = new Map([
@@ -669,6 +672,28 @@ class GraphicsContext {
         }
     }
 
+    // The pitches the shared stepped view may rest on: those every stepped
+    // scene on screen allows (all upright stops when none is showing). If
+    // they had none in common, the front-most stepped scene's would win;
+    // the current scenes all allow the isometric tilt, so they always share
+    // it.
+    stepped_pitch_stops() {
+        let stops = null;
+        let front = null;
+        this.for_each_shown_scene((scene) => {
+            if (scene.stepped_pitches === null) {
+                return;
+            }
+            front = front ?? scene.stepped_pitches;
+            stops = stops === null ? scene.stepped_pitches :
+                stops.filter((pitch) => scene.stepped_pitches.includes(pitch));
+        });
+        if (stops === null) {
+            return UPRIGHT_PITCHES;
+        }
+        return stops.length > 0 ? stops : front;
+    }
+
     // Advance every slot's crossfade by dt seconds, finishing those that
     // reach the end, and blink the header's entries for those still going.
     update_crossfades(dt) {
@@ -703,6 +728,7 @@ class GraphicsContext {
         this.update_stats_hud();
         this.update_crossfades(dt);
         this.view.update(dt);
+        this.stepped_view.update(dt, this.view, this.stepped_pitch_stops());
         this.for_each_shown_scene((scene) => {
             scene.anim_frame(dt);
             scene.update_zoom();
@@ -1000,11 +1026,11 @@ class GraphicsContext {
         }
     }
 
-    // `sync_idx` counts MIDI clocks, 24 per quarter note - not beats, despite
-    // what this parameter used to be called.
+    // `sync_idx` counts MIDI clocks, MIDI_SYNCS_PER_BEAT per quarter note -
+    // not beats, despite what this parameter used to be called.
     handle_sync(latency, sync_rate_hz, sync_idx) {
-        const syncs_to_skip = 24;
-        const delay = this.immediate_mode ? 0 : syncs_to_skip / sync_rate_hz - latency;
+        // Delivered a beat late, like beats in delayed mode.
+        const delay = this.immediate_mode ? 0 : MIDI_SYNCS_PER_BEAT / sync_rate_hz - latency;
 
         // Wait until the next beat to deliver the sync message
         setTimeout(() => {
@@ -1017,14 +1043,14 @@ class GraphicsContext {
             scene.handle_sync_raw(sync_rate_hz, sync_idx);
         });*/
         // Update overlay with sync rate hz (convert to bpm)
-        const bpm = sync_rate_hz * 60 / 24;
+        const bpm = sync_rate_hz * 60 / MIDI_SYNCS_PER_BEAT;
         document.getElementById("bpm").innerHTML = bpm.toFixed(0);
 
         // Timestamp each quarter note for the header's pulse indicator. Taken
         // as the sync arrives rather than when the delayed beat is delivered:
         // the indicator reports the clock on the wire, which is what you want
         // when you're checking whether the adapter is still with you.
-        const quarter = Math.floor(sync_idx / 24);
+        const quarter = Math.floor(sync_idx / MIDI_SYNCS_PER_BEAT);
         if (quarter !== this.last_quarter) {
             this.last_quarter = quarter;
             this.last_quarter_t = performance.now() / 1000;

@@ -5,7 +5,8 @@ import { lerp_scalar, ease, clamp, ShaderLoader } from '../util.js';
 
 // The brain drawn as a scan: cyan contour lines (ContourScan) scrolling up
 // over a lit, dithered fill cut into alternating bands, and a scan contour
-// that sweeps up on demand (start_scan, e.g. each kick). Its underside sits
+// that sweeps up on demand (start_scan, e.g. each kick), and a white flash on
+// demand (flash). Its underside sits
 // on the group's origin; `height` (world units) is set once the model loads,
 // and nothing draws until then.
 //
@@ -24,6 +25,9 @@ const SCAN_COLOR = new THREE.Color('white');
 // The fill under the contours: lit and dithered, dark enough that the
 // contours stay the brightest thing on it.
 const FILL_COLOR = new THREE.Color(0.0, 0.25, 0.25);
+// flash() turns contours and fill this colour, fading back over FLASH_BEATS.
+const FLASH_COLOR = new THREE.Color('white');
+const FLASH_BEATS = 0.5;
 
 export class ScannedBrain extends THREE.Group {
     // scale: world units per model unit.
@@ -40,6 +44,10 @@ export class ScannedBrain extends THREE.Group {
         };
         this.scan_frac = 1;         // through the running scan, 0..1; 1 = none
         this.scan_height = 0;       // model units
+        this.flash_amount = 0;      // 1 at a flash, fading to 0
+        // The live colours, lerped towards FLASH_COLOR by flash_amount.
+        this.line_color = LINE_COLOR.clone();
+        this.fill_mat = null;       // once loaded
 
         Promise.all([
             new ShaderLoader('glsl/chunks/dither_pars.frag', 'glsl/chunks/dither.frag').load(),
@@ -50,7 +58,7 @@ export class ScannedBrain extends THREE.Group {
             // (double-sided) through the gaps, shaded through the house
             // dither. Pushed back so the near contours, which lie exactly on
             // its surface, pass the depth test.
-            const fill_mat = new THREE.MeshLambertMaterial({
+            const fill_mat = this.fill_mat = new THREE.MeshLambertMaterial({
                 color: FILL_COLOR,
                 side: THREE.DoubleSide,
                 polygonOffset: true,
@@ -83,7 +91,7 @@ export class ScannedBrain extends THREE.Group {
 
             this.contours = new ContourScan(geom, {
                 spacing: SLICE_SPACING,
-                line_color: LINE_COLOR,
+                line_color: this.line_color,
                 scan_color: SCAN_COLOR,
                 back_gain: BACK_GAIN,
                 trail: SCAN_TRAIL,
@@ -102,9 +110,20 @@ export class ScannedBrain extends THREE.Group {
         this.scan_frac = 0;
     }
 
-    // Advance by d_beats: scroll the contours, move any running scan, and
-    // recut the contours.
+    // Turn the whole brain white, fading back over FLASH_BEATS.
+    flash() {
+        this.flash_amount = 1;
+    }
+
+    // Advance by d_beats: scroll the contours, move any running scan, fade
+    // any flash, and recut the contours.
     update(d_beats) {
+        if (this.flash_amount > 0) {
+            this.flash_amount = Math.max(0, this.flash_amount - d_beats / FLASH_BEATS);
+            const f = ease(this.flash_amount);
+            this.line_color.lerpColors(LINE_COLOR, FLASH_COLOR, f);
+            this.fill_mat?.color.lerpColors(FILL_COLOR, FLASH_COLOR, f);
+        }
         this.slice_offset = (this.slice_offset
             + d_beats * SLICE_SCROLL_PER_BEAT * SLICE_SPACING) % (2 * SLICE_SPACING);
         this.fill_uniforms.slice_offset.value = this.slice_offset;

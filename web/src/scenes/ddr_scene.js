@@ -13,7 +13,7 @@ import {
     ShaderLoader,
     BeatClock
 } from '../util.js';
-import { SteppedRotation, UPRIGHT_PITCHES, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 
 const BODY_COLOR = new THREE.Color("red");
 // Beats to lerp the clap arm orientation (front vs. overhead) after each
@@ -362,8 +362,7 @@ export class DDRScene extends Scene {
         });
 
         // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw = new SteppedRotation();
-        this.pitch = new SteppedRotation({ stops: UPRIGHT_PITCHES, bounce: true, start: PITCH_BASE });
+        this.stepped_pitches = UPRIGHT_PITCHES;
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
         this.add(this.base_group);
@@ -381,9 +380,8 @@ export class DDRScene extends Scene {
         if (!this.initialized) {
             return;
         }
-        this.base_group.rotation.x = this.pitch.update(dt,
-            PITCH_BASE + this.view_pitch(STEPPED_SCALE));
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         const half_beat_time = clamp(this.half_beat_clock.getElapsedBeats() / 2.0, 0, 1);
         const measure_time = clamp(this.measure_clock.getElapsedBeats() / 4.0, 0, 1);

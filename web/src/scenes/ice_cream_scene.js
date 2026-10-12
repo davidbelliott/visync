@@ -3,7 +3,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
 import { LightningStrike } from '../lightning_strike.js';
 import { ScannedBrain } from '../components/scanned_brain.js';
-import { SteppedRotation, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
+import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
 import {
@@ -235,8 +235,9 @@ export class IceCreamScene extends Scene {
         this.spark_pool.position.y = 8;
         this.brain_group.add(this.spark_pool);
 
-        // The shared view rotation in eased steps (see YAW_BASE).
-        this.yaw = new SteppedRotation();
+        // The shared stepped view (see YAW_BASE), pitch locked at the tilt:
+        // it holds the shared pitch there while it shows.
+        this.stepped_pitches = [PITCH_BASE];
         this.base_group.rotation.x = PITCH_BASE;
         this.base_group.rotation.y = YAW_BASE;
         this.base_group.position.y = VIEW_DROP;
@@ -254,7 +255,8 @@ export class IceCreamScene extends Scene {
         this.drift_z += drift * Math.sin(this.drift_angle);
         this.update_cones();
         this.brain.update(dt * beats_per_sec);
-        this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
         this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
     }

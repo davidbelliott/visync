@@ -14,7 +14,7 @@ import {
     BeatClock
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SteppedRotation, STEPPED_SCALE } from '../stepped_rotation.js';
+import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 
 const CUBE_WAVE_SPEED = 1.5;
 const NUM_CUBES_PER_SIDE = 10;
@@ -289,7 +289,6 @@ export class BuildingScene extends Scene {
 
         // The shared view yaw, shown in eased 45 deg steps on top
         // of the PI/4 iso offset.
-        this.yaw = new SteppedRotation();
 
         const width = NUM_CUBES_PER_SIDE * this.cube_base_size + 
             (NUM_CUBES_PER_SIDE - 1) * this.cube_base_spacing;
@@ -378,6 +377,9 @@ export class BuildingScene extends Scene {
 
 
         this.base_group.rotation.x = isom_angle;//Math.PI / 8.0;
+        // Pitch locked at the isometric tilt: it holds the shared stepped
+        // view there while it shows.
+        this.stepped_pitches = [ISOMETRIC_TILT];
         this.base_group.rotation.y = Math.PI / 4.0;
 
         this.base_group.add(this.cubes_group);
@@ -407,7 +409,8 @@ export class BuildingScene extends Scene {
         }
 
 
-        this.base_group.rotation.y = Math.PI / 4 + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
+        this.base_group.rotation.x = this.stepped_pitch();
+        this.base_group.rotation.y = Math.PI / 4 + this.stepped_yaw();
 
         this.cubes_group.position.y -= this.drift_vel * dt;
 

@@ -33,7 +33,8 @@ import { LEVEL_COLORS } from '../maze_levels.js';
 // - The floor: a dithered fill whose opacity follows simplex noise.
 //
 // Fog of war: edges fade with distance from a point (set_viewer), eased
-// between fog_near and fog_far; the floor too. The rest is lit (e.g. by a
+// between fog_near and fog_far (unless made with fog_edges false: then they
+// are drawn at full intensity everywhere); the floor too. The rest is lit (e.g. by a
 // light whose range ends at fog_far), so it darkens with distance. Walls and
 // stairs cast shadows (while the level is mostly faded in: one level casts
 // at a time), and everything lit receives them. Each level's walls stand its
@@ -73,7 +74,7 @@ const CONE_SIZE = 1;
 const CONE_SPACING = 1.2;
 const CONE_SCOOP_SEGMENTS = 8;
 const PATTERN_GROUND = 0.2;
-const MAX_PATTERN_LINES = 16384;
+const MAX_PATTERN_LINES = 32768;
 // The floor's opacity follows simplex noise: FLOOR_MIN where it is below
 // FLOOR_NOISE_LO, FLOOR_MAX above FLOOR_NOISE_HI (noise in about [-1, 1]), in
 // patches FLOOR_NOISE_SIZE world units across. FLOOR_SIZE: its extent.
@@ -84,15 +85,15 @@ const FLOOR_NOISE_HI = 0.7;
 const FLOOR_NOISE_SIZE = 25;
 const FLOOR_SIZE = 400;
 
-// Per window (archways count as windows here). ~30 windows and ~10 archways
-// typical; past MAX_WINDOWS the rest are left out (beyond the fog anyway),
-// which bounds the buffers.
-const MAX_WINDOWS = 64;
-const MAX_STAIRS = 16;      // per flight length
-const MAX_HOLES = 8;        // flights down; must match the floor shader
+// Per window (archways count as windows here), sized for the widest window
+// (half 9, with unfogged edges): ~70 windows and ~25 archways typical; past
+// MAX_WINDOWS the rest are left out, which bounds the buffers.
+const MAX_WINDOWS = 160;
+const MAX_STAIRS = 32;      // per flight length
+const MAX_HOLES = 16;       // flights down; must match the floor shader
 // Flight lengths (cells, = the lower level's height in standard heights).
 const STAIR_LENGTHS = [1, 2];
-const MAX_CARPETS = 12;
+const MAX_CARPETS = 24;
 
 // GLSL: the fog (from a point's footprint position, v_xz) and the level's
 // opacity, shared by every material here.
@@ -166,7 +167,8 @@ export class MazeLevel extends THREE.Group {
     // levels: MazeLevels. cell: grid pitch; thickness: the walls'; height:
     // the standard wall height, which a level's own is a multiple of (world
     // units). half: cells drawn either side of the centre cell.
-    constructor(levels, { cell, thickness, height, half, fog_near, fog_far }) {
+    // fog_edges: whether the edges (wireframe) fade with the fog too.
+    constructor(levels, { cell, thickness, height, half, fog_near, fog_far, fog_edges = true }) {
         super();
         this.levels = levels;
         this.level = 0;
@@ -203,6 +205,7 @@ export class MazeLevel extends THREE.Group {
             fog_near: { value: fog_near },
             fog_far: { value: fog_far },
             opacity_all: { value: 1 },
+            fog_edges: { value: fog_edges },
             // Where this group's origin is in the maze (world units), so
             // noise patterns stay fixed to the maze as the window moves.
             maze_origin: { value: new THREE.Vector2() },
@@ -264,9 +267,10 @@ export class MazeLevel extends THREE.Group {
             ].join('\n'),
             fragmentShader: [
                 FOG_PARS,
+                'uniform bool fog_edges;',
                 'varying vec3 v_color;',
                 'void main() {',
-                '    gl_FragColor = vec4(v_color, fog_alpha() * opacity_all);',
+                '    gl_FragColor = vec4(v_color, (fog_edges ? fog_alpha() : 1.0) * opacity_all);',
                 '    #include <colorspace_fragment>',
                 '}',
             ].join('\n'),
@@ -447,7 +451,7 @@ export class MazeLevel extends THREE.Group {
 
     // Per frame: fade the props with the fog and the level.
     update() {
-        const { fog_centre, fog_near, fog_far, opacity_all } = this.uniforms;
+        const { fog_centre, fog_near, fog_far, opacity_all, fog_edges } = this.uniforms;
         const fog = (x, z) => {
             const d = Math.hypot(x - fog_centre.value.x, z - fog_centre.value.y);
             const f = Math.min(1, Math.max(0, (fog_far.value - d) / (fog_far.value - fog_near.value)));
@@ -456,7 +460,8 @@ export class MazeLevel extends THREE.Group {
         for (const [k, props] of this.stairs) {
             props.begin();
             for (const [matrix, x, z] of this.stair_lists.get(k)) {
-                props.add_instance(matrix, fog(x, z));
+                const alpha = fog(x, z);
+                props.add_instance(matrix, alpha, fog_edges.value ? alpha : opacity_all.value);
             }
             props.end();
         }

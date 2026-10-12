@@ -9,20 +9,25 @@
 // EXTRA_DOOR_P, which adds loops between blocks and keeps the block edges
 // from reading as a regular grid of long walls. So every block reaches all
 // four neighbours, and the maze can be crossed in any direction. Some blocks
-// (room_p of them, per maze) also hold an open room: a room_min..room_max
-// cells patch with its inner walls knocked through (which only adds loops, so
-// the block stays connected). A maze can also be given fixed cells (e.g. a
-// stairwell's): left out of their block's carving and opened exactly the
-// sides they are given. Fixed cells must form chains hanging off the rest by
-// one end (as a stairwell's dead-end corridor does), so the rest of the
-// block stays connected; they must keep clear of block edges, and rooms
-// never knock through them. Cell (i, j) spans x in i +- 0.5, z in j +- 0.5
+// (wide_p of them, per maze) are wide: carved as a maze of 2 x 2 cell
+// squares, so their halls are two cells wide, and their doors (and their
+// neighbours' doors into them) two cells wide too. Some blocks (room_p of
+// them) also hold an open room: a patch of room_min..room_max cells a side
+// with its inner walls knocked through (which only adds loops, so the block
+// stays connected), placed clear of fixed cells (shrunk until it fits, or
+// left out), so nothing stands inside it. A maze can also be given fixed
+// cells (e.g. a stairwell's): left out of their block's carving and opened
+// exactly the sides they are given. Fixed cells must form chains hanging off
+// the rest by one end (as a stairwell's dead-end corridor does), so the rest
+// of the block stays connected; they must keep clear of block edges, and at
+// most one may fall in each 2 x 2 square of a wide block. Cell (i, j) spans x in i +- 0.5, z in j +- 0.5
 // (grid units); "north" is +z.
 
 export const BLOCK = 8;
 const EXTRA_DOOR_P = 0.2;
-// Room defaults, when a maze isn't given its own.
+// Room and wide-block defaults, when a maze isn't given its own.
 const ROOM_P = 0.5;
+const WIDE_P = 0;
 const ROOM_MIN = 2;
 const ROOM_MAX = 3;
 // Blocks kept generated: a few screens' worth, oldest dropped first.
@@ -60,10 +65,12 @@ export const MAZE_DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 export class InfiniteMaze {
     // seed: integer picking which maze. fixed: optional (i, j) => the ways
     // ([[di, dj], ...]) cell (i, j) opens if it is fixed, else null. room_p,
-    // room_min, room_max: its rooms (see above).
-    constructor(seed = 1, { fixed = null, room_p = ROOM_P, room_min = ROOM_MIN, room_max = ROOM_MAX } = {}) {
+    // room_min, room_max: its rooms; wide_p: its wide blocks (see above).
+    constructor(seed = 1, { fixed = null, room_p = ROOM_P, room_min = ROOM_MIN, room_max = ROOM_MAX,
+                            wide_p = WIDE_P } = {}) {
         this.seed = seed;
         this.fixed = fixed;
+        this.wide_p = wide_p;
         this.room_p = room_p;
         this.room_min = room_min;
         this.room_max = room_max;
@@ -126,11 +133,21 @@ export class InfiniteMaze {
         return this.door(bi, bj, x, 1);
     }
 
+    // Whether block (bi, bj) is wide (see above).
+    wide(bi, bj) {
+        return hash01(bi, bj, this.seed * 4 + 5) < this.wide_p;
+    }
+
     // Whether the wall on block (bi, bj)'s east (side 0) or north (side 1)
-    // edge has a door at cell k along it.
+    // edge has a door at cell k along it: doors come in pairs of cells if
+    // the block either side is wide.
     door(bi, bj, k, side) {
         const salt = this.seed * 4 + side;
         const forced = Math.floor(hash01(bi, bj, salt) * BLOCK);
+        if (this.wide(bi, bj) || this.wide(bi + 1 - side, bj + side)) {
+            const pair = k >> 1;
+            return pair == forced >> 1 || hash01(bi * BLOCK + pair, bj, salt + 2) < EXTRA_DOOR_P;
+        }
         return k == forced || hash01(bi * BLOCK + k, bj, salt + 2) < EXTRA_DOOR_P;
     }
 
@@ -154,7 +171,7 @@ export class InfiniteMaze {
                     }
                 }
             }
-            block = this.carve(make_rng(hash01(bi, bj, this.seed * 4 + 3)), fixed);
+            block = this.carve(make_rng(hash01(bi, bj, this.seed * 4 + 3)), fixed, this.wide(bi, bj));
             if (this.blocks.size >= MAX_CACHED_BLOCKS) {
                 this.blocks.delete(this.blocks.keys().next().value);
             }
@@ -163,41 +180,48 @@ export class InfiniteMaze {
         return block;
     }
 
-    // Randomised depth-first search over the block's cells, fixed cells (see
-    // the constructor; fixed[cell] = a mask of its ways out, or -1) left out
-    // and then opened their given ways.
-    carve(rng, fixed) {
+    // Randomised depth-first search over the block's cells (or, if wide,
+    // its 2 x 2 squares, each then opened through), fixed cells (see the
+    // constructor; fixed[cell] = a mask of its ways out, or -1) left out and
+    // then opened their given ways; then its room, if any.
+    carve(rng, fixed, wide) {
         const east = new Uint8Array(BLOCK * BLOCK);
         const north = new Uint8Array(BLOCK * BLOCK);
-        const visited = new Uint8Array(BLOCK * BLOCK);
-        for (let c = 0; c < BLOCK * BLOCK; c++) {
-            visited[c] = fixed[c] >= 0 ? 1 : 0;
-        }
-        let start = Math.floor(rng() * BLOCK * BLOCK);
-        while (fixed[start] >= 0) {
-            start = (start + 1) % (BLOCK * BLOCK);
-        }
-        const stack = [start];
-        visited[start] = 1;
-        while (stack.length > 0) {
-            const c = stack[stack.length - 1];
-            const x = c % BLOCK, y = Math.floor(c / BLOCK);
-            const next = MAZE_DIRS.filter(([dx, dy]) => {
-                const nx = x + dx, ny = y + dy;
-                return nx >= 0 && nx < BLOCK && ny >= 0 && ny < BLOCK && !visited[nx + ny * BLOCK];
-            });
-            if (next.length == 0) {
-                stack.pop();
-                continue;
+        // Open the edge between cells (x, y) and (x + dx, y + dy), unless
+        // either is fixed.
+        const open = (x, y, dx, dy) => {
+            const c = x + y * BLOCK, n = (x + dx) + (y + dy) * BLOCK;
+            if (fixed[c] >= 0 || fixed[n] >= 0) {
+                return;
             }
-            const [dx, dy] = next[Math.floor(rng() * next.length)];
-            const n = (x + dx) + (y + dy) * BLOCK;
             if (dx == 1) east[c] = 1;
             if (dx == -1) east[n] = 1;
             if (dy == 1) north[c] = 1;
             if (dy == -1) north[n] = 1;
-            visited[n] = 1;
-            stack.push(n);
+        };
+        if (wide) {
+            const S = BLOCK / 2;
+            const passages = this.dfs(rng, S, new Uint8Array(S * S));
+            for (let y = 0; y < BLOCK; y += 2) {
+                for (let x = 0; x < BLOCK; x += 2) {
+                    open(x, y, 1, 0); open(x, y + 1, 1, 0);
+                    open(x, y, 0, 1); open(x + 1, y, 0, 1);
+                }
+            }
+            for (const [sx, sy, dx, dy] of passages) {
+                // Both cell pairs across the squares' shared edge.
+                const x = 2 * sx + (dx > 0 ? 1 : 0), y = 2 * sy + (dy > 0 ? 1 : 0);
+                open(x, y, dx, dy);
+                open(x + Math.abs(dy), y + Math.abs(dx), dx, dy);
+            }
+        } else {
+            const blocked = new Uint8Array(BLOCK * BLOCK);
+            for (let c = 0; c < BLOCK * BLOCK; c++) {
+                blocked[c] = fixed[c] >= 0 ? 1 : 0;
+            }
+            for (const [x, y, dx, dy] of this.dfs(rng, BLOCK, blocked)) {
+                open(x, y, dx, dy);
+            }
         }
         for (let c = 0; c < BLOCK * BLOCK; c++) {
             for (let d = 0; d < MAZE_DIRS.length; d++) {
@@ -212,23 +236,83 @@ export class InfiniteMaze {
                 if (dy == -1) north[n] = 1;
             }
         }
-        // Knock through a room's inner walls (but never into a fixed cell).
-        let room = null;
-        if (rng() < this.room_p) {
-            const size = () => this.room_min + Math.floor(rng() * (this.room_max - this.room_min + 1));
-            const w = size(), h = size();
-            room = { x: Math.floor(rng() * (BLOCK - w + 1)), y: Math.floor(rng() * (BLOCK - h + 1)), w, h };
-            for (let y = room.y; y < room.y + h; y++) {
-                for (let x = room.x; x < room.x + w; x++) {
-                    const c = x + y * BLOCK;
-                    if (fixed[c] >= 0) {
-                        continue;
-                    }
-                    if (x < room.x + w - 1 && fixed[c + 1] < 0) east[c] = 1;
-                    if (y < room.y + h - 1 && fixed[c + BLOCK] < 0) north[c] = 1;
+        const room = rng() < this.room_p ? this.place_room(rng, fixed) : null;
+        if (room !== null) {
+            for (let y = room.y; y < room.y + room.h; y++) {
+                for (let x = room.x; x < room.x + room.w; x++) {
+                    if (x < room.x + room.w - 1) east[x + y * BLOCK] = 1;
+                    if (y < room.y + room.h - 1) north[x + y * BLOCK] = 1;
                 }
             }
         }
         return { east, north, room };
+    }
+
+    // Randomised depth-first search over an n x n grid, skipping blocked
+    // cells: the passages it carves, as [x, y, dx, dy].
+    dfs(rng, n, blocked) {
+        const visited = blocked.slice();
+        const passages = [];
+        let start = Math.floor(rng() * n * n);
+        while (visited[start]) {
+            start = (start + 1) % (n * n);
+        }
+        const stack = [start];
+        visited[start] = 1;
+        while (stack.length > 0) {
+            const c = stack[stack.length - 1];
+            const x = c % n, y = Math.floor(c / n);
+            const next = MAZE_DIRS.filter(([dx, dy]) => {
+                const nx = x + dx, ny = y + dy;
+                return nx >= 0 && nx < n && ny >= 0 && ny < n && !visited[nx + ny * n];
+            });
+            if (next.length == 0) {
+                stack.pop();
+                continue;
+            }
+            const [dx, dy] = next[Math.floor(rng() * next.length)];
+            passages.push([x, y, dx, dy]);
+            const m = (x + dx) + (y + dy) * n;
+            visited[m] = 1;
+            stack.push(m);
+        }
+        return passages;
+    }
+
+    // A room for the block, { x, y, w, h }, clear of fixed cells: a random
+    // size, its longer side shrunk until some placement fits; or null.
+    place_room(rng, fixed) {
+        const size = () => this.room_min + Math.floor(rng() * (this.room_max - this.room_min + 1));
+        let w = size(), h = size();
+        const clear = (x0, y0) => {
+            for (let y = y0; y < y0 + h; y++) {
+                for (let x = x0; x < x0 + w; x++) {
+                    if (fixed[x + y * BLOCK] >= 0) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+        while (w >= this.room_min && h >= this.room_min) {
+            const fits = [];
+            for (let y = 0; y <= BLOCK - h; y++) {
+                for (let x = 0; x <= BLOCK - w; x++) {
+                    if (clear(x, y)) {
+                        fits.push([x, y]);
+                    }
+                }
+            }
+            if (fits.length > 0) {
+                const [x, y] = fits[Math.floor(rng() * fits.length)];
+                return { x, y, w, h };
+            }
+            if (w >= h) {
+                w--;
+            } else {
+                h--;
+            }
+        }
+        return null;
     }
 }

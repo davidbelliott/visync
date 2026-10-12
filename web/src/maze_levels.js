@@ -31,15 +31,17 @@ import { InfiniteMaze, BLOCK, maze_hash } from './infinite_maze.js';
 // block at 1).
 const STAIRS_P = 1;
 // Levels' character (see params()): chance of double-height walls; the
-// ranges each level's window, archway and room chances are drawn from; and
-// the largest rooms a level can have (it picks up to ROOM_SIZE_MAX).
+// ranges each level's window, archway, room and wide-hall chances are drawn
+// from; and the largest rooms a level can have (it picks one of
+// ROOM_LARGEST, up to the whole width of a block).
 const TALL_P = 0.2;
 const WINDOW_RECT_P = [0, 0.2];
 const WINDOW_ROUND_P = [0, 0.2];
 const ARCH_P = [0.1, 0.5];
-const ROOM_P = [0.2, 0.8];
+const ROOM_P = [0.5, 1];
+const WIDE_P = [0, 0.4];
 const ROOM_SIZE_MIN = 2;
-const ROOM_SIZE_MAX = 4;
+const ROOM_LARGEST = [3, 8];
 // Levels' mazes and blocks' staircases kept generated, oldest dropped first.
 const MAX_CACHED_LEVELS = 8;
 const MAX_CACHED_STAIRS = 1024;
@@ -75,7 +77,8 @@ export class MazeLevels {
 
     // Level L's character: { height (wall height, in standard heights),
     // rect_p, round_p (window chances per wall), arch_p (per doorway),
-    // room_p (per block), room_max (largest room side, cells) }.
+    // room_p (per block), room_max (largest room side, cells), wide_p (per
+    // block: halls two cells wide) }.
     params(level) {
         let p = this.level_params.get(level);
         if (p === undefined) {
@@ -86,7 +89,8 @@ export class MazeLevels {
                 round_p: lerp(WINDOW_ROUND_P, h(2)),
                 arch_p: lerp(ARCH_P, h(3)),
                 room_p: lerp(ROOM_P, h(4)),
-                room_max: ROOM_SIZE_MIN + Math.floor(h(5) * (ROOM_SIZE_MAX - ROOM_SIZE_MIN + 1)),
+                room_max: ROOM_LARGEST[0] + Math.floor(h(5) * (ROOM_LARGEST[1] - ROOM_LARGEST[0] + 1)),
+                wide_p: lerp(WIDE_P, h(6)),
             };
             this.level_params.set(level, p);
         }
@@ -103,6 +107,7 @@ export class MazeLevels {
                 room_p: p.room_p,
                 room_min: ROOM_SIZE_MIN,
                 room_max: p.room_max,
+                wide_p: p.wide_p,
             });
             if (this.mazes.size >= MAX_CACHED_LEVELS) {
                 this.mazes.delete(this.mazes.keys().next().value);

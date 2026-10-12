@@ -103,9 +103,10 @@ export class InstancedProps extends THREE.Group {
     }
 
     // Draw an instance posed by matrix (THREE.Matrix4: translation,
-    // rotation and scale, no shear) at alpha (0..1; 0 skips it).
-    add_instance(matrix, alpha) {
-        if (this.fill === null || alpha <= 0 || this.count >= this.max) {
+    // rotation and scale, no shear) at alpha (0..1), its edges at edge_alpha
+    // (the same by default); both 0 skips it.
+    add_instance(matrix, alpha, edge_alpha = alpha) {
+        if (this.fill === null || (alpha <= 0 && edge_alpha <= 0) || this.count >= this.max) {
             return;
         }
         const k = this.count++;
@@ -115,7 +116,7 @@ export class InstancedProps extends THREE.Group {
         this.edges.set_pos(k, this.tmp_pos);
         this.edges.set_quaternion(k, this.tmp_quat);
         this.edges.set_scale(k, this.tmp_scale);
-        this.edges.set_color(k, this.edge_color, alpha);
+        this.edges.set_color(k, this.edge_color, edge_alpha);
     }
 
     end() {

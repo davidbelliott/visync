@@ -35,11 +35,18 @@ const CORRIDOR_BRAINS = 1.5;
 const CELL = CORRIDOR_BRAINS * BRAIN_MODEL_WIDTH * BRAIN_SCALE + WALL_T;
 // Fog of war, world units: the maze is lit by nothing but the brain's
 // light, whose range ends at FOG_FAR, so it darkens to black with distance;
-// edges fade (eased) from FOG_NEAR to FOG_FAR. The maze window drawn spans
-// whole cells past FOG_FAR, so nothing pops in.
+// edges fade (eased) from FOG_NEAR to FOG_FAR, unless FOG_EDGES is false:
+// then the wireframe (walls, stairs, carpets, cones) is drawn at full
+// intensity everywhere, and only the fills darken. The maze window drawn
+// (cells either side of the brain's) spans whole cells past FOG_FAR, so
+// nothing pops in; or, with unfogged edges, past the screen at the widest
+// shared zoom (an isometric view ~50 units from centre to corner, plus a
+// cell's walk before the window recentres).
 const FOG_NEAR = 5;
 const FOG_FAR = 30;
-const WINDOW_HALF = Math.ceil(FOG_FAR / CELL) + 1;     // cells either side
+const FOG_EDGES = false;
+const FOG_CELLS = Math.ceil(FOG_FAR / CELL) + 1;
+const WINDOW_HALF = FOG_EDGES ? FOG_CELLS : 9;
 
 // A translucent black floor under the brain (as in the drum kit scene),
 // dimming any scene layered behind this one: its opacity, and its size
@@ -67,8 +74,8 @@ const BOB_BEATS = 4;
 // The brain heads straight for what it can see down a straight run of open
 // cells, up to SIGHT_CELLS away (the nearest if several): first a staircase
 // it has not taken, else a cone.
-const SIGHT_CELLS = WINDOW_HALF;
-const MAX_CONES = 32;               // in view at once (two levels); ~5 typical
+const SIGHT_CELLS = FOG_CELLS;
+const MAX_CONES = 64;               // in view at once (two levels); ~20 typical
 // Cells whose cone has been picked up, and staircases taken, oldest
 // forgotten
 // first.
@@ -196,6 +203,7 @@ export class BrainMazeScene extends Scene {
             half: WINDOW_HALF,
             fog_near: FOG_NEAR,
             fog_far: FOG_FAR,
+            fog_edges: FOG_EDGES,
         };
         this.view = new MazeLevel(this.levels, view_options);
         this.next_view = new MazeLevel(this.levels, view_options);
@@ -410,8 +418,8 @@ export class BrainMazeScene extends Scene {
             dummy.updateMatrix();
             const d = Math.hypot(x - bx, z - bz);
             const level_alpha = offset == 0 ? 1 - fade : fade;
-            this.cones.add_instance(dummy.matrix,
-                ease(clamp((FOG_FAR - d) / (FOG_FAR - FOG_NEAR), 0, 1)) * level_alpha);
+            const alpha = ease(clamp((FOG_FAR - d) / (FOG_FAR - FOG_NEAR), 0, 1)) * level_alpha;
+            this.cones.add_instance(dummy.matrix, alpha, FOG_EDGES ? alpha : level_alpha);
         }
         this.cones.end();
     }

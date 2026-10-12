@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
 import { LightningStrike } from '../lightning_strike.js';
-import { ContourScan } from '../components/contour_scan.js';
+import { ScannedBrain } from '../components/scanned_brain.js';
 import { SteppedRotation, ISOMETRIC_TILT, STEPPED_SCALE } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
@@ -16,7 +16,6 @@ import {
     make_wireframe_cylinder,
     make_wireframe_circle,
     ShaderLoader,
-    BeatClock,
     Spark,
     ObjectPool,
 } from '../util.js';
@@ -78,23 +77,6 @@ const FLIP_BEATS = 1;
 // raised brain sits near the middle rather than the grid's centre.
 const VIEW_DROP = -4;
 
-// The brain is drawn as a scan (see ContourScan). Contour spacing, model
-// units: the brain is ~160 tall, so ~18 slices. Contours scroll up this many
-// slices per beat. Each kick sweeps a scan contour up the brain over
-// SCAN_BEATS, lighting the contours below it over SCAN_TRAIL model units.
-// Contours on faces turned away from the viewer are BRAIN_BACK_GAIN as
-// bright (with the black fill in front, only visible at the silhouette).
-const SLICE_SPACING = 9;
-const SLICE_SCROLL_PER_BEAT = 0.25;
-const SCAN_BEATS = 1;
-const SCAN_TRAIL = 30;
-const BRAIN_BACK_GAIN = 0.35;
-const BRAIN_LINE_COLOR = new THREE.Color('cyan');
-// The brain's solid fill under the contours: lit and dithered like the
-// cones, dark enough that the contours stay the brightest thing on it.
-const BRAIN_FILL_COLOR = new THREE.Color(0.0, 0.25, 0.25);
-const BRAIN_SCAN_COLOR = new THREE.Color('white');
-
 export class IceCreamScene extends Scene {
     constructor(context) {
         super(context, 'ice-cream');
@@ -132,23 +114,13 @@ export class IceCreamScene extends Scene {
         this.waves = [];
         this.settled_flips = 0;
 
-        this.scan_clock = new BeatClock(this);
-        this.scan_running = false;
-        this.brain = null;          // ContourScan, once loaded
-        // Model units the contours have scrolled up, wrapping every two
-        // bands so the solid/empty bands never swap at the wrap.
-        this.slice_offset = 0;
-        this.brain_fill_uniforms = {
-            slice_offset: { value: 0 },
-            slice_spacing: { value: SLICE_SPACING },
-        };
-        this.scan_height = 0;       // model units
-
         // Holds the brain, its sparks and the lights, lifted over the
         // grid's centre.
         this.brain_group = new THREE.Group();
         this.brain_group.position.y = BRAIN_LIFT;
         this.base_group.add(this.brain_group);
+        this.brain = new ScannedBrain(BRAIN_SCALE);
+        this.brain_group.add(this.brain);
         for (const [pos, intensity] of [[TOP_LIGHT_POS, TOP_LIGHT_INTENSITY],
                 [BOTTOM_LIGHT_POS, BOTTOM_LIGHT_INTENSITY]]) {
             const light = new THREE.PointLight('white', intensity, 0, LIGHT_DECAY);
@@ -163,11 +135,8 @@ export class IceCreamScene extends Scene {
         const cone_loader = new STLLoader();
         const cone_load_promise = cone_loader.loadAsync('stl/ice-cream-cone.stl');
 
-        const brain_loader = new STLLoader();
-        const brain_load_promise = brain_loader.loadAsync('stl/brain.stl');
-
-        Promise.all([shader_load_promise, cone_load_promise, brain_load_promise]).then(
-            ([[dither_pars, dither], cone_geom, brain_geom]) => {
+        Promise.all([shader_load_promise, cone_load_promise]).then(
+            ([[dither_pars, dither], cone_geom]) => {
                 // Shade through the house dither instead of smooth gradients.
                 const dither_shading = (shader) => {
                     shader.fragmentShader =
@@ -225,52 +194,6 @@ export class IceCreamScene extends Scene {
                 this.wave_beats = window_radius / WAVE_SPEED + FLIP_BEATS;
                 this.update_cones();
                 this.base_group.add(this.cones);
-
-                // Fill behind the contours, hiding the far side's, in every
-                // other band between them: a stack of open rings, its inside
-                // showing (double-sided) through the gaps. Pushed back so the
-                // near contours, which lie exactly on its surface, pass the
-                // depth test.
-                const brain_fill_mat = new THREE.MeshLambertMaterial({
-                    color: BRAIN_FILL_COLOR,
-                    side: THREE.DoubleSide,
-                    polygonOffset: true,
-                    polygonOffsetFactor: 1,
-                    polygonOffsetUnits: 1,
-                });
-                brain_fill_mat.onBeforeCompile = (shader) => {
-                    dither_shading(shader);
-                    Object.assign(shader.uniforms, this.brain_fill_uniforms);
-                    shader.vertexShader = shader.vertexShader.replace(
-                        '#include <common>',
-                        'varying float v_height;\n#include <common>'
-                    ).replace(
-                        '#include <begin_vertex>',
-                        '#include <begin_vertex>\nv_height = position.y;'
-                    );
-                    shader.fragmentShader = shader.fragmentShader.replace(
-                        'void main() {',
-                        'uniform float slice_offset;\nuniform float slice_spacing;\n' +
-                        'varying float v_height;\nvoid main() {\n' +
-                        'if (mod(floor((v_height - slice_offset) / slice_spacing), 2.0) > 0.5) discard;'
-                    );
-                };
-                const brain_fill = new THREE.Mesh(brain_geom, brain_fill_mat);
-                this.brain_group.add(brain_fill);
-
-                this.brain = new ContourScan(brain_geom, {
-                    spacing: SLICE_SPACING,
-                    line_color: BRAIN_LINE_COLOR,
-                    scan_color: BRAIN_SCAN_COLOR,
-                    back_gain: BRAIN_BACK_GAIN,
-                    trail: SCAN_TRAIL,
-                });
-                // Underside on brain_group's origin.
-                for (const obj of [brain_fill, this.brain]) {
-                    obj.scale.setScalar(BRAIN_SCALE);
-                    obj.position.y = -this.brain.min_y * BRAIN_SCALE;
-                }
-                this.brain_group.add(this.brain);
         });
 
         this.lightning_strike_meshes = [];
@@ -330,7 +253,7 @@ export class IceCreamScene extends Scene {
         this.drift_x += drift * Math.cos(this.drift_angle);
         this.drift_z += drift * Math.sin(this.drift_angle);
         this.update_cones();
-        this.update_brain_scan(dt * beats_per_sec);
+        this.brain.update(dt * beats_per_sec);
         this.base_group.rotation.y = YAW_BASE + this.yaw.update(dt, this.view_yaw(STEPPED_SCALE));
 
         this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
@@ -389,28 +312,6 @@ export class IceCreamScene extends Scene {
         this.cone_alphas.needsUpdate = true;
     }
 
-    // Scroll the brain's contours by d_beats, move any running scan, and
-    // recut the contours.
-    update_brain_scan(d_beats) {
-        this.slice_offset = (this.slice_offset
-            + d_beats * SLICE_SCROLL_PER_BEAT * SLICE_SPACING) % (2 * SLICE_SPACING);
-        this.brain_fill_uniforms.slice_offset.value = this.slice_offset;
-        if (this.brain === null) {
-            return;
-        }
-        let strength = 0;
-        if (this.scan_running) {
-            const frac = this.scan_clock.getElapsedBeats() / SCAN_BEATS;
-            this.scan_running = frac < 1;
-            // Rises with eased motion; fades over the last quarter so the
-            // glow left at the top doesn't cut out.
-            this.scan_height = lerp_scalar(this.brain.min_y, this.brain.max_y,
-                ease(clamp(frac, 0, 1)));
-            strength = clamp((1 - frac) * 4, 0, 1);
-        }
-        this.brain.update(this.slice_offset, this.scan_height, strength);
-    }
-
     handle_sync(t, bpm, beat) {
     }
 
@@ -419,8 +320,7 @@ export class IceCreamScene extends Scene {
         setTimeout(() => {
             if (channel == 1) {
                 this.waves.push(this.beats);
-                this.scan_clock.start();
-                this.scan_running = true;
+                this.brain.start_scan();
             } else if (channel == 9 || channel == 10) {
                 for (let i = 0; i < 4; i++) {
                     this.create_spark();

@@ -32,6 +32,7 @@ import { RollingCubeScene } from './src/scenes/rolling_cube_scene.js';
 import { SphereGridScene } from './src/scenes/sphere_grid_scene.js';
 import { CellularAutomataScene } from './src/scenes/cellular_automata_scene.js';
 import { ShaderScene } from './src/scenes/shader_scene.js';
+import { BrainMazeScene } from './src/scenes/brain_maze_scene.js';
 import { BuildingScene } from './src/scenes/building_scene.js';
 import { VectorFieldScene } from './src/scenes/vector_field_scene.js';
 import { DrumKitScene } from './src/scenes/drum_kit_scene.js';
@@ -478,6 +479,7 @@ class GraphicsContext {
                         transform: (v) => v },
                 ],
             })],
+            [27, new BrainMazeScene(this)],
 
             //[22, new ShaderScene(this, "glsl/chunks/texture1.frag")],
         ]);

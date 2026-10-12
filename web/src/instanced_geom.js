@@ -139,6 +139,10 @@ function create_fill_mat(transparent=false, dither_alpha=false) {
                 );
         };
 
+        // three caches compiled programs by onBeforeCompile's source, the
+        // same for every variant made here: key them apart, or e.g. a plain
+        // and a dither-alpha fill would share one program.
+        fill_mat.customProgramCacheKey = () => `instanced_fill:${dither_alpha}`;
         return fill_mat;
     });
 }

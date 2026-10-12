@@ -14,8 +14,9 @@ import { ResourceLoader } from '../util.js';
 export class InstancedProps extends THREE.Group {
     // geometry: the prop's shape. color: THREE.Color of fill and edges.
     // max: instances at once. edge_angle: deg; neighbouring faces meeting
-    // at more than this get an edge (EdgesGeometry).
-    constructor(geometry, { color, max, edge_angle = 30 }) {
+    // at more than this get an edge (EdgesGeometry). shadows: whether the
+    // fill casts and receives shadows (cast_shadows() switches casting).
+    constructor(geometry, { color, max, edge_angle = 30, shadows = false }) {
         super();
         this.max = max;
         this.count = 0;
@@ -66,6 +67,8 @@ export class InstancedProps extends THREE.Group {
                     );
                 };
                 this.fill = new THREE.InstancedMesh(fill_geom, mat, max);
+                this.fill.castShadow = this.casting = shadows;
+                this.fill.receiveShadow = shadows;
                 this.fill.count = 0;
                 this.fill.frustumCulled = false;
                 this.add(this.fill);
@@ -78,6 +81,14 @@ export class InstancedProps extends THREE.Group {
                 }
                 this.edges.set_num_instances(0);
             });
+    }
+
+    // Whether the fill casts shadows (when made with shadows).
+    cast_shadows(on) {
+        this.casting = on;
+        if (this.fill !== null) {
+            this.fill.castShadow = on;
+        }
     }
 
     // Recolour fill and edges (THREE.Color).

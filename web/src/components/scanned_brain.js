@@ -30,8 +30,9 @@ const FLASH_COLOR = new THREE.Color('white');
 const FLASH_BEATS = 0.5;
 
 export class ScannedBrain extends THREE.Group {
-    // scale: world units per model unit.
-    constructor(scale) {
+    // scale: world units per model unit. shadows: whether its fill casts and
+    // receives shadows.
+    constructor(scale, { shadows = false } = {}) {
         super();
         this.contours = null;       // ContourScan, once loaded
         this.height = 0;            // world units, once loaded
@@ -88,6 +89,7 @@ export class ScannedBrain extends THREE.Group {
                 );
             };
             const fill = new THREE.Mesh(geom, fill_mat);
+            fill.castShadow = fill.receiveShadow = shadows;
 
             this.contours = new ContourScan(geom, {
                 spacing: SLICE_SPACING,

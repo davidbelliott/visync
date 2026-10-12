@@ -121,10 +121,24 @@ const DEFAULT_HEADING = Math.PI / 4;
 
 // The only light, riding just over the brain (in brain_group's frame, origin
 // at the brain's underside; the brain is WALL_H tall). Decay 1 for a soft
-// falloff, cut off at FOG_FAR (see the fog of war).
+// falloff, cut off at FOG_FAR (see the fog of war). A spotlight pointing
+// straight down, its cone reaching FOG_FAR across the floor, so it casts
+// shadows in one pass (a point light would need six): walls block it, so
+// only what the brain can see is lit. LIGHT_PENUMBRA softens the cone's rim
+// (out in the fog anyway).
 const LIGHT_POS = new THREE.Vector3(0, WALL_H + 2, 0);
 const LIGHT_INTENSITY = 6;
 const LIGHT_DECAY = 1;
+const LIGHT_ANGLE = Math.atan2(FOG_FAR, LIGHT_POS.y);
+const LIGHT_PENUMBRA = 0.2;
+// Shadow map resolution (px a side; lower it on slow hardware), and biases
+// against self-shadowing acne on the walls.
+const SHADOW_MAP_SIZE = 1024;
+const SHADOW_BIAS = -0.0005;
+const SHADOW_NORMAL_BIAS = 0.02;
+// Shadows also darken the scenes layered behind, through a shadow-only plane
+// on the brain's floor: this dark where fully shadowed.
+const FLOOR_SHADOW_OPACITY = 0.6;
 
 export class BrainMazeScene extends Scene {
     constructor(context) {
@@ -159,11 +173,18 @@ export class BrainMazeScene extends Scene {
 
         this.brain_group = new THREE.Group();
         this.world_group.add(this.brain_group);
-        this.brain = new ScannedBrain(BRAIN_SCALE);
+        this.brain = new ScannedBrain(BRAIN_SCALE, { shadows: true });
         this.brain_group.add(this.brain);
-        const light = new THREE.PointLight('white', LIGHT_INTENSITY, FOG_FAR, LIGHT_DECAY);
+        const light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
+            LIGHT_ANGLE, LIGHT_PENUMBRA, LIGHT_DECAY);
         light.position.copy(LIGHT_POS);
-        this.brain_group.add(light);
+        this.brain_group.add(light, light.target);     // target at the brain's feet
+        light.castShadow = true;
+        light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+        light.shadow.camera.near = 0.5;
+        light.shadow.camera.far = FOG_FAR + LIGHT_POS.y;
+        light.shadow.bias = SHADOW_BIAS;
+        light.shadow.normalBias = SHADOW_NORMAL_BIAS;
 
         // Two level views: the brain's level, and the one a ramp leads to
         // (shown, crossfading, only while taking it).
@@ -199,6 +220,19 @@ export class BrainMazeScene extends Scene {
             }));
         this.floor.renderOrder = -1;
         this.world_group.add(this.floor);
+        // The shadow-only plane on the floor (see FLOOR_SHADOW_OPACITY),
+        // pushed back between the levels' floor fills and the black floor.
+        this.shadow_floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE).rotateX(-Math.PI / 2),
+            new THREE.ShadowMaterial({
+                opacity: FLOOR_SHADOW_OPACITY,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: 3,
+                polygonOffsetUnits: 3,
+            }));
+        this.shadow_floor.receiveShadow = true;
+        this.world_group.add(this.shadow_floor);
 
         // Cones, posed each frame from the lists of cones in view: [di, dj,
         // bob phase (rad), level offset (-1, 0, +1)].
@@ -209,7 +243,7 @@ export class BrainMazeScene extends Scene {
         this.cone_dummy.rotation.order = 'YXZ';     // spin about the vertical
         new STLLoader().loadAsync('stl/ice-cream-cone.stl').then((geom) => {
             this.cones = new InstancedProps(geom,
-                { color: CONE_COLOR, max: MAX_CONES, edge_angle: CONE_EDGE_ANGLE });
+                { color: CONE_COLOR, max: MAX_CONES, edge_angle: CONE_EDGE_ANGLE, shadows: true });
             this.maze_group.add(this.cones);
         });
 
@@ -269,6 +303,7 @@ export class BrainMazeScene extends Scene {
         this.maze_group.position.set(-bx, 0, -bz);
         this.brain_group.position.y = rise;
         this.floor.position.y = rise;
+        this.shadow_floor.position.y = rise;
         this.world_group.position.y = -rise - this.brain.height / 2;
         this.brain_group.rotation.y = lerp_scalar(this.facing_from, this.facing_to,
             ease(clamp(frac / TURN_FRACTION, 0, 1)));

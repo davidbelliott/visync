@@ -23,15 +23,18 @@ import { LEVEL_COLORS } from '../maze_levels.js';
 //   extra edges.
 // - Ramps up from the level and down from it: each a solid wedge filling
 //   its cell wall to wall, from the floor at its bottom side to the wall tops
-//   at its top side (see MazeLevels); the ramp down from a level shows as
-//   that wedge sunk in a walled-in hole.
+//   at its top side (see MazeLevels). The ramp down from a level shows as a
+//   hole in the floor (cut out of the floor fill), lined down to the level
+//   below on its two sides, with the wedge sloping down inside it.
 // - Carpets in the rooms: a single-hue rectangle, its brightness varying
 //   with simplex noise, outlined in the same hue.
 // - The floor: a dithered fill whose opacity follows simplex noise.
 //
 // Fog of war: edges fade with distance from a point (set_viewer), eased
 // between fog_near and fog_far; the floor too. The rest is lit (e.g. by a
-// light whose range ends at fog_far), so it darkens with distance.
+// light whose range ends at fog_far), so it darkens with distance. Walls and
+// ramps cast shadows (while the level is mostly faded in: one level casts
+// at a time), and everything lit receives them.
 
 // Window size, as a fraction of the wall span's length and height (the same
 // aspect as the wall; a round window's diameter is the height's fraction).
@@ -63,6 +66,7 @@ const FLOOR_SIZE = 400;
 // which bounds the buffers.
 const MAX_WINDOWS = 64;
 const MAX_RAMPS = 16;
+const MAX_HOLES = 8;        // ramps down, of those; must match the floor shader
 const MAX_CARPETS = 12;
 
 // GLSL: the fog (from a point's footprint position, v_xz) and the level's
@@ -87,6 +91,8 @@ export class MazeLevel extends THREE.Group {
         super();
         this.levels = levels;
         this.level = 0;
+        this.walls = null;          // the walls' mesh, once the shaders load
+        this.casting = true;        // whether its walls and ramps cast shadows
         this.cell = cell;
         this.thickness = thickness;
         this.height = height;
@@ -121,6 +127,10 @@ export class MazeLevel extends THREE.Group {
             // Where this group's origin is in the maze (world units), so
             // noise patterns stay fixed to the maze as the window moves.
             maze_origin: { value: new THREE.Vector2() },
+            // The holes down to ramps, cut out of the floor: (x0, z0, x1, z1)
+            // each, the first hole_count of them.
+            holes: { value: Array.from({ length: MAX_HOLES }, () => new THREE.Vector4()) },
+            hole_count: { value: 0 },
         };
 
         // Window panels: each kind's wall face (u along the wall, v up) cut
@@ -134,7 +144,7 @@ export class MazeLevel extends THREE.Group {
         const boundaries = 2 * m * (m + 1);
         // A window adds its two faces' cut-round panels and its lining.
         const panel_tris = 2 * this.window_shapes[2].tris.length + 2 * WINDOW_ROUND_SEGMENTS;
-        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS;
+        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS + 4 * MAX_HOLES;
         this.fill_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'normal']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_tris * 9), 3);
@@ -142,7 +152,7 @@ export class MazeLevel extends THREE.Group {
             this.fill_geom.setAttribute(name, attr);
         }
         const max_lines = 2 * boundaries + (m + 1) * (m + 1) + 2 * WINDOW_ROUND_SEGMENTS * MAX_WINDOWS +
-            4 * MAX_CARPETS;
+            4 * MAX_CARPETS + 2 * MAX_HOLES;
         this.line_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'line_color']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_lines * 6), 3);
@@ -187,7 +197,7 @@ export class MazeLevel extends THREE.Group {
 
         // Ramps: a unit wedge, posed and stretched per ramp.
         this.ramps = new InstancedProps(this.wedge_geometry(),
-            { color: this.color, max: MAX_RAMPS });
+            { color: this.color, max: MAX_RAMPS, shadows: true });
         this.add(this.ramps);
         this.ramp_list = [];        // [Matrix4, x, z] per ramp in the window
         this.matrix_pool = [];
@@ -224,7 +234,8 @@ export class MazeLevel extends THREE.Group {
                     shader.fragmentShader = shader.fragmentShader.replace(
                         '#include <dithering_pars_fragment>',
                         dither_pars + '\n' + simplex2d + '\n' + FOG_PARS +
-                        '\nuniform vec2 maze_origin;'
+                        '\nuniform vec2 maze_origin;\nuniform vec4 holes[' + MAX_HOLES + '];' +
+                        '\nuniform int hole_count;'
                     ).replace(
                         '#include <dithering_fragment>',
                         dither
@@ -233,13 +244,19 @@ export class MazeLevel extends THREE.Group {
                         '#include <clipping_planes_fragment>\n' + extra_frag
                     );
                 };
+                // three caches compiled programs by onBeforeCompile's source,
+                // which is the same for every material made here: key them by
+                // their own fragment code too, or they'd share one program.
+                mat.customProgramCacheKey = () => extra_frag;
                 return mat;
             };
             const fade = 'if (opacity_all < 1.0 && dither4x4(gl_FragCoord.xy, opacity_all) < 0.5) discard;';
             this.wall_mat = fill_material({ color: this.color }, 1, fade);
-            const walls = new THREE.Mesh(this.fill_geom, this.wall_mat);
-            walls.frustumCulled = false;
-            this.add(walls);
+            this.walls = new THREE.Mesh(this.fill_geom, this.wall_mat);
+            this.walls.frustumCulled = false;
+            this.walls.castShadow = this.casting;
+            this.walls.receiveShadow = true;
+            this.add(this.walls);
 
             // Carpets: per-vertex hue, darkened by noise in maze coordinates.
             const carpet_mat = fill_material({ vertexColors: true }, 1, fade);
@@ -253,20 +270,29 @@ export class MazeLevel extends THREE.Group {
                     `0.5 + 0.5 * snoise((v_xz + maze_origin) / ${CARPET_NOISE_SIZE.toFixed(1)}));`
                 );
             };
+            carpet_mat.customProgramCacheKey = () => 'carpet' + fade;
             const carpets = new THREE.Mesh(this.carpet_geom, carpet_mat);
             carpets.frustumCulled = false;
+            carpets.receiveShadow = true;
             this.add(carpets);
 
             // The floor: opacity from noise, faded with the fog and level.
             // Pushed back past the walls' bottom edges.
             this.floor_mat = fill_material({ color: this.color }, 2,
+                'for (int k = 0; k < ' + MAX_HOLES + '; k++) {\n' +
+                '    if (k >= hole_count) break;\n' +
+                '    vec4 hole = holes[k];\n' +
+                '    if (v_xz.x > hole.x && v_xz.x < hole.z && v_xz.y > hole.y && v_xz.y < hole.w) discard;\n' +
+                '}\n' +
                 'float floor_alpha = mix(' + FLOOR_MIN.toFixed(2) + ', ' + FLOOR_MAX.toFixed(2) +
                 ', smoothstep(' + FLOOR_NOISE_LO.toFixed(2) + ', ' + FLOOR_NOISE_HI.toFixed(2) +
                 ', snoise((v_xz + maze_origin) / ' + FLOOR_NOISE_SIZE.toFixed(1) + ')))' +
                 ' * fog_alpha() * opacity_all;\n' +
                 'if (dither4x4(gl_FragCoord.xy, floor_alpha) < 0.5) discard;');
             const floor_geom = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE).rotateX(-Math.PI / 2);
-            this.add(new THREE.Mesh(floor_geom, this.floor_mat));
+            const floor = new THREE.Mesh(floor_geom, this.floor_mat);
+            floor.receiveShadow = true;
+            this.add(floor);
         });
     }
 
@@ -289,6 +315,11 @@ export class MazeLevel extends THREE.Group {
     set_opacity(opacity) {
         this.uniforms.opacity_all.value = opacity;
         this.visible = opacity > 0;
+        this.casting = opacity > 0.5;
+        if (this.walls) {
+            this.walls.castShadow = this.casting;
+        }
+        this.ramps.cast_shadows(this.casting);
     }
 
     // Per frame: fade the props with the fog and the level.
@@ -453,17 +484,32 @@ export class MazeLevel extends THREE.Group {
         // Ramps up from this level (rising to +level_height) and down from
         // it (to -level_height).
         this.ramp_list.length = 0;
+        this.holes = [];            // [i, j, uphill] per ramp down, for emit()
         let n = 0;
         for (let i = lo; i <= hi; i++) {
             for (let j = lo; j <= hi; j++) {
                 for (const [low_level, base] of [[level, 0], [level - 1, -this.level_height]]) {
                     const uphill = levels.ramp(low_level, ci + i, cj + j);
-                    if (uphill !== null && this.ramp_list.length < MAX_RAMPS) {
-                        n = this.add_ramp(n, uphill, i, j, base);
+                    if (uphill === null || this.ramp_list.length >= MAX_RAMPS) {
+                        continue;
                     }
+                    if (base < 0) {
+                        if (this.holes.length >= MAX_HOLES) {
+                            continue;
+                        }
+                        this.holes.push([i, j, uphill]);
+                    }
+                    n = this.add_ramp(n, uphill, i, j, base);
                 }
             }
         }
+        // The holes' openings, between the walls round them, for the floor.
+        const half_in = (cell - t) / 2;
+        this.holes.forEach(([i, j], k) => {
+            this.uniforms.holes.value[k].set(
+                i * cell - half_in, j * cell - half_in, i * cell + half_in, j * cell + half_in);
+        });
+        this.uniforms.hole_count.value = this.holes.length;
 
         // Carpets in the rooms overlapping the window.
         this.carpets = maze.rooms_in(ci + lo, cj + lo, ci + hi, cj + hi).slice(0, MAX_CARPETS);
@@ -613,6 +659,27 @@ export class MazeLevel extends THREE.Group {
                 if (count == 1 || count == 3 || (count == 2 && sw == ne)) {
                     line(e[bx], 0, e[bz], e[bx], h, e[bz]);
                 }
+            }
+        }
+
+        // The holes down to ramps: their two sides lined down a level (the
+        // faces of the lower level's walls along the ramp, from its open
+        // bottom end to the wall at its top), an edge where each ends at the
+        // bottom; the wedge fills the rest. The rim is the bottom of this
+        // level's walls round the hole, and the wedge's top edge.
+        const lh = this.level_height, half_in = (this.cell - this.thickness) / 2;
+        for (const [i, j, [di, dj]] of this.holes) {
+            const cx = i * this.cell, cz = j * this.cell;
+            // Along the ramp (u, from its bottom end to its top) and across
+            // it (w): to x, z.
+            const at = (u, w, y) => [cx + di * u - dj * w, y, cz + dj * u + di * w];
+            const u0 = -this.cell / 2, u1 = half_in;
+            for (const side of [-1, 1]) {
+                const w = side * half_in;
+                // Facing into the hole: across, away from this side.
+                const nx = dj * side, nz = -di * side;
+                quad(at(u0, w, -lh), at(u0, w, 0), at(u1, w, 0), at(u1, w, -lh), nx, 0, nz);
+                line(...at(u0, w, -lh), ...at(u0, w, 0));
             }
         }
 

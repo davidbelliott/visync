@@ -6,20 +6,26 @@
 // A ramp joining level L to L + 1 fills one cell, R: a solid wedge on level
 // L rising from the floor at its bottom side (towards cell B) to the wall
 // tops at its top side (towards cell T), where level L + 1's floor carries on.
-// It goes only where R is a dead end on both levels: on level L open only
-// towards B, on level L + 1 only towards T. So on level L the wedge fills a
-// blind alley wall to wall, ending flush against the wall at its top; on
-// level L + 1 it is a hole walled in on three sides; and taking R out of
-// both mazes cuts no other way through them. The walk crosses a ramp in one
+// R is a dead end on both levels, carved that way (InfiniteMaze leaves): on
+// level L open only towards B, on level L + 1 only towards T. So on level L
+// the wedge fills a blind alley wall to wall, ending flush against the wall
+// at its top; on level L + 1 it is a hole walled in on three sides; and both
+// mazes are connected without it. Ramp sites are picked from hashes alone
+// (STAIR_SITES of each block, RAMP_P of them, uphill any way), before either
+// maze is carved. The walk crosses a ramp in one
 // two-cell move, B (level L) to T (level L + 1) or back, and R is otherwise
 // impassable from every side on both levels. Up and down ramps of a level
 // sit on cells of opposite parity (by level), so no cell is both.
 
-import { InfiniteMaze, MAZE_DIRS, maze_hash } from './infinite_maze.js';
+import { InfiniteMaze, MAZE_DIRS, BLOCK, maze_hash } from './infinite_maze.js';
 
-// Chance a cell that could hold a ramp (a dead end on both levels, pointing
-// opposite ways, of the right parity) does.
-const RAMP_P = 1;
+// Cells that can hold a ramp, by their position within their block (both
+// coordinates): inside the block (so a ramp and the cells either side of it
+// never reach a block's edge, where blocks join) and three apart (so ramps
+// never touch). And the chance a site of the right parity holds one: half a
+// ramp up and half down per block per level.
+const STAIR_SITES = [2, 5];
+const RAMP_P = 0.25;
 // Chance a doorway (an opening in a straight run of wall) is an archway.
 const ARCH_P = 0.3;
 // Chance a wall has a window; WINDOW_ROUND_P of windows are round, the rest
@@ -37,6 +43,7 @@ const COLOR_STRIDE = 5;
 
 // Hash salts, so each decision is independent.
 const SALT_RAMP = 9000;
+const SALT_RAMP_DIR = 9500;
 const SALT_RAMP_PARITY = 9900;
 const SALT_ARCH = 8000;
 const SALT_WINDOW = 8500;
@@ -56,7 +63,15 @@ export class MazeLevels {
     maze(level) {
         let maze = this.mazes.get(level);
         if (maze === undefined) {
-            maze = new InfiniteMaze(this.seed * 1000 + level);
+            // Ramp cells are leaves: on the ramp's lower level open towards
+            // its bottom, on its upper level towards its top.
+            maze = new InfiniteMaze(this.seed * 1000 + level, (i, j) => {
+                const up = this.ramp(level, i, j);
+                if (up !== null) {
+                    return [-up[0], -up[1]];
+                }
+                return this.ramp(level - 1, i, j);
+            });
             if (this.mazes.size >= MAX_CACHED_LEVELS) {
                 this.mazes.delete(this.mazes.keys().next().value);
             }
@@ -71,38 +86,17 @@ export class MazeLevels {
         return LEVEL_COLORS[((level * COLOR_STRIDE) % n + n) % n];
     }
 
-    // The direction a dead-end cell (i, j) of a level's maze opens, or null
-    // if it opens more ways (or none).
-    dead_end(level, i, j) {
-        const maze = this.maze(level);
-        let way = null;
-        for (const [di, dj] of MAZE_DIRS) {
-            if (maze.open(i, j, di, dj)) {
-                if (way !== null) {
-                    return null;
-                }
-                way = [di, dj];
-            }
-        }
-        return way;
-    }
-
     // The ramp from level L up to L + 1 filling cell (i, j), as its uphill
-    // direction [di, dj] (from B through the cell to T), or null.
+    // direction [di, dj] (from B through the cell to T), or null. Decided by
+    // hashes alone (the mazes are carved to suit).
     ramp(level, i, j) {
-        if (Math.floor(maze_hash(i, j, SALT_RAMP_PARITY) * 2) != mod2(level) ||
+        const x = ((i % BLOCK) + BLOCK) % BLOCK, y = ((j % BLOCK) + BLOCK) % BLOCK;
+        if (!STAIR_SITES.includes(x) || !STAIR_SITES.includes(y) ||
+                Math.floor(maze_hash(i, j, SALT_RAMP_PARITY) * 2) != mod2(level) ||
                 maze_hash(i, j, SALT_RAMP + level) >= RAMP_P) {
             return null;
         }
-        const below = this.dead_end(level, i, j);       // towards B
-        if (below === null) {
-            return null;
-        }
-        const above = this.dead_end(level + 1, i, j);   // towards T
-        if (above === null || above[0] != -below[0] || above[1] != -below[1]) {
-            return null;
-        }
-        return above;
+        return MAZE_DIRS[Math.floor(maze_hash(i, j, SALT_RAMP_DIR + level) * MAZE_DIRS.length)];
     }
 
     // A ramp's name, the same from either level, for remembering which have

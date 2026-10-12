@@ -11,10 +11,14 @@
 // four neighbours, and the maze can be crossed in any direction. Some blocks
 // (ROOM_P of them) also hold an open room: a ROOM_MIN..ROOM_MAX cells square
 // patch with its inner walls knocked through (which only adds loops, so the
-// block stays connected). Cell (i, j) spans x in i +- 0.5, z in j +- 0.5
-// (grid units); "north" is +z.
+// block stays connected). A maze can also be given leaf cells (e.g. for
+// stairwells): each is left out of its block's carving and joined to the
+// rest by just the one side it is given, so it is a dead end and the rest of
+// the block stays connected; rooms never knock through one. Leaves must sit
+// clear of block edges and of one another. Cell (i, j) spans x in i +- 0.5,
+// z in j +- 0.5 (grid units); "north" is +z.
 
-const BLOCK = 8;
+export const BLOCK = 8;
 const EXTRA_DOOR_P = 0.2;
 const ROOM_P = 0.5;
 const ROOM_MIN = 2;
@@ -52,9 +56,11 @@ function make_rng(seed) {
 export const MAZE_DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 
 export class InfiniteMaze {
-    // seed: integer picking which maze.
-    constructor(seed = 1) {
+    // seed: integer picking which maze. leaf: optional (i, j) => the one way
+    // ([di, dj]) cell (i, j) opens if it is a leaf, else null.
+    constructor(seed = 1, leaf = null) {
         this.seed = seed;
+        this.leaf = leaf;
         this.blocks = new Map();    // "bi,bj" -> carved block
     }
 
@@ -128,7 +134,20 @@ export class InfiniteMaze {
         const key = `${bi},${bj}`;
         let block = this.blocks.get(key);
         if (block === undefined) {
-            block = this.carve(make_rng(hash01(bi, bj, this.seed * 4 + 3)));
+            // Each leaf cell's way out (a MAZE_DIRS index), or -1.
+            const leaves = new Int8Array(BLOCK * BLOCK).fill(-1);
+            if (this.leaf !== null) {
+                for (let y = 0; y < BLOCK; y++) {
+                    for (let x = 0; x < BLOCK; x++) {
+                        const way = this.leaf(bi * BLOCK + x, bj * BLOCK + y);
+                        if (way !== null) {
+                            leaves[x + y * BLOCK] = MAZE_DIRS.findIndex(
+                                ([di, dj]) => di == way[0] && dj == way[1]);
+                        }
+                    }
+                }
+            }
+            block = this.carve(make_rng(hash01(bi, bj, this.seed * 4 + 3)), leaves);
             if (this.blocks.size >= MAX_CACHED_BLOCKS) {
                 this.blocks.delete(this.blocks.keys().next().value);
             }
@@ -137,13 +156,22 @@ export class InfiniteMaze {
         return block;
     }
 
-    // Randomised depth-first search over the block's cells.
-    carve(rng) {
+    // Randomised depth-first search over the block's cells, leaves (see the
+    // constructor; leaves[cell] = its way out's MAZE_DIRS index, or -1) left
+    // out and then hung off their one side.
+    carve(rng, leaves) {
         const east = new Uint8Array(BLOCK * BLOCK);
         const north = new Uint8Array(BLOCK * BLOCK);
         const visited = new Uint8Array(BLOCK * BLOCK);
-        const stack = [Math.floor(rng() * BLOCK * BLOCK)];
-        visited[stack[0]] = 1;
+        for (let c = 0; c < BLOCK * BLOCK; c++) {
+            visited[c] = leaves[c] >= 0 ? 1 : 0;
+        }
+        let start = Math.floor(rng() * BLOCK * BLOCK);
+        while (leaves[start] >= 0) {
+            start = (start + 1) % (BLOCK * BLOCK);
+        }
+        const stack = [start];
+        visited[start] = 1;
         while (stack.length > 0) {
             const c = stack[stack.length - 1];
             const x = c % BLOCK, y = Math.floor(c / BLOCK);
@@ -164,7 +192,18 @@ export class InfiniteMaze {
             visited[n] = 1;
             stack.push(n);
         }
-        // Knock through a room's inner walls.
+        for (let c = 0; c < BLOCK * BLOCK; c++) {
+            if (leaves[c] < 0) {
+                continue;
+            }
+            const [dx, dy] = MAZE_DIRS[leaves[c]];
+            const n = c + dx + dy * BLOCK;
+            if (dx == 1) east[c] = 1;
+            if (dx == -1) east[n] = 1;
+            if (dy == 1) north[c] = 1;
+            if (dy == -1) north[n] = 1;
+        }
+        // Knock through a room's inner walls (but never into a leaf).
         let room = null;
         if (rng() < ROOM_P) {
             const size = () => ROOM_MIN + Math.floor(rng() * (ROOM_MAX - ROOM_MIN + 1));
@@ -172,8 +211,12 @@ export class InfiniteMaze {
             room = { x: Math.floor(rng() * (BLOCK - w + 1)), y: Math.floor(rng() * (BLOCK - h + 1)), w, h };
             for (let y = room.y; y < room.y + h; y++) {
                 for (let x = room.x; x < room.x + w; x++) {
-                    if (x < room.x + w - 1) east[x + y * BLOCK] = 1;
-                    if (y < room.y + h - 1) north[x + y * BLOCK] = 1;
+                    const c = x + y * BLOCK;
+                    if (leaves[c] >= 0) {
+                        continue;
+                    }
+                    if (x < room.x + w - 1 && leaves[c + 1] < 0) east[c] = 1;
+                    if (y < room.y + h - 1 && leaves[c + BLOCK] < 0) north[c] = 1;
                 }
             }
         }

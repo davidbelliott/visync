@@ -164,18 +164,18 @@ class SceneCycler:
         if fg and bg:
             # Both have scenes: blank fg
             self.cur_scenes[0] = 0
-            messages.append(MsgGotoScene(0, 0, False))
+            messages.append(MsgGotoScene(0, 0, False, crossfade=True))
         else:
             # At least one blank: add new scene
             if fg == 0 and bg:
                 # Promote bg to fg first
-                messages.append(MsgGotoScene(0, bg, False))
+                messages.append(MsgGotoScene(0, bg, False, crossfade=True))
                 self.cur_scenes[0] = bg
             # Add new scene to bg (or fg if both were blank)
             new_scene = random.randint(1, NUM_SCENES)
             target_bg = (self.cur_scenes[0] != 0)
             self.cur_scenes[1 if target_bg else 0] = new_scene
-            messages.append(MsgGotoScene(0, new_scene, target_bg))
+            messages.append(MsgGotoScene(0, new_scene, target_bg, crossfade=True))
 
         return messages
 

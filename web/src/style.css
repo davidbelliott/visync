@@ -113,7 +113,8 @@ canvas {
     padding: 5px;
     text-align: left;
     background-color: black;
-    white-space: pre;
+    /* Keep the spacing between fields, but wrap on narrow displays. */
+    white-space: pre-wrap;
 }
 
 /* Header fields that act when clicked (see index.html). */

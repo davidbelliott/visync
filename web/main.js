@@ -117,8 +117,8 @@ const BG_COLOR = 'black';
 
 const SCENES_PER_BANK = 10;
 const NUM_SLOTS = 10;
-// A scene change crossfades within its slot over this many beats (four
-// bars), so swaps land musically and scale with tempo.
+// A crossfaded scene change (see set_slot) fades within its slot over this
+// many beats (four bars), so swaps land musically and scale with tempo.
 const CROSSFADE_BEATS = 16;
 // While a slot crossfades, its header entry shows the incoming scene
 // (highlighted) for this fraction of each beat, in step with the
@@ -133,6 +133,12 @@ const HUD_BLINK_ON_FRACTION = 0.5;
 const MAX_FRAME_DT = 0.1;
 
 const MIN_SWIPE_LENGTH = 50;
+// Two taps this close together in time (ms) and space (px) are a double-tap.
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_DIST = 40;
+// sessionStorage key for the slots' scenes and the active slot, so they
+// survive the page being reloaded (see save_slots).
+const SLOTS_STORAGE_KEY = 'visync.slots';
 
 var context = null;
 var stats = new Stats();
@@ -142,10 +148,14 @@ window.addEventListener("load", init);
 
 // URL of the relay that carries all top-level messages (sync, beat, scene
 // changes, control changes, ...). Controllers can connect to this same relay.
+// When the page is served on an explicit port (e.g. the vite dev server, from
+// this machine or another on the LAN) we talk to the adapter directly on the
+// same host; otherwise we're behind nginx, which proxies /ws/ to the adapter.
 function relay_url() {
     const protocol = (location.protocol === 'https:' ? 'wss' : 'ws');
-    const host = window.location.hostname;
-    const path = (host == "localhost") ? `${host}:8765` : `${host}/ws`;
+    const hostname = window.location.hostname;
+    const direct = window.location.port !== "" || hostname === "localhost";
+    const path = direct ? `${hostname}:8765` : `${hostname}/ws/`;
     return `${protocol}://${path}`;
 }
 
@@ -200,7 +210,7 @@ function connect() {
         } else if (type == MSG_TYPE_ADVANCE_SCENE_STATE) {
             context.advance_state(msg.steps);
         } else if (type == MSG_TYPE_GOTO_SCENE) {
-            context.change_scene(msg.scene, msg.bg);
+            context.change_scene(msg.scene, msg.bg, msg.crossfade ?? false);
         } else if (type == MSG_TYPE_AUDIO_INFO) {
             context.handle_audio_info(msg.avg, msg.peak, msg.spectrum,
                 msg.spectrum_smoothed, msg.samplerate);
@@ -281,6 +291,7 @@ function make_wireframe_sphere(radius) {
 }
 
 const ongoingTouches = [];
+let last_tap = null;    // {t, x, y} of the last tap, for double-tap detection
 
 function ongoingTouchIndexById(idToFind) {
     for (let i = 0; i < ongoingTouches.length; i++) {
@@ -303,14 +314,14 @@ function handle_start(evt) {
 
     for (let i = 0; i < touches.length; i++) {
         ongoingTouches.push(copyTouch(touches[i]));
-        /*if (touches[i].pageX < window.innerWidth / 2) {
-            context.change_scene(clamp(0, context.cur_scene_idx - 1, context.scenes.length - 1));
-        } else {
-            context.change_scene(clamp(0, context.cur_scene_idx + 1, context.scenes.length - 1));
-        }*/
     }
 }
 
+// Swipe right/left to shift every slot's contents one slot forward/back (see
+// shift_slots), and down/up to step the active slot's scene forward/back.
+// Tap the left/right quarter of the screen to move the active slot (the one
+// highlighted in the header) back/forward, and double-tap the middle half to
+// clear it.
 function handle_end(evt) {
     evt.preventDefault();
     const touches = evt.changedTouches;
@@ -318,34 +329,28 @@ function handle_end(evt) {
     for (let i = 0; i < touches.length; i++) {
         let idx = ongoingTouchIndexById(touches[i].identifier);
         if (idx >= 0) {
-            const start_pos = new THREE.Vector2(ongoingTouches[idx].pageX, ongoingTouches[idx].pageY);
-            const end_pos = new THREE.Vector2(touches[i].pageX, touches[i].pageY);
-            const delta = end_pos.clone();
-            delta.sub(start_pos);
+            const dx = touches[i].pageX - ongoingTouches[idx].pageX;
+            const dy = touches[i].pageY - ongoingTouches[idx].pageY;
 
-            if (delta.length() > MIN_SWIPE_LENGTH) {
-                // This is a swipe
-                if (Math.abs(delta.x) > Math.abs(delta.y)) {
-                    // Horizontal swipe
-                    if (delta.x > 0) {
-                        context.change_scene(clamp(0, context.cur_scene_idx - 1, context.scenes.length - 1));
-                    } else {
-                        context.change_scene(clamp(0, context.cur_scene_idx + 1, context.scenes.length - 1));
-                    }
+            if (Math.hypot(dx, dy) > MIN_SWIPE_LENGTH) {
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    context.shift_slots(dx > 0 ? 1 : -1);
                 } else {
-                    // Vertical swipe
-                    if (delta.y > 0) {
-                        context.change_scene(clamp(0, context.cur_bg_scene_idx + 1, context.scenes.length - 1), true);
-                    } else {
-                        context.change_scene(clamp(0, context.cur_bg_scene_idx - 1, context.scenes.length - 1), true);
-                    }
+                    context.step_active_scene(dy > 0 ? 1 : -1);
                 }
             } else {
-                // This is a tap
-                if (touches[i].pageX < window.innerWidth / 4) {
-                    context.scenes.get(context.cur_scene_idx).advance_state(-1);
-                } else if (touches[i].pageX > window.innerWidth * 3 / 4) {
-                    context.scenes.get(context.cur_scene_idx).advance_state(1);
+                const t = performance.now();
+                const { pageX: x, pageY: y } = touches[i];
+                if (x < window.innerWidth / 4) {
+                    context.set_active_slot(context.active_slot - 1);
+                } else if (x > window.innerWidth * 3 / 4) {
+                    context.set_active_slot(context.active_slot + 1);
+                } else if (last_tap && t - last_tap.t < DOUBLE_TAP_MS &&
+                        Math.hypot(x - last_tap.x, y - last_tap.y) < DOUBLE_TAP_DIST) {
+                    context.set_slot(context.active_slot, 0);
+                    last_tap = null;
+                } else {
+                    last_tap = { t, x, y };
                 }
             }
             ongoingTouches.splice(idx, 1);
@@ -406,8 +411,7 @@ class GraphicsContext {
         document.getElementById('scenes').addEventListener('click', (e) => {
             const entry = e.target.closest('[data-slot]');
             if (entry) {
-                this.active_slot = Number(entry.dataset.slot);
-                this.update_scene_hud();
+                this.set_active_slot(Number(entry.dataset.slot));
             }
         });
 
@@ -557,6 +561,9 @@ class GraphicsContext {
         // default value; now that bindings only fire on a knob change, do it
         // explicitly.
         this.change_scene(0);
+        // Then put back whatever was showing before a reload - e.g. mobile
+        // Safari dropping the page while it was in the background.
+        this.load_slots();
         this.cur_scene_bank = 0;
         this.num_scene_banks = Math.ceil((Math.max(...this.scenes.keys()) + 1)
             / SCENES_PER_BANK);
@@ -842,8 +849,11 @@ class GraphicsContext {
         const height = window.innerHeight;
         const aspect = width / height;
         this.renderer.setSize(width, height);
-        const div_ratio = Math.max(Math.ceil(Math.max(width, height) / 1000), 2);
-        //const div_ratio = window.devicePixelRatio;
+        // Physical pixels per rendered pixel, along each axis: at least 2 on
+        // hidpi displays (phones, retina laptops) for a chunkier look, and
+        // more on very large windows to keep the render size down.
+        const hidpi_ratio = window.devicePixelRatio >= 2 ? 2 : 1;
+        const div_ratio = Math.max(hidpi_ratio, Math.ceil(Math.max(width, height) / 2000));
         this.renderer.setPixelRatio(window.devicePixelRatio / div_ratio);
         this.recreate_buffers(width, height);
         this.scenes.forEach((scene) => {
@@ -852,8 +862,9 @@ class GraphicsContext {
     }
 
     // Put scene_idx in the given slot, leaving every other slot untouched,
-    // and update the HUD's scene list.
-    set_slot(slot, scene_idx) {
+    // and update the HUD's scene list. The change is instant unless
+    // `crossfade`, in which case it fades in over CROSSFADE_BEATS.
+    set_slot(slot, scene_idx, crossfade = false) {
         if (scene_idx == 0) {
             scene_idx = undefined;
         } else if (!this.scenes.has(scene_idx)) {
@@ -863,7 +874,11 @@ class GraphicsContext {
         if (s.scene === scene_idx) {
             return;
         }
-        if (scene_idx !== undefined && s.outgoing === scene_idx) {
+        if (!crossfade) {
+            // Also cuts short any crossfade already running in this slot.
+            s.outgoing = undefined;
+            s.fade = 1;
+        } else if (scene_idx !== undefined && s.outgoing === scene_idx) {
             // Changed back mid-crossfade: run it in reverse from where it is.
             s.outgoing = s.scene;
             s.fade = 1 - s.fade;
@@ -880,6 +895,39 @@ class GraphicsContext {
             s.fade = 1;
         }
         this.update_scene_hud();
+        this.save_slots();
+    }
+
+    // Remember each slot's scene and the active slot for load_slots. Storage
+    // can be unavailable (private browsing, blocked site data); then
+    // there's just nothing to restore.
+    save_slots() {
+        const state = {
+            scenes: this.slots.map(({ scene }) => scene ?? 0),
+            active_slot: this.active_slot,
+        };
+        try {
+            sessionStorage.setItem(SLOTS_STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {}
+    }
+
+    // Restore what save_slots stored, if anything, without crossfading.
+    load_slots() {
+        let state;
+        try {
+            state = JSON.parse(sessionStorage.getItem(SLOTS_STORAGE_KEY));
+        } catch (e) {
+            return;
+        }
+        if (!state) {
+            return;
+        }
+        state.scenes?.forEach((scene_idx, slot) => {
+            if (slot < NUM_SLOTS) {
+                this.set_slot(slot, scene_idx);
+            }
+        });
+        this.set_active_slot(state.active_slot ?? 0);
     }
 
     // Rewrite the HUD's scene list as <slot>:<shortname> for every occupied
@@ -919,7 +967,7 @@ class GraphicsContext {
         if (!active_shown) {
             shown.push(entry(this.active_slot, ''));
         }
-        document.getElementById('scenes').innerHTML = shown.join('+');
+        document.getElementById('scenes').innerHTML = shown.join('+<wbr>');
     }
 
     // The act currently playing, from MsgPerformer.
@@ -981,8 +1029,45 @@ class GraphicsContext {
     // / 15 bound above) always target the fixed foreground (slot 0, drawn in
     // front) / background (slot 1, behind it) slots, regardless of which
     // slot the keyboard currently has active (see keydown).
-    change_scene(scene_idx, bg = false) {
-        this.set_slot(bg ? 1 : 0, scene_idx);
+    change_scene(scene_idx, bg = false, crossfade = false) {
+        this.set_slot(bg ? 1 : 0, scene_idx, crossfade);
+    }
+
+    // Make `slot` the one number keys and vertical swipes act on.
+    set_active_slot(slot) {
+        this.active_slot = clamp(slot, 0, NUM_SLOTS - 1);
+        this.update_scene_hud();
+        this.save_slots();
+    }
+
+    // Move every slot's contents (scene and any crossfade in progress) one
+    // slot forward (dir 1) or back (dir -1), leaving the slot vacated at the
+    // other end empty. Does nothing if that would push a non-empty slot off
+    // the end. The active slot stays where it is.
+    shift_slots(dir) {
+        const edge = this.slots[dir > 0 ? NUM_SLOTS - 1 : 0];
+        if (edge.scene !== undefined || edge.outgoing !== undefined) {
+            return;
+        }
+        const empty = { scene: undefined, outgoing: undefined, fade: 1 };
+        if (dir > 0) {
+            this.slots.pop();
+            this.slots.unshift(empty);
+        } else {
+            this.slots.shift();
+            this.slots.push(empty);
+        }
+        this.update_scene_hud();
+        this.save_slots();
+    }
+
+    // Move the active slot `steps` scenes through the registry, wrapping
+    // round through blank (0) at the ends. Used by vertical swipes.
+    step_active_scene(steps) {
+        const order = [0, ...[...this.scenes.keys()].sort((a, b) => a - b)];
+        const cur = order.indexOf(this.slots[this.active_slot].scene ?? 0);
+        const next = ((cur + steps) % order.length + order.length) % order.length;
+        this.set_slot(this.active_slot, order[next]);
     }
 
     advance_state(steps) {
@@ -1009,10 +1094,13 @@ class GraphicsContext {
         } else if (shift_chars.includes(e.key)) {
             // Shift+digit: switch which slot subsequent digit presses
             // target, without changing any scene.
-            this.active_slot = this.key_digit_to_slot(shift_chars.indexOf(e.key));
-            this.update_scene_hud();
+            this.set_active_slot(this.key_digit_to_slot(shift_chars.indexOf(e.key)));
         } else if (e.code == "Space") {
             this.toggle_beat_mode();
+        } else if (e.shiftKey && e.key == "ArrowLeft") {
+            this.shift_slots(-1);
+        } else if (e.shiftKey && e.key == "ArrowRight") {
+            this.shift_slots(1);
         } else if (e.key == "ArrowLeft") {
             this.advance_state(-1);
         } else if (e.key == "ArrowRight") {

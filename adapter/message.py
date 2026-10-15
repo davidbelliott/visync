@@ -48,10 +48,13 @@ class MsgBeat(Msg):
 
 
 class MsgGotoScene(Msg):
-    def __init__(self, last_transmit_latency, scene, bg=False):
+    # `crossfade` fades the new scene in over a few bars rather than cutting
+    # to it.
+    def __init__(self, last_transmit_latency, scene, bg=False, crossfade=False):
         super().__init__(Msg.Type.GOTO_SCENE, last_transmit_latency)
         self.scene = scene
         self.bg = bg
+        self.crossfade = crossfade
 
 
 class MsgControlChange(Msg):

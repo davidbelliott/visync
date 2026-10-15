@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { Scene } from './scene.js';
-import { ShaderLoader, BeatClock } from '../util.js';
+import { Scene, MIDI_SYNCS_PER_BEAT } from './scene.js';
+import { ShaderLoader, BeatClock, PhaseLockedBeats } from '../util.js';
 import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 
@@ -174,6 +174,9 @@ export class HelixScene extends Scene {
         }
 
         this.clock.start();
+        // The helix turns turns_per_beat times a beat, in step with the
+        // music: its angle is driven by a beat count locked to the MIDI clock.
+        this.spin_beats = new PhaseLockedBeats();
 
         // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
@@ -191,7 +194,7 @@ export class HelixScene extends Scene {
 
         const positionAttribute = this.geom1.getAttribute('position');
 
-        const curve_time = t;
+        const curve_time = this.spin_beats.advance(dt, this.get_local_bpm());
         for (let i = 0; i < positionAttribute.count; i++) {
             const t_norm = i / (positionAttribute.count - 1);
             const point = this.curve1.getPointWithRadius(t_norm, curve_time);
@@ -221,6 +224,11 @@ export class HelixScene extends Scene {
     }
 
     handle_sync(t, bpm, beat) {
+    }
+
+    handle_sync_raw(sync_rate_hz, sync_idx) {
+        super.handle_sync_raw(sync_rate_hz, sync_idx);
+        this.spin_beats.lock(sync_idx / MIDI_SYNCS_PER_BEAT);
     }
 
     state_transition(old_state_idx, new_state_idx) {

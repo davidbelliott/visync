@@ -20,17 +20,20 @@ function step_progress(t, move) {
 // returned): y the lift, 0..1, z the slide, -1 (back) .. 1 (forward), x 0.
 // Over two steps a foot lifts while sliding from back to the middle, then
 // sets down while sliding forward; over the next two, slides back along the
-// ground: the feet half a cycle apart, so one is always down.
+// ground: the feet half a cycle apart, so one is always down, and one lands
+// on every beat. The lift is a hop, not an ease: up fast and slowing to the
+// top, then falling faster and faster to strike the ground on the beat (an
+// ease to rest there would look down before it, so the step read as early).
 export function shuffle_foot(side, t, out = [0, 0, 0]) {
     const f = step_progress(t, SHUFFLE_MOVE);
     out[0] = 0;
     switch ((Math.floor(t * SHUFFLE_STEPS) + 2 * side) % 4) {
         case 0:
-            out[1] = ease(Math.min(1, f));
+            out[1] = Math.sin(Math.PI / 2 * Math.min(1, f));
             out[2] = ease(Math.min(0, -1 + f));
             break;
         case 1:
-            out[1] = ease(Math.max(0, 1 - f));
+            out[1] = Math.cos(Math.PI / 2 * Math.min(1, f));
             out[2] = ease(Math.min(1, f));
             break;
         case 2:

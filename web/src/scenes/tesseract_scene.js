@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { Scene } from './scene.js';
+import { Scene, MIDI_SYNCS_PER_BEAT } from './scene.js';
 import { CH_EXPAND_W, knob_with_zero_zone } from '../controller_map.js';
-import { BeatClock, ease, clamp } from '../util.js';
+import { BeatClock, PhaseLockedBeats, ease, clamp } from '../util.js';
 import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { Tesseract } from '../highdim.js';
 
@@ -20,7 +20,8 @@ const W_DIST_SIZES = 1.5;
 // each other. TURN_MODE: 'constant' turns steadily at a quarter turn per
 // TURN_BEATS; 'eased' eases a quarter turn over TURN_BEATS on every sync; 'off'.
 // A quarter turn maps the tesseract onto itself, so eased turns always rest
-// on the aligned pose.
+// on the aligned pose, and constant turns, locked to the MIDI clock
+// (PhaseLockedBeats), pass through it on the beat.
 const TURN_PLANE = 'zw';
 const TURN_MODE = 'constant';
 const TURN_BEATS = 1;
@@ -58,6 +59,7 @@ export class TesseractScene extends Scene {
         this.base_group.add(this.tesseract);
         this.turns = 0;     // eased quarter turns started
         this.turn_clock = new BeatClock(this);
+        this.turn_beats = new PhaseLockedBeats(TURN_BEATS);     // constant mode
 
         // Knob: the w axis's scale (0 merges the two cubes).
         this.bind(CH_EXPAND_W, (v) => { this.tesseract.scale_vec.w = v; }, knob_with_zero_zone(1));
@@ -88,7 +90,8 @@ export class TesseractScene extends Scene {
         const d_beats = dt * this.get_local_bpm() / 60;
         let turning = false;
         if (TURN_MODE == 'constant') {
-            this.tesseract[TURN_ROT] += d_beats / TURN_BEATS * Math.PI / 2;
+            this.tesseract[TURN_ROT] = this.turn_beats.advance(dt, this.get_local_bpm())
+                / TURN_BEATS * Math.PI / 2;
             turning = true;
         } else if (this.turns > 0) {
             const frac = clamp(this.turn_clock.getElapsedBeats() / TURN_BEATS, 0, 1);
@@ -122,6 +125,11 @@ export class TesseractScene extends Scene {
             }
         }
         geom.attributes.color.needsUpdate = true;
+    }
+
+    handle_sync_raw(sync_rate_hz, sync_idx) {
+        super.handle_sync_raw(sync_rate_hz, sync_idx);
+        this.turn_beats.lock(sync_idx / MIDI_SYNCS_PER_BEAT);
     }
 
     handle_sync(t, bpm, beat) {

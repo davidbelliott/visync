@@ -382,6 +382,35 @@ export class ObjectPool extends THREE.Group {
     }
 }
 
+// A beat count (`beats`, from 0) that advances with the tempo each frame and
+// is phase-locked to the (latency-compensated) MIDI clock, so beat-relative
+// motion lands on the audible beats rather than at whatever phase its scene
+// happened to start. Each clock tick (see Scene.handle_sync_raw) moves it
+// `gain` of the way to the clock's phase within `period` beats, settling
+// within about a beat without a visible jump; only the phase is locked.
+export class PhaseLockedBeats {
+    // period: beats over which the phase matters (e.g. a step's length).
+    // gain: fraction of the phase error corrected per clock tick (24 a beat).
+    constructor(period = 1, gain = 0.05) {
+        this.period = period;
+        this.gain = gain;
+        this.beats = 0;
+    }
+
+    // Advance by dt seconds at bpm; returns the count.
+    advance(dt, bpm) {
+        this.beats += dt * bpm / 60;
+        return this.beats;
+    }
+
+    // clock_beats: the clock's position in beats (sync_idx / syncs per beat).
+    lock(clock_beats) {
+        let err = clock_beats - this.beats;
+        err -= this.period * Math.round(err / this.period);
+        this.beats += err * this.gain;
+    }
+}
+
 export class BeatClock extends THREE.Clock {
     constructor(parent_scene) {
         super(false);

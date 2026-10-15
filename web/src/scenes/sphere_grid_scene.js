@@ -243,7 +243,8 @@ export class SphereGridScene extends Scene {
 
     handle_beat(t, channel) {
         if (channel == 1) {
-            this.beat_clock.start();
+            // On the (latency-compensated) beat, not as the message lands.
+            setTimeout(() => this.beat_clock.start(), this.get_beat_delay() * 1000);
         }
     }
 

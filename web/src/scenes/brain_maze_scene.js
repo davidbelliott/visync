@@ -8,7 +8,7 @@ import { MazeLevel } from '../components/maze_level.js';
 import { InstancedProps } from '../components/instanced_props.js';
 import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
-import { lerp_scalar, ease, clamp, Spark } from '../util.js';
+import { lerp_scalar, ease, clamp, Spark, PhaseLockedBeats } from '../util.js';
 
 // Rotation (rad): yaw in lockstep with the other stepped scenes (see
 // stepped_rotation.js), every 45 deg from a diagonal base; pitch locked at
@@ -123,12 +123,9 @@ const EASED_STEPS = true;
 // the cone-eating flash with them, fall half a beat after). None at constant
 // speed, which has no peak: it arrives on the beat.
 const STEP_LEAD = EASED_STEPS ? MOVE_BEATS / 2 : 0;
-// The walk's beat count is phase-locked to the (latency-compensated) MIDI
-// clock: each clock tick (24 a beat) moves it this fraction of the way to the
-// clock's phase within a step, settling within about a beat without a
-// visible jump. Without it the walk free-runs at the tempo, at whatever
-// phase the scene happened to start.
-const PHASE_LOCK_GAIN = 0.05;
+// The walk's beat count is phase-locked to the MIDI clock (PhaseLockedBeats)
+// over a step; without that it free-runs at the tempo, at whatever phase the
+// scene happened to start.
 const TURN_FRACTION = 0.5;
 const VISIT_PENALTY = 1.5;
 const JITTER = 0.5;
@@ -300,7 +297,8 @@ export class BrainMazeScene extends Scene {
         this.climb = 0;
         this.cells = 1;                 // cells the step covers (more on stairs)
         this.rise_h = 0;                // world units a staircase step climbs
-        this.beats = 0;
+        this.walk_clock = new PhaseLockedBeats(MOVE_BEATS);
+        this.beats = 0;                 // walk_clock's count, as of this frame
         this.step_start = -STEP_LEAD;
         this.visits = new Map();
         this.taken = new Set();
@@ -315,7 +313,7 @@ export class BrainMazeScene extends Scene {
 
     anim_frame(dt) {
         const d_beats = dt * this.get_local_bpm() / 60;
-        this.beats += d_beats;
+        this.beats = this.walk_clock.advance(dt, this.get_local_bpm());
         while (this.beats - this.step_start >= MOVE_BEATS * this.cells) {
             this.arrive();
         }
@@ -616,13 +614,9 @@ export class BrainMazeScene extends Scene {
         return [0, 0, 0, null, 1, 0];
     }
 
-    // Nudge the walk's beat count towards the clock's phase within a step
-    // (only the phase: the count itself is the scene's own).
     handle_sync_raw(sync_rate_hz, sync_idx) {
         super.handle_sync_raw(sync_rate_hz, sync_idx);
-        let err = sync_idx / MIDI_SYNCS_PER_BEAT - this.beats;
-        err -= MOVE_BEATS * Math.round(err / MOVE_BEATS);
-        this.beats += err * PHASE_LOCK_GAIN;
+        this.walk_clock.lock(sync_idx / MIDI_SYNCS_PER_BEAT);
     }
 
     handle_beat(t, channel) {

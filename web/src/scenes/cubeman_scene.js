@@ -312,10 +312,10 @@ export class CubemanScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        if (channel == 4) {
-            this.bg.add_square("white");
-        } else if (channel == 1 || channel == 3) {
-            this.bg.add_square("red");
+        // Squares on the (latency-compensated) beat, not as the message lands.
+        const color = channel == 4 ? "white" : (channel == 1 || channel == 3) ? "red" : null;
+        if (color !== null) {
+            setTimeout(() => this.bg.add_square(color), this.get_beat_delay() * 1000);
         }
 
         if (channel == 1) {

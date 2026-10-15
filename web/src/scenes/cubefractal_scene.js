@@ -45,15 +45,24 @@ const STATE_PROGRESS = [0, 0.5, 1];
 // fades in over this much width, world units, so splitting a faded cube
 // doesn't darken it in a step; a tenth of a cube, too thin to see into.
 const SLAB_FADE_IN_WIDTH = 0.1 * CUBE_SIZE;
-// Each kick moves to the next state over this many beats, starting on the
-// (latency-compensated) beat. At 1, kicks on every beat chain into one
-// unbroken motion.
+// Each kick moves to the next state over this many beats, starting KICK_LEAD
+// beats before the (latency-compensated) beat. At 1, kicks on every beat
+// chain into one unbroken motion.
 const MOVE_BEATS = 1.0;
 // false: each move is linear in progress, so a steady beat streams the
 // fractal outwards at one constant rate. true: each move eases in and out
 // (smoothstep, as EasedFollower's moves from rest), surging and settling
 // with every kick.
 const EASED_MOVES = true;
+// Eased moves start half a move early, so their peak speed (mid-move) lands
+// on the kick rather than half a beat after it. That needs the lookahead of
+// delayed beat mode, where a kick arrives ~half a beat before it sounds (see
+// Scene.get_beat_delay); the network latency it falls short by is made up by
+// starting the move part way in, if no more than MAX_PREROLL beats (a
+// smoothstep that far has barely left rest). In immediate mode, with no
+// lookahead, moves start on the kick as before. Linear moves have no peak.
+const KICK_LEAD = EASED_MOVES ? MOVE_BEATS / 2 : 0;
+const MAX_PREROLL = 0.1;
 // Camera glide towards the cube it tracks, s to settle (critically damped);
 // the max speed only stops a pathological jump, world units/s.
 const CAM_SMOOTH_S = 0.5;
@@ -288,7 +297,8 @@ export class CubeFractalScene extends Scene {
     // flight has got to. From full expansion that starts a new level,
     // snapping such a move to its end first (the new level is built from the
     // full spacing).
-    kick() {
+    // preroll_s: seconds of the move already behind it as it starts.
+    kick(preroll_s = 0) {
         let from = this.level_progress();
         if (this.state == 2) {
             this.start_level();
@@ -298,7 +308,7 @@ export class CubeFractalScene extends Scene {
         this.state++;
         this.move_from = from;
         this.move_to = STATE_PROGRESS[this.state];
-        this.move_elapsed = 0;
+        this.move_elapsed = preroll_s;
         this.move_secs = MOVE_BEATS * 60 / this.get_local_bpm();
     }
 
@@ -413,7 +423,15 @@ export class CubeFractalScene extends Scene {
 
     handle_beat(t, channel) {
         if (channel == 1) {
-            setTimeout(() => this.kick(), this.get_beat_delay() * 1000);
+            const beat_s = 60 / this.get_local_bpm();
+            const early_s = this.get_beat_delay() - KICK_LEAD * beat_s;
+            if (early_s >= 0) {
+                setTimeout(() => this.kick(), early_s * 1000);
+            } else if (-early_s <= MAX_PREROLL * beat_s) {
+                this.kick(-early_s);
+            } else {
+                setTimeout(() => this.kick(), this.get_beat_delay() * 1000);
+            }
         }
     }
 }

@@ -44,4 +44,10 @@ export class DrumKitScene extends Scene {
         // Spin with the shared view yaw (0.2 rad/s at 1x).
         this.kit.rotation.y = this.view_yaw();
     }
+
+    // Hit the drums on the (latency-compensated) beat, not as the message
+    // lands (in delayed mode up to half a beat early).
+    handle_beat(latency, channel) {
+        setTimeout(() => super.handle_beat(latency, channel), this.get_beat_delay() * 1000);
+    }
 }

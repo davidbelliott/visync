@@ -352,6 +352,7 @@ adapter_secret = None
 # The curses console, when one is running (see console_ui.py). None under
 # visync.service or a pipe, where every call below falls back to plain prints.
 console = None
+console_loop = None     # the asyncio loop running it, which owns its log
 
 # Name of the act currently playing, broadcast on change and to each new client.
 cur_performer = ''
@@ -371,11 +372,20 @@ def broadcast(msg):
 
 def log_line(text):
     """Report something that isn't a message: into the console's log when one
-    is running, otherwise to stdout."""
-    if console is not None:
+    is running, otherwise to stdout. Safe from any thread: rtmidi calls in from
+    its own MIDI thread, and the console's log may only change on the loop
+    that draws it (draw() iterates it), so those lines are handed over."""
+    if console is None:
+        print(text)
+        return
+    try:
+        on_loop = asyncio.get_running_loop() is console_loop
+    except RuntimeError:
+        on_loop = False
+    if on_loop:
         console.log_note(text)
     else:
-        print(text)
+        console_loop.call_soon_threadsafe(console.log_note, text)
 
 
 def update_client_count():
@@ -651,7 +661,7 @@ async def main_loop_console(tempo):
     Does nothing unless stdin is a terminal: under visync.service or a pipe
     there are no keys to read and the redraws would just flood the log, so the
     adapter stays on plain prints via log_line."""
-    global console
+    global console, console_loop
     if not sys.stdin.isatty():
         return
 
@@ -659,6 +669,8 @@ async def main_loop_console(tempo):
     hints = 'tab performer   pgup/pgdn scroll   s sync/cc   ctrl-C quit'
     if tempo is not None:
         hints = 'space tap   up/down bpm   left/right nudge   ' + hints
+    # The loop first: log_line from the MIDI thread needs it once console is set.
+    console_loop = asyncio.get_running_loop()
     console = console_ui.Console(tempo=tempo, on_performer=set_performer,
                                  hints=hints)
     console.performer = cur_performer

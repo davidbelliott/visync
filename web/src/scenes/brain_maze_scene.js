@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { Scene } from './scene.js';
+import { Scene, MIDI_SYNCS_PER_BEAT } from './scene.js';
 import { Head } from '../components/head.js';
 import { MAZE_DIRS } from '../infinite_maze.js';
 import { MazeLevels } from '../maze_levels.js';
@@ -102,8 +102,8 @@ const SPARK_BEATS = 1.5;
 const SPARK_SIZE = 0.2;
 const SPARK_COLOR = 'white';
 
-// The head walks the maze one cell per MOVE_BEATS, arriving in each cell on
-// the beat, turning only at right angles (it faces the way it goes, turning
+// The head walks the maze one cell per MOVE_BEATS, passing the beat mid-step
+// (see STEP_LEAD), turning only at right angles (it faces the way it goes, turning
 // over the first TURN_FRACTION of a step). A staircase is crossed in one move,
 // from the cell before it to the one past it (its k cells and one more, over
 // as many MOVE_BEATS), rising or sinking a level only while on the steps,
@@ -117,6 +117,18 @@ const MOVE_BEATS = 1;
 // glide through the maze. true: each step eases from rest to rest, pausing
 // in every cell on the beat.
 const EASED_STEPS = true;
+// Beats each step starts ahead of the beat: half a step when eased, so its
+// peak speed (mid-step) lands on the beat and the walk reads as driven by it,
+// rather than setting off on it and peaking half a beat late (arrivals, and
+// the cone-eating flash with them, fall half a beat after). None at constant
+// speed, which has no peak: it arrives on the beat.
+const STEP_LEAD = EASED_STEPS ? MOVE_BEATS / 2 : 0;
+// The walk's beat count is phase-locked to the (latency-compensated) MIDI
+// clock: each clock tick (24 a beat) moves it this fraction of the way to the
+// clock's phase within a step, settling within about a beat without a
+// visible jump. Without it the walk free-runs at the tempo, at whatever
+// phase the scene happened to start.
+const PHASE_LOCK_GAIN = 0.05;
 const TURN_FRACTION = 0.5;
 const VISIT_PENALTY = 1.5;
 const JITTER = 0.5;
@@ -289,7 +301,7 @@ export class BrainMazeScene extends Scene {
         this.cells = 1;                 // cells the step covers (more on stairs)
         this.rise_h = 0;                // world units a staircase step climbs
         this.beats = 0;
-        this.step_start = 0;
+        this.step_start = -STEP_LEAD;
         this.visits = new Map();
         this.taken = new Set();
         this.view.set_level(this.level);
@@ -307,7 +319,8 @@ export class BrainMazeScene extends Scene {
         while (this.beats - this.step_start >= MOVE_BEATS * this.cells) {
             this.arrive();
         }
-        const frac = (this.beats - this.step_start) / (MOVE_BEATS * this.cells);
+        // Clamped: a phase-lock nudge can step the count back past the start.
+        const frac = Math.max(0, (this.beats - this.step_start) / (MOVE_BEATS * this.cells));
 
         // Slide the maze under the head, which is part way along its step
         // from the window's centre cell (and up or down stairs).
@@ -601,5 +614,22 @@ export class BrainMazeScene extends Scene {
         // are a dead end on both levels, open only to the cells that cross
         // it).
         return [0, 0, 0, null, 1, 0];
+    }
+
+    // Nudge the walk's beat count towards the clock's phase within a step
+    // (only the phase: the count itself is the scene's own).
+    handle_sync_raw(sync_rate_hz, sync_idx) {
+        super.handle_sync_raw(sync_rate_hz, sync_idx);
+        let err = sync_idx / MIDI_SYNCS_PER_BEAT - this.beats;
+        err -= MOVE_BEATS * Math.round(err / MOVE_BEATS);
+        this.beats += err * PHASE_LOCK_GAIN;
+    }
+
+    handle_beat(t, channel) {
+        if (channel == 1) {
+            setTimeout(() => {
+                this.head.start_scan();
+            }, this.get_beat_delay() * 1000);
+        }
     }
 }

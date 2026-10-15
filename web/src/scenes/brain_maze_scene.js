@@ -140,6 +140,16 @@ const LIGHT_ABOVE_WALLS = 2;
 const LIGHT_INTENSITY = 6;
 const LIGHT_DECAY = 1;
 const LIGHT_PENUMBRA = 0.2;
+// A small fill light on the face, riding with the head as it turns (in
+// head_group's frame, face towards +z): FACE_LIGHT_POS world units in front
+// of and above the forehead (the head is ~4 tall, its face ~1.4 in front of
+// centre), so it lights the face's front and top from ~2.5 away. Physical
+// falloff (decay 2) cut off at FACE_LIGHT_RANGE, so it only grazes the
+// nearest walls; no shadows (a point light would need six passes).
+const FACE_LIGHT_POS = new THREE.Vector3(0, 4.6, 2.6);
+const FACE_LIGHT_INTENSITY = 6;
+const FACE_LIGHT_RANGE = 5;
+const FACE_LIGHT_DECAY = 2;
 // Shadow map resolution (px a side; lower it on slow hardware), and biases
 // against self-shadowing acne on the walls.
 const SHADOW_MAP_SIZE = 1024;
@@ -193,6 +203,10 @@ export class BrainMazeScene extends Scene {
         light.shadow.camera.near = 0.5;
         light.shadow.bias = SHADOW_BIAS;
         light.shadow.normalBias = SHADOW_NORMAL_BIAS;
+        const face_light = new THREE.PointLight('white', FACE_LIGHT_INTENSITY,
+            FACE_LIGHT_RANGE, FACE_LIGHT_DECAY);
+        face_light.position.copy(FACE_LIGHT_POS);
+        this.head_group.add(face_light);
 
         // Two level views: the head's level, and the one a staircase leads to
         // (shown, crossfading, only while taking it).

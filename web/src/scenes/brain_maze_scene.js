@@ -26,7 +26,7 @@ const WALL_T = 0.5;
 const WALL_H = 4;
 // The head stands as tall as the walls (the model is ~28 units tall and
 // ~19 wide and deep, so ~2.7 across here: it turns easily in a cell).
-const HEAD_MODEL_HEIGHT = 28.2;
+const HEAD_MODEL_HEIGHT = 27.9;
 const HEAD_SCALE = WALL_H / HEAD_MODEL_HEIGHT;
 // Corridors CORRIDOR_W world units between the walls, which sets the cell
 // pitch (~6.2): sized for the brain this scene first walked (1.5 times its
@@ -127,18 +127,20 @@ const MAX_REMEMBERED = 2048;
 // towards +z; DEFAULT_HEADING until the knob moves.
 const DEFAULT_HEADING = Math.PI / 4;
 
-// The only light, riding with the head (in head_group's frame, origin at
-// the head's underside, face towards +z, so it turns with it): LIGHT_AHEAD
-// world units in front of the face's centre line, lighting the face's front
-// and top, and LIGHT_ABOVE_WALLS above the tops of its level's walls, so it
-// rises with taller levels (blending between levels' heights on the stairs).
-// Decay 1 for a soft falloff, cut off at FOG_FAR (see the fog of war). A
-// point light casting shadows (six passes, one per cube face): walls block
-// it, so only what the head can see is lit.
+// The only light in the maze, riding over the head (in head_group's frame,
+// origin at the head's underside), LIGHT_ABOVE_WALLS world units above the
+// tops of its level's walls, so it rises with taller levels (blending
+// between levels' heights on the stairs). Decay 1 for a soft falloff, cut off
+// at FOG_FAR (see the fog of war). A spotlight pointing straight down, its
+// cone (widened to suit its height) reaching FOG_FAR across the floor, so it
+// casts shadows in one pass (a point light would need six): walls block it,
+// so only what the head can see is lit. LIGHT_PENUMBRA softens the cone's rim
+// (out in the fog anyway). Centred over the head, so it holds still as the
+// head turns; the face gets its own key light (Head's face light).
 const LIGHT_ABOVE_WALLS = 2;
-const LIGHT_AHEAD = 2.6;
 const LIGHT_INTENSITY = 6;
 const LIGHT_DECAY = 1;
+const LIGHT_PENUMBRA = 0.2;
 // Shadow map resolution (px a side; lower it on slow hardware), and biases
 // against self-shadowing acne on the walls.
 const SHADOW_MAP_SIZE = 1024;
@@ -183,10 +185,10 @@ export class BrainMazeScene extends Scene {
         this.world_group.add(this.head_group);
         this.head = new Head(HEAD_SCALE, { shadows: true });
         this.head_group.add(this.head);
-        // Raised each frame by place_light.
-        const light = this.light = new THREE.PointLight('white', LIGHT_INTENSITY, FOG_FAR,
-            LIGHT_DECAY);
-        this.head_group.add(light);
+        // Placed (height and cone) each frame by place_light.
+        const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
+            Math.PI / 4, LIGHT_PENUMBRA, LIGHT_DECAY);
+        this.head_group.add(light, light.target);     // target at the head's feet
         light.castShadow = true;
         light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         light.shadow.camera.near = 0.5;
@@ -346,7 +348,7 @@ export class BrainMazeScene extends Scene {
 
     // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
     // blended `fade` (0..1) of the way to the next level's on the stairs,
-    // LIGHT_AHEAD in front of the face.
+    // its cone reaching FOG_FAR across the floor from there.
     place_light(fade) {
         const wall_h = (level) => WALL_H * this.levels.params(level).height;
         let h = wall_h(this.level);
@@ -354,7 +356,8 @@ export class BrainMazeScene extends Scene {
             h = lerp_scalar(h, wall_h(this.level + this.climb), fade);
         }
         const y = h + LIGHT_ABOVE_WALLS;
-        this.light.position.set(0, y, LIGHT_AHEAD);
+        this.light.position.set(0, y, 0);
+        this.light.angle = Math.atan2(FOG_FAR, y);
     }
 
     // Height (world units) along a staircase move `along` (0..1) of the way

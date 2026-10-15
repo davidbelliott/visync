@@ -514,7 +514,7 @@ export class DrumboxScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        const time_till_impact = this.get_beat_delay(t);
+        const time_till_impact = this.get_beat_delay();
         for (const paddle_group of this.paddle_groups) {
             paddle_group.impacts.push([time_till_impact, channel]);
         }

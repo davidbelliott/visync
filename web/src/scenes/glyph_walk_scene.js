@@ -190,7 +190,7 @@ export class GlyphWalkScene extends Scene {
 
     handle_beat(t, channel) {
         if (channel == 1) {
-            const delay = this.get_beat_delay(t);
+            const delay = this.get_beat_delay();
             setTimeout(() => { this.beat_clock.start(); }, delay * 1000);
         }
     }

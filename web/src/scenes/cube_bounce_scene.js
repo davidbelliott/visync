@@ -105,9 +105,9 @@ export class CubeBounceScene extends Scene {
     }
 
     handle_beat(est_latency, channel) {
-        const delay = this.get_beat_delay(est_latency);
+        const delay = this.get_beat_delay();
         if (channel == 1) {
-            this.impacts[this.impact_idx] = -this.get_beat_delay(est_latency) / 60 * this.get_local_bpm();
+            this.impacts[this.impact_idx] = -this.get_beat_delay() / 60 * this.get_local_bpm();
             this.impact_idx = (this.impact_idx + 1) % this.impacts.length;
         }
     }

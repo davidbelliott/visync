@@ -164,25 +164,25 @@ class SceneCycler:
         if fg and bg:
             # Both have scenes: blank fg
             self.cur_scenes[0] = 0
-            messages.append(MsgGotoScene(0, 0, False, crossfade=True))
+            messages.append(MsgGotoScene(0, False, crossfade=True))
         else:
             # At least one blank: add new scene
             if fg == 0 and bg:
                 # Promote bg to fg first
-                messages.append(MsgGotoScene(0, bg, False, crossfade=True))
+                messages.append(MsgGotoScene(bg, False, crossfade=True))
                 self.cur_scenes[0] = bg
             # Add new scene to bg (or fg if both were blank)
             new_scene = random.randint(1, NUM_SCENES)
             target_bg = (self.cur_scenes[0] != 0)
             self.cur_scenes[1 if target_bg else 0] = new_scene
-            messages.append(MsgGotoScene(0, new_scene, target_bg, crossfade=True))
+            messages.append(MsgGotoScene(new_scene, target_bg, crossfade=True))
 
         return messages
 
     def check_advance(self, sync_idx):
         """Returns a MsgAdvanceSceneState if we're at the halfway point between scene changes."""
         if (self.cycle_interval != 0 and sync_idx % self.cycle_interval == self.cycle_interval // 2):
-            return MsgAdvanceSceneState(0, 1)
+            return MsgAdvanceSceneState(1)
         else:
             return None
 
@@ -224,7 +224,7 @@ for bar in range(0, NUM_BARS):
             fake_beat[16 * bar + i].append(9)
 
 
-def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=0, use_note_syncs=False):
+def translate_note_to_msg(channel, note_number, note_vel, use_note_syncs=False):
     log_line(f'{channel}:{note_number}:{note_vel}')
     if note_vel == 0:
         return None
@@ -234,28 +234,28 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         # This channel is used for synchronization
         clock_tracker.ping()
         if clock_tracker.sync:
-            ws_msg = MsgSync(last_transmit_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+            ws_msg = MsgSync(clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
             if LOG_SYNC:
                 log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
                 log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
     elif channel == 15:
         # Analog Rytm auto channel
         if note_number >= 12 and note_number < 36:
-            ws_msg = MsgGotoScene(last_transmit_latency, note_number - 12, note_vel < 100)
+            ws_msg = MsgGotoScene(note_number - 12, note_vel < 100)
         elif note_number >= 36:
             log_line(f'advancing {-1 if note_number % 2 == 0 else 1}')
-            ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1 if note_number % 2 == 0 else 1)
+            ws_msg = MsgAdvanceSceneState(-1 if note_number % 2 == 0 else 1)
         else:
-            ws_msg = MsgBeat(last_transmit_latency, note_number + 1, True)
+            ws_msg = MsgBeat(note_number + 1, True)
 
     elif channel == 14:
         # This channel is used for graphics scene switching
-        ws_msg = MsgGotoScene(last_transmit_latency, note_number - 60, note_vel < 100)
+        ws_msg = MsgGotoScene(note_number - 60, note_vel < 100)
     elif channel == 13:
         # This channel is used for moving forward/backward in the graphics scene
-        ws_msg = MsgAdvanceSceneState(last_transmit_latency, 1)
+        ws_msg = MsgAdvanceSceneState(1)
     elif channel == 12:
-        ws_msg = MsgAdvanceSceneState(last_transmit_latency, -1)
+        ws_msg = MsgAdvanceSceneState(-1)
     else:
         # Remaining channels are used for controlling elements within the scene
         '''if channel == 4:
@@ -265,7 +265,7 @@ def translate_note_to_msg(channel, note_number, note_vel, last_transmit_latency=
         elif channel == 2 or channel == 5:
             channel = 3'''
 
-        ws_msg = MsgBeat(last_transmit_latency, channel, True)
+        ws_msg = MsgBeat(channel, True)
 
     return ws_msg
 
@@ -310,7 +310,7 @@ class RtMidiInputHandler:
         if status == midiconstants.TIMING_CLOCK:
             clock_tracker.ping()
             if clock_tracker.sync and self.playing:
-                ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                ws_msg = MsgSync(clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                 if LOG_SYNC:
                     log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
                     log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
@@ -324,7 +324,7 @@ class RtMidiInputHandler:
         elif status & 0xF0 == midiconstants.NOTE_ON and midi_msg[2] != 0:
             channel = (status & 0xF) + 1
             note_number, note_vel = midi_msg[1], midi_msg[2]
-            ws_msg = translate_note_to_msg(channel, note_number, note_vel, last_msg_latency)
+            ws_msg = translate_note_to_msg(channel, note_number, note_vel)
         elif status & 0xF0 == midiconstants.NOTE_OFF or (
                 status & 0xF0 == midiconstants.NOTE_ON and midi_msg[2] == 0):
             channel = (status & 0xF) + 1
@@ -334,7 +334,7 @@ class RtMidiInputHandler:
         elif status & 0xF0 == midiconstants.CONTROL_CHANGE:
             control_idx = midi_msg[1]
             control_val = midi_msg[2]
-            ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
+            ws_msg = MsgControlChange(control_idx, control_val / MIDI_CC_MAX)
 
         if ws_msg != None and LOG_MSGS:
             log_line(str(ws_msg))
@@ -349,15 +349,16 @@ connected = set()
 adapter = None
 adapter_secret = None
 
-# Last message's roundtrip latency divided by two, in seconds
-last_msg_latency = 0.0
-
 # The curses console, when one is running (see console_ui.py). None under
 # visync.service or a pipe, where every call below falls back to plain prints.
 console = None
 
 # Name of the act currently playing, broadcast on change and to each new client.
 cur_performer = ''
+
+# Whether beats arrive an eighth note early for the frontend to delay (see
+# MsgBeatMode). Set once in main() from the input mode and --immediate.
+beat_delayed = False
 
 
 def broadcast(msg):
@@ -388,23 +389,26 @@ def set_performer(name):
     cur_performer = name
     if console is not None:
         console.performer = name
-    broadcast(MsgPerformer(last_msg_latency, name))
+    broadcast(MsgPerformer(name))
 
 
 async def handler(websocket):
-    global last_msg_latency
     connected.add(websocket)
     update_client_count()
     log_line("Client connected")
     # The performer only goes out when it changes, so a browser opened mid-set
     # would show nothing. Send the current one to this client alone.
+    await websocket.send(MsgBeatMode(beat_delayed).to_json())
     if cur_performer:
-        await websocket.send(MsgPerformer(last_msg_latency, cur_performer).to_json())
+        await websocket.send(MsgPerformer(cur_performer).to_json())
     try:
+        # Echo pings straight back to the client that sent them: each one
+        # times its own round trip, so its latency estimate is its own rather
+        # than whichever client happened to reply last.
         async for message in websocket:
             msg = json.loads(message)
-            last_msg_latency = (time.time() - msg['t']) / 2
-            #print(last_msg_latency)
+            if msg.get('msg_type') == Msg.Type.PING:
+                await websocket.send(message)
     finally:
         # Unregister client
         connected.remove(websocket)
@@ -426,7 +430,7 @@ class SerialMidiHandler:
                 clock_tracker.ping()
                 if clock_tracker.sync and self.playing:
                     #print(f'Sync idx: {clock_tracker.cur_sync_idx}')
-                    ws_msg = MsgSync(last_msg_latency, clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
+                    ws_msg = MsgSync(clock_tracker.sync_rate_hz, clock_tracker.cur_sync_idx)
                     if LOG_SYNC:
                         log_line(f'sync_rate_bpm: {clock_tracker.sync_rate_hz * 60 / 24}')
                         log_line(f'beat: {clock_tracker.cur_sync_idx // 24}')
@@ -481,15 +485,15 @@ class SerialMidiHandler:
                     log_line(f"control change: {self.bytes[1:]}")
                     control_idx, control_val = self.bytes[1:]
                     # This channel is used for graphics scene switching
-                    ws_msg = MsgControlChange(last_msg_latency, control_idx, control_val / MIDI_CC_MAX)
-                    #ws_msg = MsgGotoScene(last_msg_latency, int(control_val / 5), control_idx > 1)
+                    ws_msg = MsgControlChange(control_idx, control_val / MIDI_CC_MAX)
+                    #ws_msg = MsgGotoScene(int(control_val / 5), control_idx > 1)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == midiconstants.PITCH_BEND:
                 self.bytes.append(b)
                 if len(self.bytes) == 3:
                     value_lo, value_hi = self.bytes[1:]
                     value = (value_hi << 7) | value_lo
-                    ws_msg = MsgPitchBend(last_msg_latency, value)
+                    ws_msg = MsgPitchBend(value)
                     self.bytes = []
             elif self.bytes[0] & 0xF0 == midiconstants.PROGRAM_CHANGE:
                 self.bytes.append(b)
@@ -497,7 +501,7 @@ class SerialMidiHandler:
                 value = self.bytes[1]
                 log_line(f'program change: {channel} {value}')
                 clock_tracker.cur_sync_idx = -1
-                ws_msg = MsgProgramChange(last_msg_latency, channel, value)
+                ws_msg = MsgProgramChange(channel, value)
                 self.bytes = []
             elif self.bytes[0] & 0xF0 == 0xA0:
                 self.bytes.append(b)
@@ -665,7 +669,6 @@ async def main_loop_console(tempo):
 
 
 async def main_loop_fake(tempo, cycle=0):
-    global last_msg_latency
     sync_idx = 0
     beat_idx = 0
     state_advancing = True
@@ -698,7 +701,7 @@ async def main_loop_fake(tempo, cycle=0):
         # change then takes effect from here on without the clock jumping to
         # wherever the new rate says tick `sync_idx` should have landed.
         sync_rate_hz = (tempo.bpm() * 24) / 60
-        sync_msg = MsgSync(last_msg_latency, sync_rate_hz, sync_idx)
+        sync_msg = MsgSync(sync_rate_hz, sync_idx)
         broadcast(sync_msg)
 
         if scene_cycler:
@@ -716,7 +719,7 @@ async def main_loop_fake(tempo, cycle=0):
 
             '''if new_beat_idx % 16 == 0:
                 # Advance or decrease state
-                adv_msg = MsgAdvanceSceneState(0, cur_advance_step)
+                adv_msg = MsgAdvanceSceneState(cur_advance_step)
                 broadcast(adv_msg)
                 cur_advance_state += cur_advance_step
                 if (cur_advance_state > 4 or cur_advance_state <= 0):
@@ -733,13 +736,13 @@ async def main_loop_fake(tempo, cycle=0):
                     # TODO: change state here and propagate to frontend!
                     bg = last_changed_fg
                     new_scene = 0
-                ch_scene_msg = MsgGotoScene(0, new_scene, bg)
+                ch_scene_msg = MsgGotoScene(new_scene, bg)
                 broadcast(ch_scene_msg)
                 last_changed_fg = not bg
                 cur_scenes[1 if bg else 0] = new_scene'''
 
             for beat in cur_beats:
-                beat_msg = MsgBeat(last_msg_latency, beat)
+                beat_msg = MsgBeat(beat)
                 broadcast(beat_msg)
         sync_idx += 1
         next_tick_time += 1 / sync_rate_hz
@@ -798,10 +801,10 @@ async def main_loop_audio(device, infer_beat=False):
             if detector is not None:
                 # Beats first: they're time-critical, the audio info is not.
                 for band, energy, ratio in detector.update(spectrum, now):
-                    broadcast(MsgBeat(last_msg_latency, band.channel, True))
+                    broadcast(MsgBeat(band.channel, True))
                     log_line(f"beat {band.name:6s} ch{band.channel:<2d} "
                              f"{ratio:5.2f}x avg (energy {energy:.2e})")
-            msg = MsgAudioInfo(last_msg_latency, amp_to_db(avg), amp_to_db(peak),
+            msg = MsgAudioInfo(amp_to_db(avg), amp_to_db(peak),
                                amp_to_db(spectrum), amp_to_db(smoothed), samplerate)
             broadcast(msg)
             next_tick += period
@@ -825,7 +828,7 @@ async def main_loop_fake_knob_movement(tempo):
             phase = 2 * math.pi * (elapsed - knob * beat_s) / period_s[knob]
             # Normalized [0, 1] value, left unquantized for smooth motion.
             value = (math.sin(phase) + 1) / 2
-            cc_msg = MsgControlChange(last_msg_latency, knob, value)
+            cc_msg = MsgControlChange(knob, value)
             broadcast(cc_msg)
         await asyncio.sleep(1.0 / FAKE_KNOB_UPDATE_HZ)
 
@@ -850,6 +853,12 @@ async def main():
                              'PATTERN (case-insensitive; must match exactly one) '
                              'and broadcast MsgAudioInfo. Use --list-devices to '
                              'see names.')
+    parser.add_argument('-i', '--immediate', action='store_true',
+                        help='With --device or --rtmidi: beat notes arrive on '
+                             'the beat, so show them immediately. By default '
+                             'they are expected an eighth note early, and the '
+                             'frontend delays them to land on the beat. --fake '
+                             'and --audio beats are always immediate.')
     parser.add_argument('--list-devices', action='store_true',
                         help='List audio input devices and exit')
     args = parser.parse_args()
@@ -871,6 +880,9 @@ async def main():
     if args.fake == FAKE_TAP_TEMPO and not sys.stdin.isatty():
         print('Error: --fake with no BPM needs a terminal to tap the tempo in')
         exit(1)
+
+    global beat_delayed
+    beat_delayed = bool(args.rtmidi or args.device) and not args.immediate
 
     # Resolve the audio device up front so a bad --audio pattern fails cleanly
     # here rather than tearing down the server/TaskGroup with a SystemExit.

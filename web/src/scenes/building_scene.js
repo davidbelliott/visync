@@ -238,7 +238,7 @@ class Gantry {
             this.paddle_start_y = this.paddle_base_y;
         }*/
         this.pound_movement_secs = Math.min(this.max_pound_s,
-            this.parent_scene.get_beat_delay(latency));
+            this.parent_scene.get_beat_delay());
         this.pound_clock.start();
         setTimeout(() => {
             if (sparks) {

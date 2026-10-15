@@ -356,7 +356,7 @@ export class SpinningRobotsScene extends Scene {
             setTimeout(() => {
                 const pick = rand_int(0, this.flashable_robots.length);
                 this.visor_flash[this.flashable_robots[pick]] = 1;
-            }, this.get_beat_delay(t) * 1000);
+            }, this.get_beat_delay() * 1000);
         }
     }
 }

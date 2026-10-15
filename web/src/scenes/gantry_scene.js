@@ -707,7 +707,7 @@ export class GantryScene extends Scene {
         if (channel != 1 && channel != 5) {
             return;
         }
-        const delay = this.get_beat_delay(t);
+        const delay = this.get_beat_delay();
         const drop_secs = clamp(delay, MIN_POUND_S, MAX_POUND_S);
         this.record_kick(this.clock.getElapsedTime() + Math.max(delay, drop_secs), drop_secs);
         setTimeout(() => {

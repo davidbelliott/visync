@@ -519,7 +519,7 @@ update_field_pointers() {
 
   /* ──────────────── BEAT / SYNC ──────────────── */
   handle_beat(latency, channel) {
-    const delay = this.parent ? this.parent.get_beat_delay(latency) : 0;
+    const delay = this.parent ? this.parent.get_beat_delay() : 0;
     setTimeout(() => {
         const slot = this.nextCube;
         this._spawnCubeFromTemplate(slot, channel);

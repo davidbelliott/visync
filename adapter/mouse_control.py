@@ -1,7 +1,5 @@
 import argparse
 import asyncio
-import json
-import time
 
 import websockets
 from pynput.mouse import Controller
@@ -26,19 +24,14 @@ Y_WHEEL_IDX = 9
 # Connected viewer clients (mirrors adapter.py).
 connected = set()
 
-# Last message's roundtrip latency divided by two, in seconds. Updated from the
-# ack messages clients send back.
-last_msg_latency = 0.0
-
 
 async def handler(websocket):
-    global last_msg_latency
     connected.add(websocket)
     print("Client connected")
     try:
-        async for message in websocket:
-            msg = json.loads(message)
-            last_msg_latency = (time.time() - msg['t']) / 2
+        # Nothing clients send matters; just hold the connection until it closes.
+        async for _ in websocket:
+            pass
     finally:
         connected.remove(websocket)
         print("Client disconnected")
@@ -68,9 +61,9 @@ async def main_loop_mouse(x_idx, y_idx, invert_y):
         # Broadcast unconditionally every tick (like adapter's fake knobs) so a
         # freshly-connected client always gets the current position promptly.
         websockets.broadcast(
-            connected, MsgControlChange(last_msg_latency, x_idx, x).to_json())
+            connected, MsgControlChange(x_idx, x).to_json())
         websockets.broadcast(
-            connected, MsgControlChange(last_msg_latency, y_idx, y).to_json())
+            connected, MsgControlChange(y_idx, y).to_json())
 
         await asyncio.sleep(1.0 / UPDATE_HZ)
 

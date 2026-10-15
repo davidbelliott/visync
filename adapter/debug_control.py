@@ -23,7 +23,6 @@ Controls:
 """
 
 import asyncio
-import json
 import time
 
 import dearpygui.dearpygui as dpg
@@ -67,10 +66,6 @@ VIEWPORT_H = 40 + KNOB_COUNT * 27
 # Connected viewer clients (mirrors adapter.py / apc40_control.py).
 connected = set()
 
-# Last message's roundtrip latency divided by two, in seconds. Updated from the
-# ack messages clients send back.
-last_msg_latency = 0.0
-
 # Current slider values, one per knob. Untouched sliders are never broadcast
 # (mirroring apc40_control.py's quiet idle knobs) so they can't override
 # values set on the front-end by other controllers or scene defaults.
@@ -86,7 +81,6 @@ touched_theme = None
 
 
 async def handler(websocket):
-    global last_msg_latency
     connected.add(websocket)
     print("Client connected")
     try:
@@ -94,10 +88,10 @@ async def handler(websocket):
         # moved, so reconnects (page reloads) keep the panel state.
         for idx in sorted(touched):
             await websocket.send(
-                MsgControlChange(last_msg_latency, idx, values[idx]).to_json())
-        async for message in websocket:
-            msg = json.loads(message)
-            last_msg_latency = (time.time() - msg['t']) / 2
+                MsgControlChange(idx, values[idx]).to_json())
+        # Nothing clients send matters; just hold the connection until it closes.
+        async for _ in websocket:
+            pass
     finally:
         connected.remove(websocket)
         print("Client disconnected")
@@ -190,8 +184,7 @@ async def gui_loop():
             for idx in sorted(dirty):
                 websockets.broadcast(
                     connected,
-                    MsgControlChange(
-                        last_msg_latency, idx, values[idx]).to_json())
+                    MsgControlChange(idx, values[idx]).to_json())
             dirty.clear()
 
             dpg.render_dearpygui_frame()

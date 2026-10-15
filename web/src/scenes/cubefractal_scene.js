@@ -413,7 +413,7 @@ export class CubeFractalScene extends Scene {
 
     handle_beat(t, channel) {
         if (channel == 1) {
-            setTimeout(() => this.kick(), this.get_beat_delay(t) * 1000);
+            setTimeout(() => this.kick(), this.get_beat_delay() * 1000);
         }
     }
 }

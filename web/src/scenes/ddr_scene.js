@@ -369,7 +369,7 @@ export class DDRScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay(t);
+        const delay = this.get_beat_delay();
         setTimeout(() => {
             if ((channel == 1 || channel == 3) && this.arrows) {
                 this.arrows[this.cur_arrow_idx].start_anim(rand_int(0, 4), 1);

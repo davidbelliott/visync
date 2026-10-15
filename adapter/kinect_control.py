@@ -39,7 +39,6 @@ Run:
 
 import argparse
 import asyncio
-import json
 import math
 import pathlib
 import time
@@ -165,19 +164,14 @@ POSE_CONNECTIONS = [
 # Connected viewer clients (mirrors adapter.py / mouse_control.py).
 connected = set()
 
-# Last message's roundtrip latency divided by two, in seconds. Updated from the
-# ack messages clients send back.
-last_msg_latency = 0.0
-
 
 async def handler(websocket):
-    global last_msg_latency
     connected.add(websocket)
     print("Client connected")
     try:
-        async for message in websocket:
-            msg = json.loads(message)
-            last_msg_latency = (time.time() - msg['t']) / 2
+        # Nothing clients send matters; just hold the connection until it closes.
+        async for _ in websocket:
+            pass
     finally:
         connected.remove(websocket)
         print("Client disconnected")
@@ -503,9 +497,7 @@ async def main_loop(source, debug):
                         pts + frame_offset_m(norm_landmarks)
                         for pts, norm_landmarks in zip(pts_list, norm_landmarks_list)
                     ]
-                    pose_msg = MsgPose(
-                        last_msg_latency,
-                        [pts.tolist() for pts in positioned_pts_list])
+                    pose_msg = MsgPose([pts.tolist() for pts in positioned_pts_list])
                     websockets.broadcast(connected, pose_msg.to_json())
 
                 # Broadcast every tick once we have values (like mouse_control)
@@ -513,7 +505,7 @@ async def main_loop(source, debug):
                 for idx, value in smoothed.items():
                     websockets.broadcast(
                         connected,
-                        MsgControlChange(last_msg_latency, idx, value).to_json())
+                        MsgControlChange(idx, value).to_json())
 
                 if debug:
                     key = draw_debug(cv2, frame_rgb, norm_landmarks_list,

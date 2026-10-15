@@ -210,7 +210,7 @@ export class HelixScene extends Scene {
     }
 
     handle_beat(est_latency, channel) {
-        const delay = this.get_beat_delay(est_latency);
+        const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1 || channel == 3) {
                 for (const c of this.curves) {

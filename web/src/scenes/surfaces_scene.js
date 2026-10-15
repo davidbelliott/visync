@@ -114,7 +114,7 @@ export class SurfacesScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay(t);
+        const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 4) {
                 this.beat_clock.start();

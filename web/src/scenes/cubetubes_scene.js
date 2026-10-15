@@ -440,7 +440,7 @@ export class CubeTubesScene extends Scene {
     }
 
     handle_beat(t, channel) {
-        const delay = this.get_beat_delay(t);
+        const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1) {
                 this.beat_clock.start();

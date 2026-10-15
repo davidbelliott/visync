@@ -76,12 +76,17 @@ const MSG_TYPE_GOTO_SCENE = 2;
 const MSG_TYPE_ADVANCE_SCENE_STATE = 3;
 const MSG_TYPE_PROMOTION = 4;
 const MSG_TYPE_PROMOTION_GRANT = 5;
-const MSG_TYPE_ACK = 6;
 const MSG_TYPE_PITCH_BEND = 7;
 const MSG_TYPE_CONTROL_CHANGE = 8;
 const MSG_TYPE_AUDIO_INFO = 10;
 // Name of the act currently playing (see adapter/message.py's MsgPerformer).
 const MSG_TYPE_PERFORMER = 11;
+// Our own timestamp, echoed back by the adapter so we can time the round trip
+// (see connect()).
+const MSG_TYPE_PING = 12;
+// Whether beats arrive early for us to delay (see adapter/message.py's
+// MsgBeatMode); sent by the adapter as we connect.
+const MSG_TYPE_BEAT_MODE = 13;
 
 // Widths the header's fixed fields are padded to, so the '|' separators hold
 // still as values change (#header is white-space: pre). The scene list sits
@@ -109,6 +114,11 @@ const HUD_STATS_INTERVAL_S = 0.5;
 const SKEW_SMOOTHING = 0.99;
 const LATENCY_SMOOTHING = 0.9;
 const STALE_THRESHOLD = 0.1;
+// How often to ping the adapter to measure our latency to it, in ms.
+const PING_INTERVAL_MS = 250;
+// Latency beyond the network's that we can't measure - display pipeline,
+// audio output - in seconds, calibrated by hand. Added to the measured
+// latency to get expected_latency().
 //const EXTRA_LATENCY = 0.220;
 const EXTRA_LATENCY = 0.0;
 
@@ -162,12 +172,27 @@ function relay_url() {
 
 function connect() {
     const socket = new WebSocket(relay_url());
+    let ping_timer = null;
     socket.addEventListener('open', function() {
         context.set_connected(true);
+        ping_timer = setInterval(() => {
+            socket.send(JSON.stringify(
+                {msg_type: MSG_TYPE_PING, t: performance.now() / 1000}));
+        }, PING_INTERVAL_MS);
     });
     socket.addEventListener('message', function(e) {
 	const msg = JSON.parse(e.data);
         const type = msg.msg_type;
+
+        // Our own ping, echoed back: half its round trip is our one-way
+        // latency to the adapter. Its t is on our clock, not the adapter's,
+        // so it stays out of the skew estimate below.
+        if (type == MSG_TYPE_PING) {
+            const latency = (performance.now() / 1000 - msg.t) / 2;
+            context.est_avg_latency = context.est_avg_latency === undefined ? latency :
+                context.est_avg_latency * LATENCY_SMOOTHING + latency * (1 - LATENCY_SMOOTHING);
+            return;
+        }
 
         // Knob values are continuous state, not events scheduled against the
         // beat: they want no latency compensation, no ack, and none of the
@@ -190,15 +215,7 @@ function connect() {
             return;
         }
 
-        // Update average latency with the one-way latency seen last
-        context.est_avg_latency = context.est_avg_latency ?
-            context.est_avg_latency * LATENCY_SMOOTHING + msg.latency * (1 - LATENCY_SMOOTHING) :
-            msg.latency;
-
-        /*const est_tot_latency = skew - context.est_avg_skew // extra latency of just this message
-            + context.est_avg_latency   // average latency
-            + EXTRA_LATENCY;            // extra latency (manual calibration)*/
-        const est_tot_latency = /*msg.latency +*/ EXTRA_LATENCY;
+        const est_tot_latency = context.expected_latency();
 
         //console.log(`Skew: ${skew} | ${context.est_avg_skew}`);
         //console.log(`Latency: ${context.est_avg_latency}`);
@@ -216,13 +233,14 @@ function connect() {
                 msg.spectrum_smoothed, msg.samplerate);
         } else if (type == MSG_TYPE_PERFORMER) {
             context.set_performer(msg.name);
+        } else if (type == MSG_TYPE_BEAT_MODE) {
+            context.set_beat_mode(msg.delayed);
         }
-        const resp = {msg_type: MSG_TYPE_ACK, t: msg.t};
-        socket.send(JSON.stringify(resp));
     });
 
     socket.addEventListener('close', function(e) {
         context.set_connected(false);
+        clearInterval(ping_timer);
         // Try to reconnect after 1 second
         //console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
         setTimeout(function() {
@@ -406,8 +424,6 @@ class GraphicsContext {
         this.hud_window_start = performance.now() / 1000;
         // Clickable header fields (see index.html). Scene list entries are
         // rebuilt on every change, so their clicks are caught on the list.
-        document.getElementById('mode').addEventListener('click',
-            () => this.toggle_beat_mode());
         document.getElementById('scenes').addEventListener('click', (e) => {
             const entry = e.target.closest('[data-slot]');
             if (entry) {
@@ -632,6 +648,7 @@ class GraphicsContext {
             this.scene.add( mesh );
         }
 
+        // Until the adapter says otherwise (see set_beat_mode).
         this.immediate_mode = true;
 
         this.on_window_resize();
@@ -1095,8 +1112,6 @@ class GraphicsContext {
             // Shift+digit: switch which slot subsequent digit presses
             // target, without changing any scene.
             this.set_active_slot(this.key_digit_to_slot(shift_chars.indexOf(e.key)));
-        } else if (e.code == "Space") {
-            this.toggle_beat_mode();
         } else if (e.shiftKey && e.key == "ArrowLeft") {
             this.shift_slots(-1);
         } else if (e.shiftKey && e.key == "ArrowRight") {
@@ -1114,22 +1129,26 @@ class GraphicsContext {
         }
     }
 
+    // How long after the adapter sends something it's seen and heard here,
+    // in seconds: our measured one-way network latency plus EXTRA_LATENCY.
+    expected_latency() {
+        return (this.est_avg_latency ?? 0) + EXTRA_LATENCY;
+    }
+
     // `sync_idx` counts MIDI clocks, MIDI_SYNCS_PER_BEAT per quarter note -
     // not beats, despite what this parameter used to be called.
     handle_sync(latency, sync_rate_hz, sync_idx) {
-        // Delivered a beat late, like beats in delayed mode.
-        const delay = this.immediate_mode ? 0 : MIDI_SYNCS_PER_BEAT / sync_rate_hz - latency;
-
-        // Wait until the next beat to deliver the sync message
+        // Clock sync_idx sounded `latency` ago. Deliver the clock N ahead of
+        // it, for the fewest N that cover the latency, at the moment that
+        // one sounds, so scenes stay on the audible grid in either beat mode.
+        const period = 1 / sync_rate_hz;
+        const n = Math.max(0, Math.ceil(latency / period));
+        const delay = n * period - latency;
         setTimeout(() => {
             this.scenes.forEach((scene) => {
-                scene.handle_sync_raw(sync_rate_hz, sync_idx + 1);
+                scene.handle_sync_raw(sync_rate_hz, sync_idx + n);
             });
         }, delay * 1000);
-
-        /*this.scenes.forEach((scene) => {
-            scene.handle_sync_raw(sync_rate_hz, sync_idx);
-        });*/
         // Update overlay with sync rate hz (convert to bpm)
         const bpm = sync_rate_hz * 60 / MIDI_SYNCS_PER_BEAT;
         document.getElementById("bpm").innerHTML = bpm.toFixed(0);
@@ -1146,10 +1165,10 @@ class GraphicsContext {
         }
     }
 
-    // Space, or clicking the header's mode field: immediate vs delayed
-    // (latency-compensated) beats.
-    toggle_beat_mode() {
-        this.immediate_mode = !this.immediate_mode;
+    // Immediate vs delayed (latency-compensated) beats, as set by the
+    // adapter's input mode and --immediate flag.
+    set_beat_mode(delayed) {
+        this.immediate_mode = !delayed;
         this.update_mode_hud();
     }
 

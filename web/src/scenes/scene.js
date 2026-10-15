@@ -15,6 +15,9 @@ import {
 // the adapter's clock also uses). Always one beat per quarter note: scenes
 // never re-divide the clock, so none drops into half-time at fast tempos.
 export const MIDI_SYNCS_PER_BEAT = 24;
+// In delayed mode, how far ahead of the beat it accompanies the hardware sends
+// each beat event, in MIDI clocks: an eighth note.
+const BEAT_LEAD_SYNCS = MIDI_SYNCS_PER_BEAT / 2;
 
 export class Scene extends THREE.Scene {
     constructor(context, shortname='scene', num_states=1) {
@@ -118,12 +121,15 @@ export class Scene extends THREE.Scene {
     }
 
     // Returns the time in seconds between a beat event being received and the
-    // beat audio being played, assuming midi events for the beat are placed
-    // a quarter note earlier in the grid than the actual beats. Accounts for
-    // latency passed in as an argument.
-    get_beat_delay(est_latency=0) {
-        return this.context.immediate_mode ? 0.0 :
-            MIDI_SYNCS_PER_BEAT / this.sync_rate_hz - est_latency;
+    // beat audio being played. In delayed mode the hardware sends each beat
+    // BEAT_LEAD_SYNCS early, and it reaches us the context's expected latency
+    // after that; in immediate mode beats are shown as they arrive.
+    get_beat_delay() {
+        if (this.context.immediate_mode) {
+            return 0.0;
+        }
+        return Math.max(0,
+            BEAT_LEAD_SYNCS / this.sync_rate_hz - this.context.expected_latency());
     }
 
     handle_sync(latency, sync_rate_hz, sync_idx) {

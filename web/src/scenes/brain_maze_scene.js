@@ -606,7 +606,7 @@ export class BrainMazeScene extends Scene {
         if (channel == 1) {
             setTimeout(() => {
                 this.brain.start_scan();
-            }, this.get_beat_delay(t) * 1000);
+            }, this.get_beat_delay() * 1000);
         }
     }
 }

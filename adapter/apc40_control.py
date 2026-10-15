@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import json
 import time
 
 import websockets
@@ -57,19 +56,14 @@ connected = set()
 # (the MIDI callback hands updates over via call_soon_threadsafe).
 targets = {}
 
-# Last message's roundtrip latency divided by two, in seconds. Updated from the
-# ack messages clients send back.
-last_msg_latency = 0.0
-
 
 async def handler(websocket):
-    global last_msg_latency
     connected.add(websocket)
     print("Client connected")
     try:
-        async for message in websocket:
-            msg = json.loads(message)
-            last_msg_latency = (time.time() - msg['t']) / 2
+        # Nothing clients send matters; just hold the connection until it closes.
+        async for _ in websocket:
+            pass
     finally:
         connected.remove(websocket)
         print("Client disconnected")
@@ -138,7 +132,7 @@ async def broadcast_loop():
             smoothed[idx] = value
             websockets.broadcast(
                 connected,
-                MsgControlChange(last_msg_latency, idx, value).to_json())
+                MsgControlChange(idx, value).to_json())
         await asyncio.sleep(max(0.0, period - (time.time() - tick)))
 
 

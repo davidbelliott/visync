@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { Scene } from './scene.js';
-import { ScannedBrain } from '../components/scanned_brain.js';
+import { Head } from '../components/head.js';
 import { MAZE_DIRS } from '../infinite_maze.js';
 import { MazeLevels } from '../maze_levels.js';
 import { MazeLevel } from '../components/maze_level.js';
@@ -13,33 +13,33 @@ import { lerp_scalar, ease, clamp, Spark } from '../util.js';
 // Rotation (rad): yaw in lockstep with the other stepped scenes (see
 // stepped_rotation.js), every 45 deg from a diagonal base; pitch locked at
 // the isometric tilt, looking down into the maze. The view pivots on the
-// brain's centre, which stays in the middle of the screen.
+// head's centre, which stays in the middle of the screen.
 const YAW_BASE = Math.PI / 4;
 const PITCH_BASE = ISOMETRIC_TILT;
 
 // The maze (see MazeLevels, MazeLevel), world units: the walls' thickness
 // and standard height (a level's walls are a multiple of it, and each level
 // stands on top of the walls of the one below). Each level has its own
-// layout, colour and character; only the brain's level shows, crossfading to
+// layout, colour and character; only the head's level shows, crossfading to
 // the next as it takes a staircase.
 const WALL_T = 0.5;
 const WALL_H = 4;
-// The brain stands as tall as the walls (the model is ~162 units tall and
-// ~153 wide, so ~3.8 wide here, and ~4.7 long: it still turns in a cell).
-const BRAIN_MODEL_HEIGHT = 162;
-const BRAIN_MODEL_WIDTH = 153;
-const BRAIN_SCALE = WALL_H / BRAIN_MODEL_HEIGHT;
-// Claustrophobic corridors, CORRIDOR_BRAINS times the brain's width between
-// the walls (~5.7), which sets the cell pitch (~6.2).
-const CORRIDOR_BRAINS = 1.5;
-const CELL = CORRIDOR_BRAINS * BRAIN_MODEL_WIDTH * BRAIN_SCALE + WALL_T;
-// Fog of war, world units: the maze is lit by nothing but the brain's
+// The head stands as tall as the walls (the model is ~28 units tall and
+// ~19 wide and deep, so ~2.7 across here: it turns easily in a cell).
+const HEAD_MODEL_HEIGHT = 28.2;
+const HEAD_SCALE = WALL_H / HEAD_MODEL_HEIGHT;
+// Corridors CORRIDOR_W world units between the walls, which sets the cell
+// pitch (~6.2): sized for the brain this scene first walked (1.5 times its
+// width), kept so the fog and maze window (below) stay tuned.
+const CORRIDOR_W = 5.7;
+const CELL = CORRIDOR_W + WALL_T;
+// Fog of war, world units: the maze is lit by nothing but the head's
 // light, whose range ends at FOG_FAR, so it darkens to black with distance;
 // edges fade (eased) from FOG_NEAR to FOG_FAR, unless FOG_EDGES is false:
 // then the maze's wireframe (walls, stairs, carpets) is drawn at full
 // intensity everywhere, and only the fills darken. The cones fade
 // with the fog either way, edges and all. The maze window drawn
-// (cells either side of the brain's) spans whole cells past FOG_FAR, so
+// (cells either side of the head's) spans whole cells past FOG_FAR, so
 // nothing pops in; or, with unfogged edges, past the screen at the widest
 // shared zoom (an isometric view ~50 units from centre to corner, plus a
 // cell's walk before the window recentres).
@@ -49,7 +49,7 @@ const FOG_EDGES = false;
 const FOG_CELLS = Math.ceil(FOG_FAR / CELL) + 1;
 const WINDOW_HALF = FOG_EDGES ? FOG_CELLS : 9;
 
-// A translucent black floor under the brain (as in the drum kit scene),
+// A translucent black floor under the head (as in the drum kit scene),
 // dimming any scene layered behind this one: its opacity, and its size
 // (world units), enough to cover the screen at the widest shared zoom.
 const FLOOR_OPACITY = 0.5;
@@ -72,7 +72,7 @@ const CONE_SPIN = Math.PI / 8;
 // cell) so neighbours drift in and out of step.
 const BOB_HEIGHT = 0.75;
 const BOB_BEATS = 4;
-// The brain heads straight for what it can see down a straight run of open
+// The head heads straight for what it can see down a straight run of open
 // cells, up to SIGHT_CELLS away (the nearest if several): first a staircase
 // it has not taken, else a cone.
 const SIGHT_CELLS = FOG_CELLS;
@@ -82,7 +82,7 @@ const MAX_CONES = 64;               // in view at once (two levels); ~20 typical
 // first.
 const MAX_COLLECTED = 4096;
 const MAX_TAKEN = 1024;
-// When the brain reaches a cone it eats it: the brain flashes white, and
+// When the head reaches a cone it eats it: the head flashes white, and
 // plus-sign sparks (the shared Spark, as a cross facing the viewer, small as
 // gantry's: SPARK_SIZE is its half-width) burst from it, one along each of
 // SPARK_DIRS (an icosahedron's 12 vertices, spread evenly over every
@@ -102,12 +102,12 @@ const SPARK_BEATS = 1.5;
 const SPARK_SIZE = 0.2;
 const SPARK_COLOR = 'white';
 
-// The brain walks the maze one cell per MOVE_BEATS, arriving in each cell on
+// The head walks the maze one cell per MOVE_BEATS, arriving in each cell on
 // the beat, turning only at right angles (it faces the way it goes, turning
 // over the first TURN_FRACTION of a step). A staircase is crossed in one move,
 // from the cell before it to the one past it (its k cells and one more, over
 // as many MOVE_BEATS), rising or sinking a level only while on the steps,
-// the levels crossfading as it does; the brain never stops on the stairs. With nothing in
+// the levels crossfading as it does; the head never stops on the stairs. With nothing in
 // sight (see SIGHT_CELLS) it picks the open way that best follows its heading, never
 // turning straight back unless at a dead end, and shunning cells by
 // VISIT_PENALTY per earlier visit so it backs out of dead ends and doesn't
@@ -127,14 +127,14 @@ const MAX_REMEMBERED = 2048;
 // towards +z; DEFAULT_HEADING until the knob moves.
 const DEFAULT_HEADING = Math.PI / 4;
 
-// The only light, riding over the brain (in brain_group's frame, origin at
-// the brain's underside), LIGHT_ABOVE_WALLS world units above the tops of its
+// The only light, riding over the head (in head_group's frame, origin at
+// the head's underside), LIGHT_ABOVE_WALLS world units above the tops of its
 // level's walls, so it rises with taller levels (blending between levels'
 // heights on the stairs). Decay 1 for a soft falloff, cut off at FOG_FAR (see
 // the fog of war). A spotlight pointing straight down, its cone (widened to
 // suit its height) reaching FOG_FAR across the floor, so it casts shadows in
 // one pass (a point light would need six): walls block it, so only what the
-// brain can see is lit. LIGHT_PENUMBRA softens the cone's rim (out in the
+// head can see is lit. LIGHT_PENUMBRA softens the cone's rim (out in the
 // fog anyway).
 const LIGHT_ABOVE_WALLS = 2;
 const LIGHT_INTENSITY = 6;
@@ -146,7 +146,7 @@ const SHADOW_MAP_SIZE = 1024;
 const SHADOW_BIAS = -0.0005;
 const SHADOW_NORMAL_BIAS = 0.02;
 // Shadows also darken the scenes layered behind, through a shadow-only plane
-// on the brain's floor: this dark where fully shadowed.
+// on the head's floor: this dark where fully shadowed.
 const FLOOR_SHADOW_OPACITY = 0.6;
 
 export class BrainMazeScene extends Scene {
@@ -163,10 +163,10 @@ export class BrainMazeScene extends Scene {
         this.camera = this.cam_orth;
         this.clear();
 
-        // base_group turns about the brain's centre; world_group drops the
-        // floor the brain stands on (and the brain) so that centre is at the
-        // origin, following the brain up and down stairs; maze_group slides
-        // the maze under the brain, its origin on the brain's level's floor
+        // base_group turns about the head's centre; world_group drops the
+        // floor the head stands on (and the head) so that centre is at the
+        // origin, following the head up and down stairs; maze_group slides
+        // the maze under the head, its origin on the head's level's floor
         // under the window's centre cell.
         this.base_group = new THREE.Group();
         this.base_group.rotation.x = PITCH_BASE;
@@ -180,21 +180,21 @@ export class BrainMazeScene extends Scene {
         this.maze_group = new THREE.Group();
         this.world_group.add(this.maze_group);
 
-        this.brain_group = new THREE.Group();
-        this.world_group.add(this.brain_group);
-        this.brain = new ScannedBrain(BRAIN_SCALE, { shadows: true });
-        this.brain_group.add(this.brain);
+        this.head_group = new THREE.Group();
+        this.world_group.add(this.head_group);
+        this.head = new Head(HEAD_SCALE, { shadows: true });
+        this.head_group.add(this.head);
         // Placed (height and cone) each frame by place_light.
         const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
             Math.PI / 4, LIGHT_PENUMBRA, LIGHT_DECAY);
-        this.brain_group.add(light, light.target);     // target at the brain's feet
+        this.head_group.add(light, light.target);     // target at the head's feet
         light.castShadow = true;
         light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         light.shadow.camera.near = 0.5;
         light.shadow.bias = SHADOW_BIAS;
         light.shadow.normalBias = SHADOW_NORMAL_BIAS;
 
-        // Two level views: the brain's level, and the one a staircase leads to
+        // Two level views: the head's level, and the one a staircase leads to
         // (shown, crossfading, only while taking it).
         this.levels = new MazeLevels();
         const view_options = {
@@ -211,7 +211,7 @@ export class BrainMazeScene extends Scene {
         this.next_view.set_opacity(0);
         this.maze_group.add(this.view, this.next_view);
 
-        // The black floor follows the brain's feet. It writes no depth and
+        // The black floor follows the head's feet. It writes no depth and
         // draws before the scene's other translucent parts, so it dims only
         // what lies behind the scene, never the edges drawn on the floor;
         // pushed back past the levels' floor fills, which win where solid.
@@ -272,7 +272,7 @@ export class BrainMazeScene extends Scene {
             this.sparks.push(spark);
         }
 
-        // The walk: the level and cell the brain set out from, the step it
+        // The walk: the level and cell the head set out from, the step it
         // is taking (MAZE_DIRS entry) and its climb (+1 up a staircase, -1 down,
         // 0 level), beats elapsed and when the step began, its facing (rad)
         // turning from facing_from to facing_to, how often it has entered
@@ -308,21 +308,21 @@ export class BrainMazeScene extends Scene {
         }
         const frac = (this.beats - this.step_start) / (MOVE_BEATS * this.cells);
 
-        // Slide the maze under the brain, which is part way along its step
+        // Slide the maze under the head, which is part way along its step
         // from the window's centre cell (and up or down stairs).
         const along = EASED_STEPS ? ease(frac) : frac;
         const bx = this.step[0] * along * this.cells * CELL;
         const bz = this.step[1] * along * this.cells * CELL;
         const rise = this.stairs_rise(along);
         this.maze_group.position.set(-bx, 0, -bz);
-        this.brain_group.position.y = rise;
+        this.head_group.position.y = rise;
         this.floor.position.y = rise;
         this.shadow_floor.position.y = rise;
-        this.world_group.position.y = -rise - this.brain.height / 2;
-        this.brain_group.rotation.y = lerp_scalar(this.facing_from, this.facing_to,
+        this.world_group.position.y = -rise - this.head.height / 2;
+        this.head_group.rotation.y = lerp_scalar(this.facing_from, this.facing_to,
             ease(clamp(frac / TURN_FRACTION, 0, 1)));
 
-        // On stairs, the levels crossfade as the brain climbs.
+        // On stairs, the levels crossfade as the head climbs.
         const fade = this.rise_h > 0 ? Math.abs(rise) / this.rise_h : 0;
         this.view.set_opacity(1 - fade);
         this.next_view.set_opacity(fade);
@@ -332,7 +332,7 @@ export class BrainMazeScene extends Scene {
             view.update();
         }
 
-        this.brain.update(d_beats);
+        this.head.update(d_beats);
         this.base_group.rotation.x = this.stepped_pitch();
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
         this.update_cones(bx, bz, fade);
@@ -345,7 +345,7 @@ export class BrainMazeScene extends Scene {
         }
     }
 
-    // Set the light LIGHT_ABOVE_WALLS over the walls of the brain's level,
+    // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
     // blended `fade` (0..1) of the way to the next level's on the stairs,
     // its cone reaching FOG_FAR across the floor from there.
     place_light(fade) {
@@ -376,7 +376,7 @@ export class BrainMazeScene extends Scene {
         return 0;
     }
 
-    // Lay out both views around the brain's cell: its level, and (if the
+    // Lay out both views around the head's cell: its level, and (if the
     // step under way is a staircase) the level it leads to, offset up or down.
     build_views() {
         this.view.build(this.cell_i, this.cell_j);
@@ -388,7 +388,7 @@ export class BrainMazeScene extends Scene {
         this.list_cones();
     }
 
-    // List the uneaten cones in view: around the brain's cell on its level,
+    // List the uneaten cones in view: around the head's cell on its level,
     // and on the level a staircase under way leads to.
     list_cones() {
         this.cone_cells.length = 0;
@@ -407,7 +407,7 @@ export class BrainMazeScene extends Scene {
     }
 
     // Pose the cones (spin, bob) and fade them with the fog, by distance
-    // from the brain at (bx, bz), and with their level's crossfade.
+    // from the head at (bx, bz), and with their level's crossfade.
     update_cones(bx, bz, fade) {
         if (this.cones === null) {
             return;
@@ -430,13 +430,13 @@ export class BrainMazeScene extends Scene {
         this.cones.end();
     }
 
-    // Burst plus signs from the brain's centre, at maze_group's origin.
+    // Burst plus signs from the head's centre, at maze_group's origin.
     spawn_sparks() {
         const beats_per_sec = this.get_local_bpm() / 60;
         for (const dir of SPARK_DIRS) {
             const spark = this.sparks[this.next_spark];
             this.next_spark = (this.next_spark + 1) % MAX_SPARKS;
-            spark.position.set(0, this.brain.height / 2, 0);
+            spark.position.set(0, this.head.height / 2, 0);
             spark.velocity.copy(dir).multiplyScalar(SPARK_SPEED * beats_per_sec);
             spark.acceleration.set(0, SPARK_LIFT * beats_per_sec * beats_per_sec, 0);
             spark.life_s = SPARK_BEATS / beats_per_sec;
@@ -453,7 +453,7 @@ export class BrainMazeScene extends Scene {
         this.cell_i += si * cells;
         this.cell_j += sj * cells;
         if (climb != 0) {
-            // The view the staircase led to becomes the brain's level.
+            // The view the staircase led to becomes the head's level.
             this.level += climb;
             [this.view, this.next_view] = [this.next_view, this.view];
             this.view.position.y = 0;
@@ -478,7 +478,7 @@ export class BrainMazeScene extends Scene {
             if (this.collected.size > MAX_COLLECTED) {
                 this.collected.delete(this.collected.values().next().value);
             }
-            this.brain.flash();
+            this.head.flash();
             this.spawn_sparks();
         }
 
@@ -510,7 +510,7 @@ export class BrainMazeScene extends Scene {
     }
 
     // Whether cell (i, j) of level L holds an uneaten cone (never a staircase's
-    // cell, which the brain can't stand in).
+    // cell, which the head can't stand in).
     has_cone(level, i, j) {
         return this.levels.maze(level).cell_random(i, j) < CONE_P &&
             !this.collected.has(`${level},${i},${j}`) && !this.levels.stairs_cell(level, i, j);
@@ -600,13 +600,5 @@ export class BrainMazeScene extends Scene {
         // are a dead end on both levels, open only to the cells that cross
         // it).
         return [0, 0, 0, null, 1, 0];
-    }
-
-    handle_beat(t, channel) {
-        if (channel == 1) {
-            setTimeout(() => {
-                this.brain.start_scan();
-            }, this.get_beat_delay() * 1000);
-        }
     }
 }

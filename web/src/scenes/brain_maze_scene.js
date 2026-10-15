@@ -127,29 +127,18 @@ const MAX_REMEMBERED = 2048;
 // towards +z; DEFAULT_HEADING until the knob moves.
 const DEFAULT_HEADING = Math.PI / 4;
 
-// The only light, riding over the head (in head_group's frame, origin at
-// the head's underside), LIGHT_ABOVE_WALLS world units above the tops of its
-// level's walls, so it rises with taller levels (blending between levels'
-// heights on the stairs). Decay 1 for a soft falloff, cut off at FOG_FAR (see
-// the fog of war). A spotlight pointing straight down, its cone (widened to
-// suit its height) reaching FOG_FAR across the floor, so it casts shadows in
-// one pass (a point light would need six): walls block it, so only what the
-// head can see is lit. LIGHT_PENUMBRA softens the cone's rim (out in the
-// fog anyway).
+// The only light, riding with the head (in head_group's frame, origin at
+// the head's underside, face towards +z, so it turns with it): LIGHT_AHEAD
+// world units in front of the face's centre line, lighting the face's front
+// and top, and LIGHT_ABOVE_WALLS above the tops of its level's walls, so it
+// rises with taller levels (blending between levels' heights on the stairs).
+// Decay 1 for a soft falloff, cut off at FOG_FAR (see the fog of war). A
+// point light casting shadows (six passes, one per cube face): walls block
+// it, so only what the head can see is lit.
 const LIGHT_ABOVE_WALLS = 2;
+const LIGHT_AHEAD = 2.6;
 const LIGHT_INTENSITY = 6;
 const LIGHT_DECAY = 1;
-const LIGHT_PENUMBRA = 0.2;
-// A small fill light on the face, riding with the head as it turns (in
-// head_group's frame, face towards +z): FACE_LIGHT_POS world units in front
-// of and above the forehead (the head is ~4 tall, its face ~1.4 in front of
-// centre), so it lights the face's front and top from ~2.5 away. Physical
-// falloff (decay 2) cut off at FACE_LIGHT_RANGE, so it only grazes the
-// nearest walls; no shadows (a point light would need six passes).
-const FACE_LIGHT_POS = new THREE.Vector3(0, 4.6, 2.6);
-const FACE_LIGHT_INTENSITY = 6;
-const FACE_LIGHT_RANGE = 5;
-const FACE_LIGHT_DECAY = 2;
 // Shadow map resolution (px a side; lower it on slow hardware), and biases
 // against self-shadowing acne on the walls.
 const SHADOW_MAP_SIZE = 1024;
@@ -194,19 +183,15 @@ export class BrainMazeScene extends Scene {
         this.world_group.add(this.head_group);
         this.head = new Head(HEAD_SCALE, { shadows: true });
         this.head_group.add(this.head);
-        // Placed (height and cone) each frame by place_light.
-        const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
-            Math.PI / 4, LIGHT_PENUMBRA, LIGHT_DECAY);
-        this.head_group.add(light, light.target);     // target at the head's feet
+        // Raised each frame by place_light.
+        const light = this.light = new THREE.PointLight('white', LIGHT_INTENSITY, FOG_FAR,
+            LIGHT_DECAY);
+        this.head_group.add(light);
         light.castShadow = true;
         light.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
         light.shadow.camera.near = 0.5;
         light.shadow.bias = SHADOW_BIAS;
         light.shadow.normalBias = SHADOW_NORMAL_BIAS;
-        const face_light = new THREE.PointLight('white', FACE_LIGHT_INTENSITY,
-            FACE_LIGHT_RANGE, FACE_LIGHT_DECAY);
-        face_light.position.copy(FACE_LIGHT_POS);
-        this.head_group.add(face_light);
 
         // Two level views: the head's level, and the one a staircase leads to
         // (shown, crossfading, only while taking it).
@@ -361,7 +346,7 @@ export class BrainMazeScene extends Scene {
 
     // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
     // blended `fade` (0..1) of the way to the next level's on the stairs,
-    // its cone reaching FOG_FAR across the floor from there.
+    // LIGHT_AHEAD in front of the face.
     place_light(fade) {
         const wall_h = (level) => WALL_H * this.levels.params(level).height;
         let h = wall_h(this.level);
@@ -369,8 +354,7 @@ export class BrainMazeScene extends Scene {
             h = lerp_scalar(h, wall_h(this.level + this.climb), fade);
         }
         const y = h + LIGHT_ABOVE_WALLS;
-        this.light.position.set(0, y, 0);
-        this.light.angle = Math.atan2(FOG_FAR, y);
+        this.light.position.set(0, y, LIGHT_AHEAD);
     }
 
     // Height (world units) along a staircase move `along` (0..1) of the way

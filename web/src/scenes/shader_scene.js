@@ -156,6 +156,9 @@ export class ShaderScene extends Scene {
             stencilBuffer: false
         };
         
+        // Free the old ones' GPU memory first (see GraphicsContext.recreate_buffers).
+        this.renderTarget?.dispose();
+        this.prevRender?.dispose();
         this.renderTarget = new THREE.WebGLRenderTarget(width, height, rtOptions);
         this.prevRender = new THREE.WebGLRenderTarget(width, height, rtOptions);
     }

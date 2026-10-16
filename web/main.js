@@ -777,6 +777,9 @@ class GraphicsContext {
     }
 
     recreate_buffers(width, height) {
+        // Free the old targets' GPU memory: resizes (on mobile, whenever the
+        // address bar shows or hides) would otherwise leak a set each time.
+        this.buffers?.forEach((b) => b.dispose());
         this.buffers = [];
         for (let i = 0; i < 2; i++) {
             this.buffers.push(new THREE.WebGLRenderTarget(width, height, {

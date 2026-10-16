@@ -273,12 +273,9 @@ export class InstancedGeometryCollection {
         return this.instancedGeometry.instanceCount++;
     }
 
-    get_pos(idx) {
-        const arr = [];
-        for (let i = 0; i < 3; i++) {
-            arr.push(this.offsets.getComponent(idx, i));
-        }
-        return new THREE.Vector3(...arr);
+    // Written to target if given (for per-frame loops), else a new vector.
+    get_pos(idx, target = new THREE.Vector3()) {
+        return target.fromBufferAttribute(this.offsets, idx);
     }
 
     set_pos(idx, pos) {

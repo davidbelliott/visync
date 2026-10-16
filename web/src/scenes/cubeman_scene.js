@@ -20,6 +20,12 @@ import {
     BeatClock
 } from '../util.js';
 
+// The tunnel's travel (world units) is rebased by this much, moving the
+// squares back with it, whenever it passes it: it would otherwise grow for as
+// long as the page runs, until float32 precision on the GPU made the squares
+// jitter (hundreds of thousands of units after a few hours).
+const TUNNEL_REBASE = 1000;
+
 class TunnelMovementBackground {
     constructor(parent_scene) {
         this.parent_scene = parent_scene;
@@ -29,7 +35,6 @@ class TunnelMovementBackground {
         this.squares_group = new THREE.Group();
         this.num_squares = 80;
         this.square_sep = 8;
-        this.clock = new THREE.Clock();
         this.sync_clock = new THREE.Clock();
         this.wave_ampl = 2;
         this.start_square_offset = 0;
@@ -53,9 +58,7 @@ class TunnelMovementBackground {
     }
 
     anim_frame(dt) {
-        const elapsed = this.clock.getElapsedTime();
         const speed = 20.0;
-        this.squares_group.position.z = -speed * elapsed;
 
         /*this.squares.forEach((s, i) => {
                 s.material.opacity = Math.max(0.0, 1.0 - (this.camera.position.z - (s.position.z + this.squares_group.position.z)) / (10 * this.square_sep));
@@ -63,6 +66,12 @@ class TunnelMovementBackground {
         });*/
         const max_offset = this.square_sep;
         this.squares_group.position.z -= speed * dt;
+        if (this.squares_group.position.z < -TUNNEL_REBASE) {
+            this.squares_group.position.z += TUNNEL_REBASE;
+            for (const sq of this.squares) {
+                sq.position.z -= TUNNEL_REBASE;
+            }
+        }
         //while (this.squares_group.position.z < -max_offset) {
             //this.squares_group.position.z += max_offset;
         //}

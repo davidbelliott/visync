@@ -47,6 +47,12 @@ export class RollingCubeScene extends Scene {
         this.prismSize = 1;
         this.prism_base_geom = this.create_prism_geometry();
         this.prism_collection = new InstancedGeometryCollection(this.tri_group, this.prism_base_geom);
+        // Per-frame scratch (anim_frame; the collection's setters copy values).
+        this.tmp_quat = new THREE.Quaternion();
+        this.tmp_axis = new THREE.Vector3();
+        this.tmp_vec = new THREE.Vector3();
+        this.tmp_scale = new THREE.Vector3();
+        this.tmp_color = new THREE.Color();
         this.createPrismInstances();
 
         this.cube_side_len = this.prismSize * 3 / Math.sqrt(2);
@@ -181,8 +187,7 @@ export class RollingCubeScene extends Scene {
         const sign = [1, -1, 1];
         axis_arr[this.roll_dir] = 1;
         const theta = sign[this.roll_dir] * cube_roll_frac * Math.PI / 2;
-        const quat = new THREE.Quaternion();
-        quat.setFromAxisAngle(new THREE.Vector3().fromArray(axis_arr), theta);
+        const quat = this.tmp_quat.setFromAxisAngle(this.tmp_axis.fromArray(axis_arr), theta);
         this.cube.setRotationFromQuaternion(quat);
         if (this.roll_dir == 0) {
             this.cube.position.y = 
@@ -207,8 +212,7 @@ export class RollingCubeScene extends Scene {
             (3 * this.prismSize / 2) * Math.cos(theta + Math.PI / 4);*/
 
         // Camera tracks cube, without the "bounce" orthogonal to plane
-        const cube_world_pos = new THREE.Vector3(0, 0, 0);
-        this.cube.localToWorld(cube_world_pos);
+        const cube_world_pos = this.cube.localToWorld(this.tmp_vec.set(0, 0, 0));
 
         this.camera.position.y = cube_world_pos.y;
         this.camera.position.x = cube_world_pos.x;
@@ -217,7 +221,7 @@ export class RollingCubeScene extends Scene {
         this.updateProjectedCube();
 
 
-        const tri_camera_offset = this.tri_group.position.clone();
+        const tri_camera_offset = this.tmp_vec.copy(this.tri_group.position);
         tri_camera_offset.sub(this.camera.position);
         if (tri_camera_offset.y > 2 * this.prismSize * 1.5) {
             this.tri_group.position.y -= 2 * this.prismSize * 1.5;
@@ -235,7 +239,7 @@ export class RollingCubeScene extends Scene {
         const elapsed_scale_beats = this.wave_scale_clock.getElapsedBeats();
         const elapsed_color_beats = this.wave_color_clock.getElapsedBeats();
         for (let i = 0; i < this.prism_collection.instancedGeometry.instanceCount; i++) {
-            const from_camera = this.prism_collection.get_pos(i).clone();
+            const from_camera = this.prism_collection.get_pos(i, this.tmp_vec);
             this.tri_group.localToWorld(from_camera);
             from_camera.sub(this.camera.position);
             let scale = 1;
@@ -243,13 +247,12 @@ export class RollingCubeScene extends Scene {
                 scale = clamp(0.9 + 0.3 * Math.sin(-2 * Math.PI * elapsed_scale_beats + from_camera.length()), 0, 1);
             }
             //const scale = clamp(0.7 + 0.05 * from_camera.length() * Math.sin(2 * 2 * Math.PI * elapsed_time), 0, 1) ** 2;
-            const scale_vec = new THREE.Vector3(scale, scale, 1);
-            this.prism_collection.set_scale(i, scale_vec);
+            this.prism_collection.set_scale(i, this.tmp_scale.set(scale, scale, 1));
 
             const saturation = 1.0;
             const lightness = 0.5;
-            
-            const color = new THREE.Color();
+
+            const color = this.tmp_color;
             color.setHSL(Math.sin(1 / 8 * elapsed_color_beats + 0.1 * from_camera.length()), saturation, lightness);
             this.prism_collection.set_color(i, color);
             /*if (from_camera.y > (this.gridSize - 1) * this.prismSize * 1.5) {

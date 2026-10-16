@@ -282,6 +282,9 @@ export function make_wireframe_rectangle(width, height, color) {
 }
 
 
+// Scratch for Spark.anim_frame's billboarding, so sparks allocate nothing per frame.
+const SPARK_SCRATCH_QUAT = new THREE.Quaternion();
+
 export class Spark extends THREE.Object3D {
     constructor(size, color, axes, flicker=true, always_in_front=false, is_cross=false, billboard=true) {
         super();
@@ -325,13 +328,8 @@ export class Spark extends THREE.Object3D {
     anim_frame(dt, camera) {
         if (this.active) {
             this.cur_frame++;
-            const dv = this.acceleration.clone();
-            dv.multiplyScalar(dt);
-            this.velocity.add(dv);
-
-            const dx = this.velocity.clone();
-            dx.multiplyScalar(dt);
-            this.position.add(dx);
+            this.velocity.addScaledVector(this.acceleration, dt);
+            this.position.addScaledVector(this.velocity, dt);
 
             this.visible = true;
             if (this.flicker) {
@@ -340,7 +338,7 @@ export class Spark extends THREE.Object3D {
             if (this.billboard) {
                 this.quaternion.copy(camera.quaternion);
                 if (this.parent != null) {
-                    const group_quat = new THREE.Quaternion();
+                    const group_quat = SPARK_SCRATCH_QUAT;
                     this.parent.getWorldQuaternion(group_quat);
                     group_quat.conjugate();
                     this.quaternion.premultiply(group_quat);

@@ -199,6 +199,8 @@ export class TracersScene extends Scene {
     }
 
     recreate_buffers(width, height) {
+        // Free the old ones' GPU memory first (see GraphicsContext.recreate_buffers).
+        this.buffers?.forEach((b) => b.dispose());
         this.buffers = [];
         for (let i = 0; i < this.num_traces * this.trace_spacing; i++) {
             this.buffers.push(new THREE.WebGLRenderTarget(width, height, {}));

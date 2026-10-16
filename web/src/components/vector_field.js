@@ -38,17 +38,16 @@ function createField() {
     phaseY.push(Math.random() * Math.PI * 2);
     phaseZ.push(Math.random() * Math.PI * 2);
   }
-  return function field(pos) {
+  // Written to target if given (the per-frame integration passes scratch).
+  return function field(pos, target = new THREE.Vector3()) {
     let vx = 0, vy = 0, vz = 0;
     for (let i = 0; i < waves; i++) {
       vx += Math.sin(kx[i] * pos.x + phaseX[i]);
       vy += Math.sin(ky[i] * pos.y + phaseY[i]);
       vz += Math.sin(kz[i] * pos.z + phaseZ[i]);
     }
-    const v = new THREE.Vector3(vx, vy, vz);
     const maxLen = waves * Math.sqrt(3);
-    v.multiplyScalar(1 / maxLen);
-    return v;
+    return target.set(vx, vy, vz).multiplyScalar(1 / maxLen);
   };
 }
 
@@ -57,6 +56,11 @@ export class VectorFieldComponent extends Component {
     super();
 
     this.field = createField();
+    // Per-frame scratch (anim_frame).
+    this._tmpPos = new THREE.Vector3();
+    this._tmpVel = new THREE.Vector3();
+    this._tmpAccel = new THREE.Vector3();
+    this._fieldColor = new THREE.Color();
 
     // Base geometry (unit line 0->1 on X) used by all instanced line renderers
     this.base = new THREE.BufferGeometry();
@@ -459,21 +463,15 @@ update_field_pointers() {
           if (!this.cubeActive[c]) continue;
 
           const basePos = this._cubeOffset(c);
+          // Scratch, reused for every vertex.
+          const pos = this._tmpPos, v = this._tmpVel;
           for (let i = 0; i < CUBE_VERT_COUNT; i++) {
             const pIdx = basePos + i*3;
 
-            const pos = new THREE.Vector3(
-              this.cubePos[pIdx+0],
-              this.cubePos[pIdx+1],
-              this.cubePos[pIdx+2]
-            );
-            const v = new THREE.Vector3(
-              this.cubeVel[pIdx+0],
-              this.cubeVel[pIdx+1],
-              this.cubeVel[pIdx+2]
-            );
+            pos.fromArray(this.cubePos, pIdx);
+            v.fromArray(this.cubeVel, pIdx);
 
-            const accel = this.field(pos).multiplyScalar(dt * ACCEL_PER_UNIT_FIELD);
+            const accel = this.field(pos, this._tmpAccel).multiplyScalar(dt * ACCEL_PER_UNIT_FIELD);
             v.add(accel);              // v ← v + a*dt (a already scaled by dt)
             pos.add(v);                // x ← x + v
 
@@ -497,7 +495,7 @@ update_field_pointers() {
         this.updateTracers(dt);
 
         // pointer tween
-        const fieldColor = this.fieldColorDst.clone();
+        const fieldColor = this._fieldColor.copy(this.fieldColorDst);
         if (this._ptrLerpT < 1.0) {
           this._ptrLerpT = Math.min(1.0, this._ptrLerpT + (this._ptrLerpDur > 0 ? dt / this._ptrLerpDur : 1.0));
           const t = this._ptrLerpT;

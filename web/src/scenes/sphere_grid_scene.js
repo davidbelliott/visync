@@ -8,80 +8,53 @@ import { InstancedGeometryCollection } from '../instanced_geom.js';
 const CUBES_PER_SIDE = 10;
 const CUBE_SIZE = 1;
 
-function cosPalette(t, a, b, c, d) {
-    // Create result color
-    const result = new THREE.Color();
-    
-    // Calculate cosine terms for each channel
-    const cosR = Math.cos(6.28318 * (c.r * t + d.r));
-    const cosG = Math.cos(6.28318 * (c.g * t + d.g));
-    const cosB = Math.cos(6.28318 * (c.b * t + d.b));
-    
-    // Set RGB values using the palette formula
-    result.r = a.r + b.r * cosR;
-    result.g = a.g + b.g * cosG;
-    result.b = a.b + b.b * cosB;
-    
-    return result;
+// The cosine palette a + b cos(2 pi (c t + d)), per channel, into target.
+function cosPalette(t, a, b, c, d, target) {
+    return target.setRGB(
+        a.r + b.r * Math.cos(6.28318 * (c.r * t + d.r)),
+        a.g + b.g * Math.cos(6.28318 * (c.g * t + d.g)),
+        a.b + b.b * Math.cos(6.28318 * (c.b * t + d.b)));
 }
 
-function palette(t) {
-    // Define default palette colors
-    const a = new THREE.Color(0.87, 0.38, 0.70);
-    const b = new THREE.Color(0.83, 0.35, 0.05);
-    const c = new THREE.Color(0.89, 0.65, 0.87);
-    const d = new THREE.Color(0.69, 0.61, 0.01);
-    
-    // Alternative palette values (commented out as per original GLSL)
-    // const a = new THREE.Color(0.5, 0.5, 0.5);
-    // const b = new THREE.Color(0.5, 0.5, 0.5);
-    // const c = new THREE.Color(1.0, 1.0, 1.0);
-    // const d = new THREE.Color(0.0, 0.1, 0.2);
-    
-    return cosPalette(t, a, b, c, d);
+// Default palette colors (alternatives, as in the original GLSL: a and b
+// 0.5 grey, c white, d (0, 0.1, 0.2)).
+const PALETTE_A = new THREE.Color(0.87, 0.38, 0.70);
+const PALETTE_B = new THREE.Color(0.83, 0.35, 0.05);
+const PALETTE_C = new THREE.Color(0.89, 0.65, 0.87);
+const PALETTE_D = new THREE.Color(0.69, 0.61, 0.01);
+
+function palette(t, target) {
+    return cosPalette(t, PALETTE_A, PALETTE_B, PALETTE_C, PALETTE_D, target);
 }
 
-function metaballs(x, y, z, time) {
-    // Create 3 moving metaballs
-    const balls = [
-        {
-            pos: new THREE.Vector3(
-                Math.sin(time * 0.7) * 4,
-                Math.cos(time * 0.8) * 4,
-                Math.sin(time * 0.9) * 4
-            ),
-            strength: 12.0
-        },
-        {
-            pos: new THREE.Vector3(
-                Math.cos(time * 0.6) * 5,
-                Math.sin(time * 1.1) * 5,
-                Math.cos(time * 0.7) * 5
-            ),
-            strength: 8.0
-        },
-        {
-            pos: new THREE.Vector3(
-                Math.sin(time * 0.9) * 3,
-                Math.cos(time * 0.5) * 3,
-                Math.sin(time * 0.8) * 3
-            ),
-            strength: 8.0
-        }
-    ];
+// 3 moving metaballs: centres set once a frame by place_metaballs (they move
+// with time only), then sampled per cube by metaballs.
+const METABALLS = [
+    { x: 0, y: 0, z: 0, strength: 12.0 },
+    { x: 0, y: 0, z: 0, strength: 8.0 },
+    { x: 0, y: 0, z: 0, strength: 8.0 },
+];
 
-    // Calculate field value at point
+function place_metaballs(time) {
+    const [b0, b1, b2] = METABALLS;
+    b0.x = Math.sin(time * 0.7) * 4; b0.y = Math.cos(time * 0.8) * 4; b0.z = Math.sin(time * 0.9) * 4;
+    b1.x = Math.cos(time * 0.6) * 5; b1.y = Math.sin(time * 1.1) * 5; b1.z = Math.cos(time * 0.7) * 5;
+    b2.x = Math.sin(time * 0.9) * 3; b2.y = Math.cos(time * 0.5) * 3; b2.z = Math.sin(time * 0.8) * 3;
+}
+
+// The field at (x, y, z), from the centres place_metaballs last set.
+function metaballs(x, y, z) {
     let value = 0;
-    for (const ball of balls) {
-        const dx = x - ball.pos.x;
-        const dy = y - ball.pos.y;
-        const dz = z - ball.pos.z;
-        const dist_sq = dx * dx + dy * dy + dz * dz;
-        value += ball.strength / dist_sq;
+    for (const ball of METABALLS) {
+        const dx = x - ball.x;
+        const dy = y - ball.y;
+        const dz = z - ball.z;
+        value += ball.strength / (dx * dx + dy * dy + dz * dz);
     }
-    
     return value * 0.5; // Scale the result to get reasonable values
 }
+
+const WHITE = new THREE.Color('white');
 
 export class SphereGridScene extends Scene {
     constructor(context) {
@@ -101,6 +74,8 @@ export class SphereGridScene extends Scene {
 
         this.clear();
         this.background = new THREE.Color(0x000000);
+        this.cell_scale = new THREE.Vector3();     // per-cube scratch (anim_frame)
+        this.cell_color = new THREE.Color();
         this.cube_group = new THREE.Group();
         this.add(this.cube_group);
 
@@ -196,25 +171,27 @@ export class SphereGridScene extends Scene {
         this.cube_group.rotation.y = this.view_yaw(0.25);
         this.elapsed_time += adjusted_elapsed;
 
-        const saturation = 1.0;
-        const lightness = 0.5;
-
+        // Scratch, reused for every cube (the setters copy the values).
+        const scale = this.cell_scale;
+        const color = this.cell_color;
+        if (this.cur_state_idx == 1) {
+            place_metaballs(this.elapsed_time);
+        }
         for (let i = 0; i < CUBES_PER_SIDE; i++) {
             for (let j = 0; j < CUBES_PER_SIDE; j++) {
                 for (let k = 0; k < CUBES_PER_SIDE; k++) {
+                    const idx = i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k;
                     const cell_val = this.cell_val_func(this.elapsed_time, i, j, k);
                     this.cell_values[i][j][k] = cell_val;
-                    this.inst_geom_fill.set_scale(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, new THREE.Vector3(cell_val, cell_val, cell_val));
-
-                    let color = new THREE.Color();
-                    //color.setHSL(Math.sin(1 / 8 * this.elapsed_time + 0.1 * j), saturation, lightness);
-                    this.inst_geom_fill.set_scale(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, new THREE.Vector3(cell_val, cell_val, cell_val));
+                    this.inst_geom_fill.set_scale(idx, scale.setScalar(cell_val));
                     if (this.cur_state_idx == 1) {
-                        color = palette(1 / 8 * this.elapsed_time + 0.1 * j);
+                        palette(1 / 8 * this.elapsed_time + 0.1 * j, color);
                     } else if (this.cur_state_idx == 0) {
-                        color = new THREE.Color("white");
+                        color.copy(WHITE);
+                    } else {
+                        color.setRGB(0, 0, 0);
                     }
-                    this.inst_geom_fill.set_color(i * CUBES_PER_SIDE ** 2 + j * CUBES_PER_SIDE + k, color);
+                    this.inst_geom_fill.set_color(idx, color);
                 }
             }
         }
@@ -236,7 +213,7 @@ export class SphereGridScene extends Scene {
             const x = (i - CUBES_PER_SIDE/2);
             const y = (j - CUBES_PER_SIDE/2);
             const z = (k - CUBES_PER_SIDE/2);
-            return Math.min(1.0, 2 * Math.tanh(metaballs(x, y, z, this.elapsed_time)) ** 4);
+            return Math.min(1.0, 2 * Math.tanh(metaballs(x, y, z)) ** 4);
         }
     }
 

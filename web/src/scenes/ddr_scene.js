@@ -23,6 +23,13 @@ const BODY_COLOR = new THREE.Color("red");
 const CLAP_DIR_TRANSITION_BEATS = 1;
 const ARROW_VEL = 5;
 const ARROW_TOP_Y = 1.27;
+// Per-frame scratch for the robot's and arrows' anim_frame (only ever used
+// within one call, never kept), so a frame allocates nothing.
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const TMP_ARMS = new THREE.Vector3();
+const TMP_FOOT = new THREE.Vector3();
+const TMP_QUAT = new THREE.Quaternion();
+const TMP_ARROW = new THREE.Vector3();
 
 function mirror_mesh(mesh, axis_idx) {
     const new_mesh = mesh.clone();
@@ -164,15 +171,15 @@ class DDRRobot extends THREE.Object3D {
         this.clap_dir_cur = lerp_scalar(this.prev_clap_dir, this.clap_dir, clap_dir_frac);
 
         const body_offset = 0.8 * shuffle_bob(half_beat_time);
-        const arms_offset = new THREE.Vector3(0, 0.6 * shuffle_bob(half_beat_time, 1), 0);
+        const arms_offset = TMP_ARMS.set(0, 0.6 * shuffle_bob(half_beat_time, 1), 0);
 
         for (let side = 0; side < 2; side++) {
             const shuffle_offset = this.get_foot_offset(side, half_beat_time);
-            const pos_vec = new THREE.Vector3(shuffle_offset[0], shuffle_offset[1], shuffle_offset[2]);
-            pos_vec.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cur_foot_dir);
+            const pos_vec = TMP_FOOT.fromArray(shuffle_offset);
+            pos_vec.applyAxisAngle(Y_AXIS, this.cur_foot_dir);
             this.feet[side].position.copy(this.feet[side].base_pos);
             this.feet[side].position.add(pos_vec);
-            const new_quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.cur_foot_rot);
+            const new_quat = TMP_QUAT.setFromAxisAngle(Y_AXIS, this.cur_foot_rot);
             this.feet[side].quaternion.copy(this.feet[side].base_quat);
             this.feet[side].quaternion.multiply(new_quat);
 
@@ -217,12 +224,12 @@ class DDRArrow extends THREE.LineSegments {
     anim_frame() {
         const beats_elapsed = this.clock.getElapsedBeats();
         const global_beats_elapsed = DDRArrow.global_clock.getElapsedBeats();
-        this.offset_vec = new THREE.Vector3(
+        const offset = TMP_ARROW.set(
             0,
             Math.min(ARROW_VEL * (beats_elapsed - this.time_till_impact), 0) - ARROW_TOP_Y,
             Math.max(ARROW_VEL * (beats_elapsed - this.time_till_impact), 0));
-        this.offset_vec.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2 * this.ddr_direction);
-        this.position.copy(this.offset_vec);
+        offset.applyAxisAngle(Y_AXIS, Math.PI / 2 * this.ddr_direction);
+        this.position.copy(offset);
         this.material.opacity = clamp(1 - (this.time_till_impact - beats_elapsed) / this.time_till_impact, 0, 1);
         this.material.color.setHSL(Math.sin(global_beats_elapsed / 8 + beats_elapsed / 12), 1, 0.5);
     }

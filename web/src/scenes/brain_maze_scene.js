@@ -159,6 +159,14 @@ const SHADOW_NORMAL_BIAS = 0.02;
 // Shadows also darken the scenes layered behind, through a shadow-only plane
 // on the head's floor: this dark where fully shadowed.
 const FLOOR_SHADOW_OPACITY = 0.6;
+// An exactly 1 px OUTLINE_COLOR outline round the head's outermost
+// silhouette, drawn over everything (walls included) with no depth test, or
+// none if OUTLINE is false. Screen space: the head is drawn as one flat shape
+// into a mask (OUTLINE_LAYER; no bands, contours or brain, so no inner folds
+// can outline), then every pixel just outside it is coloured.
+const OUTLINE = true;
+const OUTLINE_COLOR = new THREE.Color('cyan');
+const OUTLINE_LAYER = 1;
 
 export class BrainMazeScene extends Scene {
     constructor(context) {
@@ -302,8 +310,88 @@ export class BrainMazeScene extends Scene {
         this.facing_from = this.facing_to;
         this.build_views();
 
+        // The outline pass (see OUTLINE): a mask sized to whatever target the
+        // scene is drawn to (made on first use and on a size change), the
+        // flat material the head is drawn into it with, and a full-screen
+        // quad marking the pixels just outside it.
+        this.outline_mask = null;
+        this.mask_mat = new THREE.MeshBasicMaterial({ color: 'white' });
+        this.outline_quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+            uniforms: { mask: { value: null }, color: { value: OUTLINE_COLOR } },
+            vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+            fragmentShader: [
+                'uniform sampler2D mask;',
+                'uniform vec3 color;',
+                'float inside(ivec2 p) {',
+                '    ivec2 size = textureSize(mask, 0);',
+                '    return texelFetch(mask, clamp(p, ivec2(0), size - 1), 0).r;',
+                '}',
+                'void main() {',
+                '    ivec2 p = ivec2(gl_FragCoord.xy);',
+                '    if (inside(p) > 0.5) discard;',
+                '    float n = inside(p + ivec2(1, 0)) + inside(p - ivec2(1, 0)) +',
+                '        inside(p + ivec2(0, 1)) + inside(p - ivec2(0, 1));',
+                '    if (n < 0.5) discard;',
+                '    gl_FragColor = vec4(color, 1.0);',
+                '}',
+            ].join('\n'),
+            depthTest: false,
+            depthWrite: false,
+        }));
+        this.outline_quad.frustumCulled = false;
+        this.outline_scene = new THREE.Scene();
+        this.outline_scene.add(this.outline_quad);
+        this.outline_cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this.tmp_size = new THREE.Vector2();
+        this.tmp_clear = new THREE.Color();
+
         // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
+    }
+
+    render(renderer, underlying_buffer) {
+        super.render(renderer, underlying_buffer);
+        if (OUTLINE && this.head.fill !== null) {
+            this.draw_outline(renderer);
+        }
+    }
+
+    // Draw the head's silhouette into the mask, then its 1 px outline over
+    // whatever target the scene was drawn to (the screen, or a crossfade's
+    // buffer).
+    draw_outline(renderer) {
+        const target = renderer.getRenderTarget();
+        const size = target ? this.tmp_size.set(target.width, target.height) :
+            renderer.getDrawingBufferSize(this.tmp_size);
+        if (this.outline_mask === null || this.outline_mask.width != size.x ||
+                this.outline_mask.height != size.y) {
+            this.outline_mask?.dispose();
+            this.outline_mask = new THREE.WebGLRenderTarget(size.x, size.y, { depthBuffer: false });
+            this.outline_quad.material.uniforms.mask.value = this.outline_mask.texture;
+        }
+        this.head.fill.layers.enable(OUTLINE_LAYER);
+
+        // The mask: only OUTLINE_LAYER, flat white on clear black, without
+        // redrawing the shadow map.
+        const layers = this.camera.layers.mask;
+        const auto_shadows = renderer.shadowMap.autoUpdate;
+        const clear_alpha = renderer.getClearAlpha();
+        renderer.getClearColor(this.tmp_clear);
+        renderer.shadowMap.autoUpdate = false;
+        this.camera.layers.set(OUTLINE_LAYER);
+        this.overrideMaterial = this.mask_mat;
+        renderer.setRenderTarget(this.outline_mask);
+        renderer.setClearColor(0x000000, 0);
+        renderer.clear();
+        renderer.render(this, this.camera);
+        this.overrideMaterial = null;
+        this.camera.layers.mask = layers;
+        renderer.shadowMap.autoUpdate = auto_shadows;
+        renderer.setClearColor(this.tmp_clear, clear_alpha);
+
+        // The outline, over the scene as drawn.
+        renderer.setRenderTarget(target);
+        renderer.render(this.outline_scene, this.outline_cam);
     }
 
     anim_frame(dt) {

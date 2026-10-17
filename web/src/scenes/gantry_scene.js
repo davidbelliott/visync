@@ -10,7 +10,7 @@ import {
     EasedFollower
 } from '../util.js';
 import { InstancedGeometryCollection } from '../instanced_geom.js';
-import { SpringFabric } from '../spring_fabric.js';
+import { RippleField } from '../ripple_field.js';
 import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
 import { SparkPool } from '../components/spark_pool.js';
@@ -21,15 +21,18 @@ const CELL = 4;
 // Cubes in the window laid out around the view (per side).
 const NUM_CUBES_PER_SIDE = 32;
 
-// Cube heights are a spring fabric (src/spring_fabric.js), tuned for pond
-// ripples: a strike knocks its one cube down and rings spread out from it.
-// Anchor/coupling in 1/s^2, damping in 1/s, strike velocity in units/s down;
-// the edge band absorbs ripples inside the faded-out cells.
-const FABRIC_ANCHOR = 10;
-const FABRIC_COUPLING = 100;
-const FABRIC_DAMPING = 1.0;
-const FABRIC_STRIKE_VEL = 40;
-const FABRIC_EDGE_CELLS = 5;
+// Cube heights are superimposed damped ripples (src/ripple_field.js), one
+// spreading from each recent strike: its cube dips first, then rings move
+// out at RIPPLE_SPEED cells/s, RIPPLE_WAVELENGTH cells apart, starting
+// RIPPLE_AMPLITUDE world units deep and dying away over RIPPLE_DECAY_S s
+// (1/e), so a few beats' strikes overlap, thinning from RIPPLE_SPREAD cells
+// out (still ~0.6 deep ten cells out). RIPPLE_MAX strikes are remembered.
+const RIPPLE_AMPLITUDE = 3;
+const RIPPLE_SPEED = 10;
+const RIPPLE_WAVELENGTH = 6;
+const RIPPLE_DECAY_S = 1.0;
+const RIPPLE_SPREAD = 4;
+const RIPPLE_MAX = 8;
 
 // Strike sparks: a ring of SPARKS_PER_STRIKE at SPARK_SPEED (units/s) and
 // SPARK_ELEVATION, slightly jittered (speed +-10%, elevation +-4 deg, azimuth
@@ -390,9 +393,10 @@ export class GantryScene extends Scene {
         }, MAX_SPARKS);
         this.world_group.add(this.spark_pool);
 
-        this.fabric = new SpringFabric(NUM_CUBES_PER_SIDE, {
-            anchor: FABRIC_ANCHOR, coupling: FABRIC_COUPLING,
-            damping: FABRIC_DAMPING, edge_cells: FABRIC_EDGE_CELLS,
+        this.ripples = new RippleField({
+            amplitude: RIPPLE_AMPLITUDE, speed: RIPPLE_SPEED,
+            wavelength: RIPPLE_WAVELENGTH, decay_s: RIPPLE_DECAY_S,
+            spread: RIPPLE_SPREAD, max: RIPPLE_MAX,
         });
 
         // Cube window: instance i * N + j shows cell (win_row + i, win_col + j).
@@ -539,8 +543,7 @@ export class GantryScene extends Scene {
         const half = NUM_CUBES_PER_SIDE >> 1;
         this.win_row = Math.round(this.scroll_z.value / CELL) - half;
         this.win_col = Math.round(this.scroll_x.value / CELL) - half;
-        this.fabric.set_origin(this.win_row, this.win_col);
-        this.fabric.update(dt);
+        this.ripples.update(dt);
 
         const pos = this.cube_pos;
         for (let i = 0; i < NUM_CUBES_PER_SIDE; i++) {
@@ -572,9 +575,9 @@ export class GantryScene extends Scene {
         this.update_trail();
     }
 
-    // Logical position of cell (row, col) at its fabric height, into `out`.
+    // Logical position of cell (row, col) at its ripple height, into `out`.
     cell_pos(row, col, out) {
-        return out.set(col * CELL, this.fabric.height(row, col), row * CELL);
+        return out.set(col * CELL, this.ripples.height(row, col), row * CELL);
     }
 
     // Cube opacity at logical position pos (see EDGE_FADE_BAND).
@@ -724,7 +727,7 @@ export class GantryScene extends Scene {
         const [row, col] = g === this.assignee ? this.target :
             [Math.round(g.mover.position.z / CELL), Math.round(g.mover.position.x / CELL)];
         this.create_sparks(col * CELL, row * CELL, g.trolley.vel, g.bridge.vel);
-        this.fabric.kick(row, col, -FABRIC_STRIKE_VEL);
+        this.ripples.add(row, col);
         this.stamp_at(row, col);
         this.add_trail_point(row, col);
         this.struck = [row, col];
@@ -1021,7 +1024,7 @@ export class GantryScene extends Scene {
         for (const s of this.spark_pool.sparks) {
             s.position.add(offset);
         }
-        this.fabric.shift_labels(d_row, d_col);
+        this.ripples.shift_labels(d_row, d_col);
         for (const [rows, cols] of [[this.stamp_row, this.stamp_col],
                 [this.outline_row, this.outline_col], [this.trail_row, this.trail_col]]) {
             for (let k = 0; k < rows.length; k++) {

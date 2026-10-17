@@ -21,9 +21,9 @@ import {
     create_instanced_cube_templates,
     ShaderLoader,
     Spark,
-    ObjectPool,
     BeatClock
 } from '../util.js';
+import { SparkPool } from '../components/spark_pool.js';
 
 // Rotation (rad), stepping in lockstep with the spinning robots scene: yaw
 // every 45 deg, pitch between upright views (isometric tilt up or down, or
@@ -330,8 +330,8 @@ export class CubeTubesScene extends Scene {
 
         this.add(this.base_group);
 
-        const spark_constructor = () => { return new Spark(1.0, "white", [0, 1]); };
-        this.spark_pool = new ObjectPool(spark_constructor, 64);
+        // Sparks (SparkPool, toggling with the hi-hats).
+        this.spark_pool = new SparkPool(this, () => new Spark(1.0, "white", [0, 1]), 64);
         this.base_group.add(this.spark_pool);
         // Tube segments: each tube's tail position around its looped path in
         // rings, [0, TUBE_RINGS); the segment runs from there for tube_len
@@ -378,7 +378,7 @@ export class CubeTubesScene extends Scene {
         }
 
         // Update sparks
-        this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
+        this.spark_pool.anim_frame(dt);
 
         // Handle expanding outline
         {
@@ -440,6 +440,7 @@ export class CubeTubesScene extends Scene {
     }
 
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1) {
@@ -461,8 +462,7 @@ export class CubeTubesScene extends Scene {
     create_spark() {
         const vel = new THREE.Vector3(0, -20, 0);
         const pos = new THREE.Vector3(8 * rand_int(-1, 2), 40, 8 * rand_int(-1, 2));
-        const spark = this.spark_pool.get_pool_object();
-        spark.active = true;
+        const spark = this.spark_pool.spawn();
         spark.position.copy(pos);
         spark.velocity = vel;
         spark.acceleration.set(0, 0, 0);

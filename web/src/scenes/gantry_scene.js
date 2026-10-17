@@ -13,6 +13,7 @@ import { InstancedGeometryCollection } from '../instanced_geom.js';
 import { SpringFabric } from '../spring_fabric.js';
 import { UPRIGHT_PITCHES, ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_X, CH_EXPAND_Y } from '../controller_map.js';
+import { SparkPool } from '../components/spark_pool.js';
 
 // Grid cells (scene units): cube size, and the spacing between cube centres.
 const CUBE_SIZE = 3;
@@ -380,17 +381,14 @@ export class GantryScene extends Scene {
         this.base_group.add(this.world_group);
         this.add(this.base_group);
 
-        this.sparks = [];
-        this.next_spark = 0;
-        for (let i = 0; i < MAX_SPARKS; i++) {
+        // Strike sparks (SparkPool, toggling with the hi-hats).
+        this.spark_pool = new SparkPool(this, () => {
             const s = new Spark(0.2, "white", [0, 1]);
-            s.active = false;
             s.flicker_frames = SPARK_FLICKER_FRAMES;
-            s.life_s = 0;
             s.acceleration.set(0, -SPARK_GRAVITY, 0);
-            this.world_group.add(s);
-            this.sparks.push(s);
-        }
+            return s;
+        }, MAX_SPARKS);
+        this.world_group.add(this.spark_pool);
 
         this.fabric = new SpringFabric(NUM_CUBES_PER_SIDE, {
             anchor: FABRIC_ANCHOR, coupling: FABRIC_COUPLING,
@@ -568,13 +566,7 @@ export class GantryScene extends Scene {
             g.x_beam.position.x = this.scroll_x.value;
         }
 
-        for (const s of this.sparks) {
-            if (s.active) {
-                s.life_s -= dt;
-                s.active = s.life_s > 0;
-            }
-            s.anim_frame(dt, this.cam_orth);
-        }
+        this.spark_pool.anim_frame(dt);
 
         this.beats += dt * beats_per_sec;
         this.update_trail();
@@ -704,6 +696,7 @@ export class GantryScene extends Scene {
     // Kick: if the assignee will be over the target at touchdown, it strikes,
     // the drop timed to touch down on the beat.
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         if (channel != 1 && channel != 5) {
             return;
         }
@@ -1025,7 +1018,7 @@ export class GantryScene extends Scene {
         for (const g of this.gantries) {
             g.shift(offset);
         }
-        for (const s of this.sparks) {
+        for (const s of this.spark_pool.sparks) {
             s.position.add(offset);
         }
         this.fabric.shift_labels(d_row, d_col);
@@ -1050,8 +1043,7 @@ export class GantryScene extends Scene {
     // the striker's velocity (vx, vz).
     create_sparks(x, z, vx, vz) {
         for (let i = 0; i < SPARKS_PER_STRIKE; i++) {
-            const spark = this.sparks[this.next_spark];
-            this.next_spark = (this.next_spark + 1) % MAX_SPARKS;
+            const spark = this.spark_pool.spawn(SPARK_LIFE_S);
             const speed = SPARK_SPEED * (1 + SPARK_SPEED_JITTER * (2 * Math.random() - 1));
             const elev = SPARK_ELEVATION + SPARK_ELEVATION_JITTER * (2 * Math.random() - 1);
             const azim = 2 * Math.PI / SPARKS_PER_STRIKE *
@@ -1062,8 +1054,6 @@ export class GantryScene extends Scene {
                 speed * Math.sin(elev),
                 -horiz * Math.sin(azim) + SPARK_INHERIT_VEL * vz);
             spark.position.set(x, 1.5, z);
-            spark.active = true;
-            spark.life_s = SPARK_LIFE_S;
         }
     }
 }

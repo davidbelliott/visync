@@ -8,9 +8,9 @@ import {
     ShaderLoader,
     BeatClock,
     Spark,
-    ObjectPool,
     rand_int,
 } from "../util.js";
+import { SparkPool } from '../components/spark_pool.js';
 
 function radial_wave(u, v, target, t) {
     const r = 50;
@@ -123,8 +123,8 @@ export class ParamSurfaceScene extends Scene {
         this.add(this.light);
 
         // Sparks
-        const spark_constructor = () => { return new Spark(2, "white", [0, 1], false, true, true, false); };
-        this.spark_pool = new ObjectPool(spark_constructor, 32);
+        // Sparks (SparkPool, toggling with the hi-hats).
+        this.spark_pool = new SparkPool(this, () => new Spark(2, "white", [0, 1], false, true, true, false), 32);
         this.base_group.add(this.spark_pool);
 
         this.add(this.base_group);
@@ -184,10 +184,11 @@ export class ParamSurfaceScene extends Scene {
             this.geom.computeBoundingSphere();
         }
 
-        this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
+        this.spark_pool.anim_frame(dt);
     }
 
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1 || channel == 3) {
@@ -214,8 +215,7 @@ export class ParamSurfaceScene extends Scene {
         const y = rand_int(-half_grid, half_grid) * spacing;
         const pos = new THREE.Vector3(x, y, 0);
         const vel = new THREE.Vector3(0, 0, 0);//pos.clone().normalize().multiplyScalar(5);
-        const spark = this.spark_pool.get_pool_object();
-        spark.active = true;
+        const spark = this.spark_pool.spawn();
         spark.position.copy(pos);
         spark.velocity = vel;
         spark.acceleration.set(0, 0, 0);

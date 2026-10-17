@@ -6,6 +6,7 @@ import { MAZE_DIRS } from '../infinite_maze.js';
 import { MazeLevels } from '../maze_levels.js';
 import { MazeLevel } from '../components/maze_level.js';
 import { InstancedProps } from '../components/instanced_props.js';
+import { SparkPool } from '../components/spark_pool.js';
 import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
 import { lerp_scalar, ease, clamp, Spark, PhaseLockedBeats } from '../util.js';
@@ -270,17 +271,11 @@ export class BrainMazeScene extends Scene {
             this.maze_group.add(this.cones);
         });
 
-        // Plus-sign sparks: a ring of the shared Spark, in maze_group's frame
-        // (shifted as it re-centres), each live for life_s.
-        this.sparks = [];
-        this.next_spark = 0;
-        for (let k = 0; k < MAX_SPARKS; k++) {
-            const spark = new Spark(SPARK_SIZE, SPARK_COLOR, [0, 1], true, false, true);
-            spark.active = false;
-            spark.life_s = 0;
-            this.maze_group.add(spark);
-            this.sparks.push(spark);
-        }
+        // Plus-sign sparks (SparkPool, toggling with the hi-hats), in
+        // maze_group's frame (shifted as it re-centres).
+        this.spark_pool = new SparkPool(this,
+            () => new Spark(SPARK_SIZE, SPARK_COLOR, [0, 1], true, false, true), MAX_SPARKS);
+        this.maze_group.add(this.spark_pool);
 
         // The walk: the level and cell the head set out from, the step it
         // is taking (MAZE_DIRS entry) and its climb (+1 up a staircase, -1 down,
@@ -348,13 +343,7 @@ export class BrainMazeScene extends Scene {
         this.base_group.rotation.x = this.stepped_pitch();
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
         this.update_cones(bx, bz, fade);
-        for (const spark of this.sparks) {
-            if (spark.active) {
-                spark.life_s -= dt;
-                spark.active = spark.life_s > 0;
-            }
-            spark.anim_frame(dt, this.camera);
-        }
+        this.spark_pool.anim_frame(dt);
     }
 
     // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
@@ -446,13 +435,10 @@ export class BrainMazeScene extends Scene {
     spawn_sparks() {
         const beats_per_sec = this.get_local_bpm() / 60;
         for (const dir of SPARK_DIRS) {
-            const spark = this.sparks[this.next_spark];
-            this.next_spark = (this.next_spark + 1) % MAX_SPARKS;
+            const spark = this.spark_pool.spawn(SPARK_BEATS / beats_per_sec);
             spark.position.set(0, this.head.height / 2, 0);
             spark.velocity.copy(dir).multiplyScalar(SPARK_SPEED * beats_per_sec);
             spark.acceleration.set(0, SPARK_LIFT * beats_per_sec * beats_per_sec, 0);
-            spark.life_s = SPARK_BEATS / beats_per_sec;
-            spark.active = true;
         }
     }
 
@@ -474,7 +460,7 @@ export class BrainMazeScene extends Scene {
         }
         // maze_group re-centred a cell on (and maybe a level up or down):
         // keep the sparks where they were.
-        for (const spark of this.sparks) {
+        for (const spark of this.spark_pool.sparks) {
             spark.position.x -= si * cells * CELL;
             spark.position.z -= sj * cells * CELL;
             spark.position.y -= climb * rise_h;
@@ -620,6 +606,7 @@ export class BrainMazeScene extends Scene {
     }
 
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         if (channel == 1) {
             setTimeout(() => {
                 this.head.start_scan();

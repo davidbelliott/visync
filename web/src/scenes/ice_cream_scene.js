@@ -17,8 +17,8 @@ import {
     make_wireframe_circle,
     ShaderLoader,
     Spark,
-    ObjectPool,
 } from '../util.js';
+import { SparkPool } from '../components/spark_pool.js';
 
 // Rotation (rad): yaw in lockstep with the other stepped scenes (see
 // stepped_rotation.js), every 45 deg from a diagonal base; pitch locked at
@@ -229,8 +229,8 @@ export class IceCreamScene extends Scene {
         };
 
 
-        const spark_constructor = () => { return new Spark(0.5, "white", [0, 1], false, true); };
-        this.spark_pool = new ObjectPool(spark_constructor, 4);
+        // Sparks (SparkPool, toggling with the hi-hats).
+        this.spark_pool = new SparkPool(this, () => new Spark(0.5, "white", [0, 1], false, true), 4);
 
         this.spark_pool.position.y = 8;
         this.brain_group.add(this.spark_pool);
@@ -258,7 +258,7 @@ export class IceCreamScene extends Scene {
         this.base_group.rotation.x = this.stepped_pitch();
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
 
-        this.spark_pool.foreach((spark) => { spark.anim_frame(dt, this.camera); });
+        this.spark_pool.anim_frame(dt);
     }
 
     // Write every cone in the window: its cell's position relative to the
@@ -318,6 +318,7 @@ export class IceCreamScene extends Scene {
     }
 
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         const delay = this.get_beat_delay();
         setTimeout(() => {
             if (channel == 1) {
@@ -337,8 +338,7 @@ export class IceCreamScene extends Scene {
         const phi = rand_int(0, 16) / 16 * 2 * Math.PI;
         const pos = new THREE.Vector3(r * Math.sin(theta) * Math.cos(phi), r * Math.sin(theta) * Math.sin(phi), r * Math.cos(theta));
         const vel = new THREE.Vector3(0, 0, 0);//pos.clone().normalize().multiplyScalar(5);
-        const spark = this.spark_pool.get_pool_object();
-        spark.active = true;
+        const spark = this.spark_pool.spawn();
         spark.position.copy(pos);
         spark.velocity = vel;
         spark.acceleration.set(0, 0, 0);

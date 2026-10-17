@@ -19,6 +19,7 @@ import {
     Spark,
     BeatClock
 } from '../util.js';
+import { SparkPool } from '../components/spark_pool.js';
 
 // The tunnel's travel (world units) is rebased by this much, moving the
 // squares back with it, whenever it passes it: it would otherwise grow for as
@@ -205,15 +206,9 @@ export class CubemanScene extends Scene {
         });
         this.flicker_frames = 3;
 
-        this.sparks = [];
-        this.max_num_sparks = 64;
-        this.cur_spark_idx = 0;
-        for (let i = 0; i < this.max_num_sparks; i++) {
-            const s = new Spark(0.3, "white", [0, 1]);
-            s.active = false;
-            this.base_group.add(s);
-            this.sparks.push(s);
-        }
+        // Sparks (SparkPool, toggling with the hi-hats).
+        this.spark_pool = new SparkPool(this, () => new Spark(0.3, "white", [0, 1]), 64);
+        this.base_group.add(this.spark_pool);
 
         this.buffer = new THREE.WebGLRenderTarget(width, height, {});
 
@@ -301,10 +296,7 @@ export class CubemanScene extends Scene {
             l.visible = is_active && (this.cur_frame % (2 * this.flicker_frames) < this.flicker_frames);
         }
 
-        // Sparks
-        for (const s of this.sparks) {
-            s.anim_frame(dt, this.camera);
-        }
+        this.spark_pool.anim_frame(dt);
 
         this.bg.anim_frame(dt);
 
@@ -321,6 +313,7 @@ export class CubemanScene extends Scene {
     }
 
     handle_beat(t, channel) {
+        this.spark_pool.handle_beat(t, channel);
         // Squares on the (latency-compensated) beat, not as the message lands.
         const color = channel == 4 ? "white" : (channel == 1 || channel == 3) ? "red" : null;
         if (color !== null) {
@@ -372,13 +365,11 @@ export class CubemanScene extends Scene {
 
             vel.applyEuler(new THREE.Euler(0, 0, Math.PI / 8 * i));
             vel.multiplyScalar(avg_vel);
-            this.sparks[this.cur_spark_idx].active = true;
-            this.sparks[this.cur_spark_idx].position.copy(pos);
-            this.sparks[this.cur_spark_idx].velocity = vel;
-            this.sparks[this.cur_spark_idx].acceleration.set(0, 0, 0);
-            this.sparks[this.cur_spark_idx].material.color.set(color);
-
-            this.cur_spark_idx = (this.cur_spark_idx + 1) % this.max_num_sparks;
+            const spark = this.spark_pool.spawn();
+            spark.position.copy(pos);
+            spark.velocity = vel;
+            spark.acceleration.set(0, 0, 0);
+            spark.material.color.set(color);
         }
     }
 }

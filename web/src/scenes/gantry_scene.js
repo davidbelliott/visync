@@ -37,6 +37,11 @@ const RIPPLE_WAVELENGTH = 8;
 const RIPPLE_DECAY_BEATS = 0.75;
 const RIPPLE_SPREAD = 4;
 const RIPPLE_MAX = 8;
+// The struck cube's speed down at the moment of impact (world units/s): a
+// lone ripple's at its centre, -d/dt of amplitude * sin(2 pi speed t /
+// wavelength) at t = 0. The paddle arrives at exactly this speed (see
+// start_pound), so the hit carries straight through into the cube.
+const STRIKE_SPEED = 2 * Math.PI * RIPPLE_AMPLITUDE * RIPPLE_SPEED / RIPPLE_WAVELENGTH;
 
 // Strike sparks: an even ring of SPARKS_PER_STRIKE at SPARK_SPEED (units/s)
 // and SPARK_ELEVATION, carrying on with the striking gantry's velocity.
@@ -103,8 +108,9 @@ const ACTION_VEL_SMOOTH_S = 0.3;
 
 // Paddle height h: 0 = up, 1 = on the block. Paddles stay fully up; a kick
 // slams one from there onto the block in one stroke over the drop time
-// (MAX_POUND_S, shrunk towards MIN_POUND_S when there's no lookahead),
-// accelerating into the hit, after which it glides back up
+// (MAX_POUND_S, shrunk towards MIN_POUND_S when there's no lookahead), from
+// rest to exactly STRIKE_SPEED at contact (accelerating into it from a long
+// drop, easing into it from a short one), after which it glides back up
 // (PADDLE_SMOOTH_S). SLAM_GRACE_S: how long the assignee may coast past its
 // target without a kick before easing back onto it.
 const SLAM_GRACE_S = 0.1;
@@ -185,7 +191,12 @@ class Gantry {
         this.scene = scene;
         this.base_y = 5.929;    // sqrt(2) * 5 * tan(pi / 8) + 1.5 + 0.5 + 1
         this.paddle_up_y = -1.0;
-        this.paddle_down_y = (1.5 + 0.5) - this.base_y;
+        // Its centre on a block resting at height 0: half the block (1.5)
+        // plus half the paddle (0.5) above it. Moved each frame to the block
+        // it would strike as that rides the ripples (see anim_frame), so a
+        // slam always ends exactly on the block's top: never short, never in.
+        this.paddle_contact_y = (1.5 + 0.5) - this.base_y;
+        this.paddle_down_y = this.paddle_contact_y;
 
         this.bridge = new EasedFollower(0, 1);
         this.trolley = new EasedFollower(0, 1);
@@ -215,6 +226,7 @@ class Gantry {
         this.paddle_glide = new EasedFollower(0, 1);
         this.striking = false;
         this.slam_from = 0;
+        this.slam_k = 2;            // the slam's slope at contact (see start_pound)
         this.pound_secs = MAX_POUND_S;
         this.pound_clock = new THREE.Clock(false);
         // Idle gantries track a goal set by the scene each frame instead of
@@ -262,11 +274,18 @@ class Gantry {
         }
         this.x_beam.position.z = this.mover.position.z;
 
+        // Bottom out on the top of the block the paddle would strike, as it
+        // stands now.
+        const [row, col] = this.scene.strike_cell(this);
+        this.paddle_down_y = this.paddle_contact_y + this.scene.ripples.height(row, col);
+
         // Impact effects fire on the frame the slam reaches the block, so the
         // block never moves before it's hit.
         if (this.striking) {
             const u = Math.min(1, this.pound_clock.getElapsedTime() / this.pound_secs);
-            this.paddle_h = this.slam_from + (1 - this.slam_from) * u * u;
+            // From rest to slope slam_k at contact (see start_pound).
+            const k = this.slam_k;
+            this.paddle_h = this.slam_from + (1 - this.slam_from) * ((k - 2) * u + 3 - k) * u * u;
             if (u >= 1) {
                 this.striking = false;
                 this.paddle_glide.reset(1);
@@ -344,12 +363,18 @@ class Gantry {
     }
 
     // Drop the paddle now, touching down drop_secs later (touchdown_s: that
-    // scheduled scene-clock time).
+    // scheduled scene-clock time) at STRIKE_SPEED. Its height over the drop is
+    // h(u) = (k - 2) u^3 + (3 - k) u^2 of the stroke left: from rest (h'(0) =
+    // 0) to the block (h(1) = 1) at slope k, so speed k * stroke / drop_secs;
+    // k solved for STRIKE_SPEED, and kept to 0..3, where h rises monotonically
+    // (2 is a plain u^2).
     start_pound(drop_secs) {
         this.touchdown_s = this.scene.clock.getElapsedTime() + drop_secs;
         this.pound_secs = drop_secs;
         this.striking = true;
         this.slam_from = this.paddle_h;
+        const stroke = Math.abs(this.paddle_down_y - this.paddle_up_y) * (1 - this.slam_from);
+        this.slam_k = clamp(STRIKE_SPEED * drop_secs / Math.max(stroke, 1e-6), 0, 3);
         this.pound_clock.start();
     }
 }
@@ -720,15 +745,20 @@ export class GantryScene extends Scene {
     // straight away so another gantry can set off while this one lifts.
     on_contact(g) {
         this.last_striker = g;
-        // The assignee may be passing over its block, so hit exactly there.
-        const [row, col] = g === this.assignee ? this.target :
-            [Math.round(g.mover.position.z / CELL), Math.round(g.mover.position.x / CELL)];
+        const [row, col] = this.strike_cell(g);
         this.create_sparks(col * CELL, row * CELL, g.trolley.vel, g.bridge.vel);
         this.ripples.add(row, col);
         this.stamp_at(row, col);
         this.add_trail_point(row, col);
         this.struck = [row, col];
         this.set_target(this.aim_from(this.struck));
+    }
+
+    // The block gantry g strikes: the assignee its target (it may be passing
+    // over it, so exactly there), any other the one under it.
+    strike_cell(g) {
+        return g === this.assignee ? this.target :
+            [Math.round(g.mover.position.z / CELL), Math.round(g.mover.position.x / CELL)];
     }
 
     // The struck block plus the targeting vector, rounded to a cell.

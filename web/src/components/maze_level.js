@@ -36,10 +36,10 @@ import { InstancedProps } from './instanced_props.js';
 //   off the wall's face, outlined.
 // - The floor: a dithered fill whose opacity follows simplex noise.
 //
-// Fog of war: edges fade with distance from a point (set_viewer), eased
-// between fog_near and fog_far (unless made with fog_edges false: then they
-// are drawn at full intensity everywhere); the floor too. The rest is lit (e.g. by a
-// light whose range ends at fog_far), so it darkens with distance. Walls and
+// Nothing fades with distance: everything is solid, but for the floor's own
+// translucency and the whole level's opacity (set_opacity, for crossfading
+// levels); it is lit (e.g. by a light with a limited range), which leaves the
+// distance dark. Walls and
 // stairs cast shadows (while the level is mostly faded in: one level casts
 // at a time), and everything lit receives them. Each level's walls stand its
 // own height (MazeLevels.params: a multiple of the standard height).
@@ -57,8 +57,8 @@ const ARCH_SEGMENTS = 12;           // per half turn
 // patches CARPET_NOISE_SIZE world units across.
 const CARPET_INSET = 2;
 const CARPET_Y = 0.02;
-const CARPET_DARK = 0.55;
-const CARPET_NOISE_SIZE = 4;
+const CARPET_DARK = 0.75;
+const CARPET_NOISE_SIZE = 10;
 // Carpet patterns, picked per room (world units): 0 plain; 1 a checkerboard
 // of CHECKER_TILE squares from the carpet's corner, the carpet's colour and
 // black (as the drum kit's rug, in black and white), drawn in its shader; 2 rows of zigzags, ZIGZAG_ROW apart,
@@ -90,7 +90,7 @@ const FLOOR_NOISE_SIZE = 25;
 const FLOOR_SIZE = 400;
 
 // Per window (archways count as windows here), sized for the widest window
-// (half 9, with unfogged edges): ~70 windows and ~25 archways typical; past
+// (half 9): ~70 windows and ~25 archways typical; past
 // MAX_WINDOWS the rest are left out, which bounds the buffers.
 const MAX_WINDOWS = 160;
 const MAX_STAIRS = 32;      // per flight length
@@ -110,31 +110,47 @@ const POT_HALF = 0.55;
 const POT_CLEAR = 0.25;
 const BONSAI_EDGE_ANGLE = 20;
 const MAX_PLANTS = 12;
-// Paintings: PAINTING_W of their wall span's length wide, PAINTING_H standard
-// heights tall, centred PAINTING_V standard heights up (eye level, however
-// tall the walls), PAINTING_OFFSET off the wall's face. Their noise in
-// patches PAINTING_NOISE world units across, between PAINTING_DARK and 1 of
-// the lit colour. Up to MAX_PAINTINGS.
+// Paintings, of two kinds, half each: a rectangle of noise PAINTING_W of
+// its wall span's length wide, PAINTING_H standard heights tall, centred
+// PAINTING_V standard heights up, its noise in patches RECT_NOISE world units
+// across between RECT_DARK and 1 of the lit colour; and a smiley: a disc as
+// big as fits the wall span
+// and its first standard height less PAINTING_MARGIN all round (centred in
+// that first height, so at eye level however tall the walls),
+// PAINTING_OFFSET off the wall's face, in PAINTING_SEGMENTS; filled a darker
+// value of the level's colour (PAINTING_VALUE of it) with subtle noise (as
+// the carpets': between PAINTING_NOISE_LO and 1 of that, in patches
+// PAINTING_NOISE world units across). Outlined, with SMILEY_EYE (of the
+// disc's radius) circle eyes at (+-SMILEY_EYE_X, SMILEY_EYE_Y) from its
+// centre, and a smile: that circle swept along the lower half of a circle
+// SMILEY_SMILE across, concentric with the face, drawn as the tube's outline
+// (outer and inner arcs, round caps at its ends). Up to MAX_PAINTINGS.
 const PAINTING_W = 0.45;
 const PAINTING_H = 0.35;
 const PAINTING_V = 0.55;
+const RECT_NOISE = 0.35;
+const RECT_DARK = 0.1;
+const PAINTING_MARGIN = 0.4;
 const PAINTING_OFFSET = 0.03;
-const PAINTING_NOISE = 0.35;
-const PAINTING_DARK = 0.1;
+const PAINTING_SEGMENTS = 48;
+const PAINTING_VALUE = 0.35;
+const PAINTING_NOISE_LO = 0.75;
+const PAINTING_NOISE = 1.2;
+const SMILEY_EYE = 0.12;
+const SMILEY_EYE_X = 0.3;
+const SMILEY_EYE_Y = 0.42;
+const SMILEY_SMILE = 0.55;
+const SMILEY_EYE_SEGMENTS = 16;
+// Lines per smiley: the face, two eyes, the smile's two arcs and two caps.
+const PAINTING_LINES = PAINTING_SEGMENTS + 2 * SMILEY_EYE_SEGMENTS +
+    PAINTING_SEGMENTS + SMILEY_EYE_SEGMENTS;
 const MAX_PAINTINGS = 48;
 
-// GLSL: the fog (from a point's footprint position, v_xz) and the level's
-// opacity, shared by every material here.
-const FOG_PARS = [
-    'uniform vec2 fog_centre;',
-    'uniform float fog_near;',
-    'uniform float fog_far;',
+// GLSL: the level's opacity and a point's footprint position (v_xz, for the
+// noise patterns and the floor's holes), shared by every material here.
+const LEVEL_PARS = [
     'uniform float opacity_all;',
     'varying vec2 v_xz;',
-    'float fog_alpha() {',
-    '    float f = clamp((fog_far - distance(v_xz, fog_centre)) / (fog_far - fog_near), 0.0, 1.0);',
-    '    return 0.5 - 0.5 * cos(3.14159265 * f);',
-    '}',
 ].join('\n');
 
 // Call seg(ax, az, bx, bz) for each line of carpet pattern `pattern` (see
@@ -253,8 +269,7 @@ export class MazeLevel extends THREE.Group {
     // levels: MazeLevels. cell: grid pitch; thickness: the walls'; height:
     // the standard wall height, which a level's own is a multiple of (world
     // units). half: cells drawn either side of the centre cell.
-    // fog_edges: whether the edges (wireframe) fade with the fog too.
-    constructor(levels, { cell, thickness, height, half, fog_near, fog_far, fog_edges = true }) {
+    constructor(levels, { cell, thickness, height, half }) {
         super();
         this.levels = levels;
         this.level = 0;
@@ -287,11 +302,7 @@ export class MazeLevel extends THREE.Group {
         this.north_arch = new Uint8Array(w2);
 
         this.uniforms = {
-            fog_centre: { value: new THREE.Vector2() },
-            fog_near: { value: fog_near },
-            fog_far: { value: fog_far },
             opacity_all: { value: 1 },
-            fog_edges: { value: fog_edges },
             // Where this group's origin is in the maze (world units), so
             // noise patterns stay fixed to the maze as the window moves.
             maze_origin: { value: new THREE.Vector2() },
@@ -328,7 +339,7 @@ export class MazeLevel extends THREE.Group {
             this.fill_geom.setAttribute(name, attr);
         }
         const max_lines = 2 * boundaries + (m + 1) * (m + 1) + 2 * WINDOW_ROUND_SEGMENTS * MAX_WINDOWS +
-            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES + 4 * MAX_PAINTINGS +
+            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES + PAINTING_LINES * MAX_PAINTINGS +
             bonsai_lines * MAX_PLANTS;
         this.line_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'line_color']) {
@@ -344,11 +355,12 @@ export class MazeLevel extends THREE.Group {
             this.carpet_geom.setAttribute(name, attr);
         }
 
-        // Paintings: a quad each; painting_info: (u, v) world units from its
-        // corner, and its noise's seed.
+        // Paintings: a quad or a disc (a fan of PAINTING_SEGMENTS) each;
+        // painting_info: (u, v) world units on the wall, and its noise's seed
+        // (0..1 a smiley's, 2..3 a rectangle's).
         this.painting_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'normal', 'painting_info']) {
-            const attr = new THREE.BufferAttribute(new Float32Array(MAX_PAINTINGS * 18), 3);
+            const attr = new THREE.BufferAttribute(new Float32Array(MAX_PAINTINGS * PAINTING_SEGMENTS * 9), 3);
             attr.setUsage(THREE.DynamicDrawUsage);
             this.painting_geom.setAttribute(name, attr);
         }
@@ -371,11 +383,10 @@ export class MazeLevel extends THREE.Group {
                 '}',
             ].join('\n'),
             fragmentShader: [
-                FOG_PARS,
-                'uniform bool fog_edges;',
+                LEVEL_PARS,
                 'varying vec3 v_color;',
                 'void main() {',
-                '    gl_FragColor = vec4(v_color, (fog_edges ? fog_alpha() : 1.0) * opacity_all);',
+                '    gl_FragColor = vec4(v_color, opacity_all);',
                 '    #include <colorspace_fragment>',
                 '}',
             ].join('\n'),
@@ -389,7 +400,7 @@ export class MazeLevel extends THREE.Group {
         // Staircases: a unit flight per length (steps as tall as the walls
         // are thick, so twice as many on a two-cell flight), posed and
         // stretched per staircase; and the ones in the window, per length,
-        // as [Matrix4, x, z].
+        // as Matrix4s.
         this.stairs = new Map();
         this.stair_lists = new Map();
         for (const k of STAIR_LENGTHS) {
@@ -412,7 +423,7 @@ export class MazeLevel extends THREE.Group {
         new ResourceLoader(['glsl/chunks/dither_pars.frag', 'glsl/chunks/dither.frag',
             'glsl/chunks/simplex2d.glsl']).load().then(([dither_pars, dither, simplex2d]) => {
             // A lit, dithered fill. extra_frag runs first in the fragment
-            // shader (with the fog, opacity and noise available); polygon_offset
+            // shader (with the opacity and noise available); polygon_offset
             // pushes it back so edges on it draw.
             const fill_material = (params, polygon_offset, extra_frag) => {
                 const mat = new THREE.MeshLambertMaterial({
@@ -433,7 +444,7 @@ export class MazeLevel extends THREE.Group {
                     );
                     shader.fragmentShader = shader.fragmentShader.replace(
                         '#include <dithering_pars_fragment>',
-                        dither_pars + '\n' + simplex2d + '\n' + FOG_PARS +
+                        dither_pars + '\n' + simplex2d + '\n' + LEVEL_PARS +
                         '\nuniform vec2 maze_origin;\nuniform vec4 holes[' + MAX_HOLES + '];' +
                         '\nuniform int hole_count;'
                     ).replace(
@@ -502,7 +513,8 @@ export class MazeLevel extends THREE.Group {
             carpets.receiveShadow = true;
             this.add(carpets);
 
-            // Paintings: lit noise (see PAINTING_NOISE) in the level's colour.
+            // Paintings: noise in the level's colour, strong on a rectangle,
+            // darker and subtle on a smiley (see PAINTING_VALUE).
             const painting_mat = this.painting_mat = fill_material({ color: this.color }, 1, fade);
             const painting_frag = painting_mat.onBeforeCompile;
             painting_mat.onBeforeCompile = (shader) => {
@@ -520,8 +532,13 @@ export class MazeLevel extends THREE.Group {
                 ).replace(
                     '#include <color_fragment>',
                     '#include <color_fragment>\n' +
-                    `diffuseColor.rgb *= mix(${f(PAINTING_DARK)}, 1.0, ` +
-                    `0.5 + 0.5 * snoise(v_paint.xy / ${f(PAINTING_NOISE)} + v_paint.z * 97.0));`
+                    'if (v_paint.z > 1.5) {\n' +
+                    `    diffuseColor.rgb *= mix(${f(RECT_DARK)}, 1.0, ` +
+                    `0.5 + 0.5 * snoise(v_paint.xy / ${f(RECT_NOISE)} + v_paint.z * 97.0));\n` +
+                    '} else {\n' +
+                    `    diffuseColor.rgb *= ${f(PAINTING_VALUE)} * mix(${f(PAINTING_NOISE_LO)}, 1.0, ` +
+                    `0.5 + 0.5 * snoise(v_paint.xy / ${f(PAINTING_NOISE)} + v_paint.z * 97.0));\n` +
+                    '}'
                 );
             };
             painting_mat.customProgramCacheKey = () => 'painting' + fade;
@@ -530,7 +547,7 @@ export class MazeLevel extends THREE.Group {
             paintings.receiveShadow = true;
             this.add(paintings);
 
-            // The floor: opacity from noise, faded with the fog and level.
+            // The floor: opacity from noise, faded with the level.
             // Pushed back past the walls' bottom edges.
             this.floor_mat = fill_material({ color: this.color }, 2,
                 'for (int k = 0; k < ' + MAX_HOLES + '; k++) {\n' +
@@ -541,7 +558,7 @@ export class MazeLevel extends THREE.Group {
                 'float floor_alpha = mix(' + FLOOR_MIN.toFixed(2) + ', ' + FLOOR_MAX.toFixed(2) +
                 ', smoothstep(' + FLOOR_NOISE_LO.toFixed(2) + ', ' + FLOOR_NOISE_HI.toFixed(2) +
                 ', snoise((v_xz + maze_origin) / ' + FLOOR_NOISE_SIZE.toFixed(1) + ')))' +
-                ' * fog_alpha() * opacity_all;\n' +
+                ' * opacity_all;\n' +
                 'if (dither4x4(gl_FragCoord.xy, floor_alpha) < 0.5) discard;');
             const floor_geom = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE).rotateX(-Math.PI / 2);
             const floor = new THREE.Mesh(floor_geom, this.floor_mat);
@@ -566,11 +583,6 @@ export class MazeLevel extends THREE.Group {
         }
     }
 
-    // The fog's centre, in this group's frame (x, z).
-    set_viewer(x, z) {
-        this.uniforms.fog_centre.value.set(x, z);
-    }
-
     // Fade the whole level, 0..1.
     set_opacity(opacity) {
         this.uniforms.opacity_all.value = opacity;
@@ -587,17 +599,11 @@ export class MazeLevel extends THREE.Group {
     // Per frame: fade the stairs with the level (only: they stand solid, as
     // the walls do, however far off).
     update() {
-        const { fog_centre, fog_near, fog_far, opacity_all, fog_edges } = this.uniforms;
-        const fog = (x, z) => {
-            const d = Math.hypot(x - fog_centre.value.x, z - fog_centre.value.y);
-            const f = Math.min(1, Math.max(0, (fog_far.value - d) / (fog_far.value - fog_near.value)));
-            return (0.5 - 0.5 * Math.cos(Math.PI * f)) * opacity_all.value;
-        };
+        const alpha = this.uniforms.opacity_all.value;
         for (const [k, props] of this.stairs) {
             props.begin();
-            for (const [matrix, x, z] of this.stair_lists.get(k)) {
-                props.add_instance(matrix, opacity_all.value,
-                    fog_edges.value ? fog(x, z) : opacity_all.value);
+            for (const matrix of this.stair_lists.get(k)) {
+                props.add_instance(matrix, alpha);
             }
             props.end();
         }
@@ -830,11 +836,82 @@ export class MazeLevel extends THREE.Group {
         const x = i * cell, z = j * cell;
         dummy.position.set(x - di * cell / 2, base, z - dj * cell / 2);
         dummy.updateMatrix();
-        // Fogged by its middle.
-        const mid = (st.k - 1) / 2;
-        this.stair_lists.get(st.k).push([this.pooled_matrix(n).copy(dummy.matrix),
-            x + di * mid * cell, z + dj * mid * cell]);
+        this.stair_lists.get(st.k).push(this.pooled_matrix(n).copy(dummy.matrix));
         return n + 1;
+    }
+
+    // Write triangles t ([[u, v] x 3] on the plane `off`, point(u, v, plane)
+    // placing wall coordinates) at float pc of the painting buffers, wound to
+    // face (nx, 0, nz) as tri() does, with painting_info (u, v, info_z); the
+    // next pc.
+    paint_tris(point, off, nx, nz, info_z, pnrm, ppos, pinfo, pc, tris) {
+        for (const t of tris) {
+            const [a, b, c] = t.map(([u, v]) => point(u, v, off));
+            const along = ((b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])) * nx +
+                ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) * nz;
+            for (const q of along >= 0 ? [0, 1, 2] : [0, 2, 1]) {
+                const [u, v] = t[q];
+                ppos.set(point(u, v, off), pc);
+                pnrm[pc] = nx; pnrm[pc + 1] = 0; pnrm[pc + 2] = nz;
+                pinfo[pc] = u; pinfo[pc + 1] = v; pinfo[pc + 2] = info_z;
+                pc += 3;
+            }
+        }
+        return pc;
+    }
+
+    // A rectangle of noise (see PAINTING_W) on a wall span len long, as
+    // smiley(); the next pc.
+    rect_painting(point, len, off, nx, nz, seed, pnrm, ppos, pinfo, pc, line) {
+        const w = PAINTING_W * len, ph = PAINTING_H * this.base_height, pv = PAINTING_V * this.base_height;
+        const u0 = (len - w) / 2, u1 = u0 + w, v0 = pv - ph / 2, v1 = pv + ph / 2;
+        pc = this.paint_tris(point, off, nx, nz, 2 + seed, pnrm, ppos, pinfo, pc,
+            [[[u0, v0], [u0, v1], [u1, v1]], [[u0, v0], [u1, v1], [u1, v0]]]);
+        const at = (u, v) => point(u, v, off);
+        line(...at(u0, v0), ...at(u0, v1));
+        line(...at(u0, v1), ...at(u1, v1));
+        line(...at(u1, v1), ...at(u1, v0));
+        line(...at(u1, v0), ...at(u0, v0));
+        return pc;
+    }
+
+    // A smiley (see PAINTING_MARGIN) on a wall span len long, on the plane
+    // `off` (point(u, v, plane) places wall coordinates), facing (nx, 0, nz):
+    // its disc's triangles written at float pc of the painting buffers (see
+    // paint_tris), its lines through line(); the next pc.
+    smiley(point, len, off, nx, nz, seed, pnrm, ppos, pinfo, pc, line) {
+        const bh = this.base_height;
+        const cu = len / 2, cv = bh / 2, r = Math.min(len, bh) / 2 - PAINTING_MARGIN;
+        const at = (u, v) => point(u, v, off);
+        const on = (u, v, rad, a) => [u + rad * Math.cos(a), v + rad * Math.sin(a)];
+        const fan = [];
+        for (let k = 0; k < PAINTING_SEGMENTS; k++) {
+            const a0 = 2 * Math.PI * k / PAINTING_SEGMENTS, a1 = 2 * Math.PI * (k + 1) / PAINTING_SEGMENTS;
+            fan.push([[cu, cv], on(cu, cv, r, a0), on(cu, cv, r, a1)]);
+        }
+        pc = this.paint_tris(point, off, nx, nz, seed, pnrm, ppos, pinfo, pc, fan);
+        // An arc of radius rad round (u, v), angles a0..a1, in n segments.
+        const arc = (u, v, rad, a0, a1, n) => {
+            for (let k = 0; k < n; k++) {
+                const p0 = on(u, v, rad, a0 + (a1 - a0) * k / n);
+                const p1 = on(u, v, rad, a0 + (a1 - a0) * (k + 1) / n);
+                line(...at(...p0), ...at(...p1));
+            }
+        };
+        const re = SMILEY_EYE * r, rs = SMILEY_SMILE * r, half = SMILEY_EYE_SEGMENTS / 2;
+        arc(cu, cv, r, 0, 2 * Math.PI, PAINTING_SEGMENTS);
+        for (const side of [-1, 1]) {
+            arc(cu + side * SMILEY_EYE_X * r, cv + SMILEY_EYE_Y * r, re, 0, 2 * Math.PI, SMILEY_EYE_SEGMENTS);
+        }
+        // The smile: the eye's circle swept along the lower half of the
+        // circle rs round the centre: its outer and inner edges, and the
+        // round ends (the upper halves of eye circles at the path's ends).
+        arc(cu, cv, rs + re, Math.PI, 2 * Math.PI, PAINTING_SEGMENTS / 2);
+        arc(cu, cv, rs - re, Math.PI, 2 * Math.PI, PAINTING_SEGMENTS / 2);
+        for (const side of [-1, 1]) {
+            arc(cu + side * rs, cv, re, 0, Math.PI, half);
+        }
+        return pc;
     }
 
     // Write the union's faces and edges, the windows, and the carpets.
@@ -890,30 +967,11 @@ export class MazeLevel extends THREE.Group {
             if (kind == 0) {
                 quad(point(0, 0), point(0, h), point(s1 - s0, h), point(s1 - s0, 0), nx, 0, nz);
                 line(...point(0, 0), ...point(s1 - s0, 0));
-                if (paint !== null && pc < MAX_PAINTINGS * 18) {
-                    const len = s1 - s0, w = PAINTING_W * len;
-                    const ph = PAINTING_H * this.base_height, pv = PAINTING_V * this.base_height;
-                    const u0 = (len - w) / 2, u1 = u0 + w, v0 = pv - ph / 2, v1 = pv + ph / 2;
-                    const off = at + normal * PAINTING_OFFSET;
-                    // Two triangles, each wound to face out from the wall (as tri()).
-                    for (const t of [[[u0, v0], [u0, v1], [u1, v1]], [[u0, v0], [u1, v1], [u1, v0]]]) {
-                        const [a, b, c] = t.map(([u, v]) => point(u, v, off));
-                        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-                        const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-                        const along = (uy * vz - uz * vy) * nx + (ux * vy - uy * vx) * nz;
-                        const order = along >= 0 ? [0, 1, 2] : [0, 2, 1];
-                        for (const k of order) {
-                            const [u, v] = t[k];
-                            ppos.set(point(u, v, off), pc);
-                            pnrm[pc] = nx; pnrm[pc + 1] = 0; pnrm[pc + 2] = nz;
-                            pinfo[pc] = u - u0; pinfo[pc + 1] = v - v0; pinfo[pc + 2] = paint;
-                            pc += 3;
-                        }
-                    }
-                    line(...point(u0, v0, off), ...point(u0, v1, off));
-                    line(...point(u0, v1, off), ...point(u1, v1, off));
-                    line(...point(u1, v1, off), ...point(u1, v0, off));
-                    line(...point(u1, v0, off), ...point(u0, v0, off));
+                if (paint !== null && pc < MAX_PAINTINGS * PAINTING_SEGMENTS * 9) {
+                    // Half rectangles, half smileys, each its own noise seed.
+                    const painter = paint < 0.5 ? this.rect_painting : this.smiley;
+                    pc = painter.call(this, point, s1 - s0, at + normal * PAINTING_OFFSET, nx, nz,
+                        (2 * paint) % 1, pnrm, ppos, pinfo, pc, line);
                 }
                 return;
             }

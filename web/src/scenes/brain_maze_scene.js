@@ -7,6 +7,7 @@ import { MazeLevels } from '../maze_levels.js';
 import { MazeLevel } from '../components/maze_level.js';
 import { InstancedProps } from '../components/instanced_props.js';
 import { SparkPool } from '../components/spark_pool.js';
+import { SilhouetteOutline } from '../components/silhouette_outline.js';
 import { ISOMETRIC_TILT } from '../stepped_rotation.js';
 import { CH_EXPAND_Y } from '../controller_map.js';
 import { lerp_scalar, ease, clamp, Spark, PhaseLockedBeats } from '../util.js';
@@ -31,24 +32,17 @@ const HEAD_MODEL_HEIGHT = 27.9;
 const HEAD_SCALE = WALL_H / HEAD_MODEL_HEIGHT;
 // Corridors CORRIDOR_W world units between the walls, which sets the cell
 // pitch (~6.2): sized for the brain this scene first walked (1.5 times its
-// width), kept so the fog and maze window (below) stay tuned.
+// width), kept so the light's reach and maze window (below) stay tuned.
 const CORRIDOR_W = 5.7;
 const CELL = CORRIDOR_W + WALL_T;
-// Fog of war, world units: the maze is lit by nothing but the head's
-// light, whose range ends at FOG_FAR, so it darkens to black with distance;
-// edges fade (eased) from FOG_NEAR to FOG_FAR, unless FOG_EDGES is false:
-// then the maze's wireframe (walls, stairs, carpets) is drawn at full
-// intensity everywhere, and only the fills darken. The cones fade
-// with the fog either way, edges and all. The maze window drawn
-// (cells either side of the head's) spans whole cells past FOG_FAR, so
-// nothing pops in; or, with unfogged edges, past the screen at the widest
-// shared zoom (an isometric view ~50 units from centre to corner, plus a
-// cell's walk before the window recentres).
-const FOG_NEAR = 5;
-const FOG_FAR = 30;
-const FOG_EDGES = false;
-const FOG_CELLS = Math.ceil(FOG_FAR / CELL) + 1;
-const WINDOW_HALF = FOG_EDGES ? FOG_CELLS : 9;
+// Fog of war, world units: nothing fades with distance; the maze is lit by
+// nothing but the head's light, whose range ends LIGHT_RANGE away, so it
+// darkens to black past that, its wireframe drawn at full intensity
+// everywhere. The maze window drawn (cells either side of the head's) spans
+// past the screen at the widest shared zoom (an isometric view ~50 units
+// from centre to corner, plus a cell's walk before the window recentres).
+const LIGHT_RANGE = 30;
+const WINDOW_HALF = 9;
 
 // A translucent black floor under the head (as in the drum kit scene),
 // dimming any scene layered behind this one: its opacity, and its size
@@ -64,7 +58,6 @@ const FLOOR_SIZE = 400;
 const CONE_P = 0.06;
 const CONE_SCALE = 0.10;
 const CONE_COLOR = new THREE.Color('orange');
-const CONE_EDGE_ANGLE = 1;          // deg: every facet edge (see ice cream)
 const CONE_BASE_ANGLE = -Math.PI / 2;
 const CONE_TIP_Z = -20;
 const CONE_SPIN = Math.PI / 8;
@@ -76,7 +69,7 @@ const BOB_BEATS = 4;
 // The head heads straight for what it can see down a straight run of open
 // cells, up to SIGHT_CELLS away (the nearest if several): first a staircase
 // it has not taken, else a cone.
-const SIGHT_CELLS = FOG_CELLS;
+const SIGHT_CELLS = Math.ceil(LIGHT_RANGE / CELL) + 1;
 const MAX_CONES = 64;               // in view at once (two levels); ~20 typical
 // Cells whose cone has been picked up, and staircases taken, oldest
 // forgotten
@@ -144,11 +137,11 @@ const DEFAULT_HEADING = Math.PI / 4;
 // origin at the head's underside), LIGHT_ABOVE_WALLS world units above the
 // tops of its level's walls, so it rises with taller levels (blending
 // between levels' heights on the stairs). Decay 1 for a soft falloff, cut off
-// at FOG_FAR (see the fog of war). A spotlight pointing straight down, its
-// cone (widened to suit its height) reaching FOG_FAR across the floor, so it
+// at LIGHT_RANGE (see the fog of war). A spotlight pointing straight down, its
+// cone (widened to suit its height) reaching LIGHT_RANGE across the floor, so it
 // casts shadows in one pass (a point light would need six): walls block it,
 // so only what the head can see is lit. LIGHT_PENUMBRA softens the cone's rim
-// (out in the fog anyway). Centred over the head, so it holds still as the
+// (out in the dark anyway). Centred over the head, so it holds still as the
 // head turns; the face gets its own key light (Head's face light).
 const LIGHT_ABOVE_WALLS = 2;
 const LIGHT_INTENSITY = 6;
@@ -170,6 +163,12 @@ const FLOOR_SHADOW_OPACITY = 0.6;
 const OUTLINE = true;
 const OUTLINE_COLOR = new THREE.Color('cyan');
 const OUTLINE_LAYER = 1;
+// The cones' outline: 1 px in their colour round their silhouettes (see
+// SilhouetteOutline), at their depth, so walls in front hide it; drawn from
+// CONE_OUTLINE_LAYER, into a mask dissolving each cone as it fades with its
+// level's crossfade (see cone_mask_material), so it takes its outline with
+// it. They have no edges.
+const CONE_OUTLINE_LAYER = 2;
 // Eating a cone sends a 1 px white outline of the head's silhouette out from
 // it, as cubetubes' kick outline: after PICKUP_RING_HOLD beats it grows to
 // PICKUP_RING_SCALE times the head's size over PICKUP_RING_BEATS, fading from
@@ -185,6 +184,31 @@ const PICKUP_RING_OPACITY = 0.8;
 const PICKUP_TRACER_INTERVAL = 1 / 32;
 const PICKUP_TRACER_LIFETIME = 1 / 4;
 const PICKUP_RINGS = Math.ceil(PICKUP_TRACER_LIFETIME / PICKUP_TRACER_INTERVAL) + 2;
+
+// The cones' mask material: whole silhouettes (their own lit material would
+// vanish there, unlit, through the house dither), each instance's opacity
+// (InstancedProps' instance_alpha) in red, for the outline to dissolve by
+// (SilhouetteOutline's fade).
+function cone_mask_material() {
+    const mat = new THREE.MeshBasicMaterial({ color: 'white' });
+    mat.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            'attribute float instance_alpha;\nvarying float v_alpha;\n#include <common>'
+        ).replace(
+            '#include <begin_vertex>',
+            '#include <begin_vertex>\nv_alpha = instance_alpha;'
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            '#include <common>\nvarying float v_alpha;'
+        ).replace(
+            '#include <opaque_fragment>',
+            'gl_FragColor = vec4(v_alpha, 0.0, 0.0, 1.0);'
+        );
+    };
+    return mat;
+}
 
 export class BrainMazeScene extends Scene {
     constructor(context) {
@@ -222,7 +246,7 @@ export class BrainMazeScene extends Scene {
         this.head = new Head(HEAD_SCALE, { shadows: true });
         this.head_group.add(this.head);
         // Placed (height and cone) each frame by place_light.
-        const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, FOG_FAR,
+        const light = this.light = new THREE.SpotLight('white', LIGHT_INTENSITY, LIGHT_RANGE,
             Math.PI / 4, LIGHT_PENUMBRA, LIGHT_DECAY);
         this.head_group.add(light, light.target);     // target at the head's feet
         light.castShadow = true;
@@ -239,9 +263,6 @@ export class BrainMazeScene extends Scene {
             thickness: WALL_T,
             height: WALL_H,
             half: WINDOW_HALF,
-            fog_near: FOG_NEAR,
-            fog_far: FOG_FAR,
-            fog_edges: FOG_EDGES,
         };
         this.view = new MazeLevel(this.levels, view_options);
         this.next_view = new MazeLevel(this.levels, view_options);
@@ -293,7 +314,7 @@ export class BrainMazeScene extends Scene {
         this.cone_dummy.rotation.order = 'YXZ';     // spin about the vertical
         new STLLoader().loadAsync('stl/ice-cream-cone.stl').then((geom) => {
             this.cones = new InstancedProps(geom,
-                { color: CONE_COLOR, max: MAX_CONES, edge_angle: CONE_EDGE_ANGLE, shadows: true });
+                { color: CONE_COLOR, max: MAX_CONES, edges: false, shadows: true });
             this.maze_group.add(this.cones);
         });
 
@@ -332,64 +353,17 @@ export class BrainMazeScene extends Scene {
         this.facing_from = this.facing_to;
         this.build_views();
 
-        // The outline pass (see OUTLINE): a mask sized to whatever target the
-        // scene is drawn to (made on first use and on a size change), the
-        // flat material the head is drawn into it with, and a full-screen
-        // quad marking the pixels just outside it.
-        this.outline_mask = null;
-        this.mask_mat = new THREE.MeshBasicMaterial({ color: 'white' });
-        this.outline_quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-            uniforms: {
-                mask: { value: null },
-                color: { value: OUTLINE_COLOR },
-                outline_on: { value: OUTLINE ? 1 : 0 },
-                center: { value: new THREE.Vector2() },     // head's centre, px
-                ring_scale: { value: new Float32Array(PICKUP_RINGS).fill(1) },
-                ring_alpha: { value: new Float32Array(PICKUP_RINGS) },
-            },
-            vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
-            fragmentShader: [
-                `#define RINGS ${PICKUP_RINGS}`,
-                'uniform sampler2D mask;',
-                'uniform vec3 color;',
-                'uniform float outline_on;',
-                'uniform vec2 center;',
-                'uniform float ring_scale[RINGS];',
-                'uniform float ring_alpha[RINGS];',
-                // Whether pixel p is inside the silhouette scaled by s about center.
-                'float inside(vec2 p, float s) {',
-                '    ivec2 size = textureSize(mask, 0);',
-                '    ivec2 q = ivec2(floor(center + (p - center) / s));',
-                '    return texelFetch(mask, clamp(q, ivec2(0), size - 1), 0).r;',
-                '}',
-                // Whether p is on that silhouette's 1 px outline: just outside it.
-                'float ring(vec2 p, float s) {',
-                '    if (inside(p, s) > 0.5) return 0.0;',
-                '    float n = inside(p + vec2(1.0, 0.0), s) + inside(p - vec2(1.0, 0.0), s) +',
-                '        inside(p + vec2(0.0, 1.0), s) + inside(p - vec2(0.0, 1.0), s);',
-                '    return n > 0.5 ? 1.0 : 0.0;',
-                '}',
-                'void main() {',
-                '    vec2 p = gl_FragCoord.xy;',
-                '    float base = outline_on * ring(p, 1.0);',
-                '    float a = 0.0;',
-                '    for (int i = 0; i < RINGS; i++) {',
-                '        if (ring_alpha[i] > 0.0) a = max(a, ring_alpha[i] * ring(p, ring_scale[i]));',
-                '    }',
-                '    if (base < 0.5 && a <= 0.0) discard;',
-                '    gl_FragColor = base > 0.5 ? vec4(mix(color, vec3(1.0), a), 1.0) : vec4(vec3(1.0), a);',
-                '}',
-            ].join('\n'),
-            transparent: true,
-            depthTest: false,
-            depthWrite: false,
-        }));
-        this.outline_quad.frustumCulled = false;
-        this.outline_scene = new THREE.Scene();
-        this.outline_scene.add(this.outline_quad);
-        this.outline_cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        this.tmp_size = new THREE.Vector2();
-        this.tmp_clear = new THREE.Color();
+        // The outlines (see OUTLINE, CONE_OUTLINE_LAYER): the head's, on top
+        // of everything, flat white into its mask, with the pickup rings; the
+        // cones', at their depth.
+        this.head_outline = new SilhouetteOutline({
+            layer: OUTLINE_LAYER, color: OUTLINE_COLOR, enabled: OUTLINE, rings: PICKUP_RINGS,
+            mask_material: new THREE.MeshBasicMaterial({ color: 'white' }),
+        });
+        this.cone_outline = new SilhouetteOutline({
+            layer: CONE_OUTLINE_LAYER, color: CONE_COLOR, depth: true, fade: true,
+            mask_material: cone_mask_material(),
+        });
         this.tmp_center = new THREE.Vector3();
 
         // The pickup ring (see PICKUP_RING_HOLD): beats since the last cone
@@ -410,52 +384,20 @@ export class BrainMazeScene extends Scene {
 
     render(renderer, underlying_buffer) {
         super.render(renderer, underlying_buffer);
+        if (this.cones?.fill) {
+            this.cones.fill.layers.enable(CONE_OUTLINE_LAYER);
+            this.cone_outline.draw(renderer, this, this.camera);
+        }
         if ((OUTLINE || this.rings_live) && this.head.fill !== null) {
-            this.draw_outline(renderer);
+            this.head.fill.layers.enable(OUTLINE_LAYER);
+            // Rings scale about the head's centre, in the target's pixels.
+            this.head_outline.draw(renderer, this, this.camera, (size) => {
+                const c = this.tmp_center.set(0, this.head.height / 2, 0);
+                this.head_group.localToWorld(c).project(this.camera);
+                this.head_outline.uniforms.center.value.set(
+                    (c.x * 0.5 + 0.5) * size.x, (c.y * 0.5 + 0.5) * size.y);
+            });
         }
-    }
-
-    // Draw the head's silhouette into the mask, then its 1 px outline over
-    // whatever target the scene was drawn to (the screen, or a crossfade's
-    // buffer).
-    draw_outline(renderer) {
-        const target = renderer.getRenderTarget();
-        const size = target ? this.tmp_size.set(target.width, target.height) :
-            renderer.getDrawingBufferSize(this.tmp_size);
-        if (this.outline_mask === null || this.outline_mask.width != size.x ||
-                this.outline_mask.height != size.y) {
-            this.outline_mask?.dispose();
-            this.outline_mask = new THREE.WebGLRenderTarget(size.x, size.y, { depthBuffer: false });
-            this.outline_quad.material.uniforms.mask.value = this.outline_mask.texture;
-        }
-        this.head.fill.layers.enable(OUTLINE_LAYER);
-
-        // The mask: only OUTLINE_LAYER, flat white on clear black, without
-        // redrawing the shadow map.
-        const layers = this.camera.layers.mask;
-        const auto_shadows = renderer.shadowMap.autoUpdate;
-        const clear_alpha = renderer.getClearAlpha();
-        renderer.getClearColor(this.tmp_clear);
-        renderer.shadowMap.autoUpdate = false;
-        this.camera.layers.set(OUTLINE_LAYER);
-        this.overrideMaterial = this.mask_mat;
-        renderer.setRenderTarget(this.outline_mask);
-        renderer.setClearColor(0x000000, 0);
-        renderer.clear();
-        renderer.render(this, this.camera);
-        this.overrideMaterial = null;
-        this.camera.layers.mask = layers;
-        renderer.shadowMap.autoUpdate = auto_shadows;
-        renderer.setClearColor(this.tmp_clear, clear_alpha);
-
-        // The outline (and any pickup rings, scaled about the head's centre in
-        // the target's pixels), over the scene as drawn.
-        const c = this.tmp_center.set(0, this.head.height / 2, 0);
-        this.head_group.localToWorld(c).project(this.camera);
-        this.outline_quad.material.uniforms.center.value.set(
-            (c.x * 0.5 + 0.5) * size.x, (c.y * 0.5 + 0.5) * size.y);
-        renderer.setRenderTarget(target);
-        renderer.render(this.outline_scene, this.outline_cam);
     }
 
     anim_frame(dt) {
@@ -486,22 +428,20 @@ export class BrainMazeScene extends Scene {
         this.view.set_opacity(1 - fade);
         this.next_view.set_opacity(fade);
         this.place_light(fade);
-        for (const view of [this.view, this.next_view]) {
-            view.set_viewer(bx, bz);
-            view.update();
-        }
+        this.view.update();
+        this.next_view.update();
 
         this.head.update(d_beats);
         this.base_group.rotation.x = this.stepped_pitch();
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
-        this.update_cones(bx, bz, fade);
+        this.update_cones(fade);
         this.spark_pool.anim_frame(dt);
         this.update_pickup_ring(d_beats);
     }
 
     // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
     // blended `fade` (0..1) of the way to the next level's on the stairs,
-    // its cone reaching FOG_FAR across the floor from there.
+    // its cone reaching LIGHT_RANGE across the floor from there.
     place_light(fade) {
         const wall_h = (level) => WALL_H * this.levels.params(level).height;
         let h = wall_h(this.level);
@@ -510,7 +450,7 @@ export class BrainMazeScene extends Scene {
         }
         const y = h + LIGHT_ABOVE_WALLS;
         this.light.position.set(0, y, 0);
-        this.light.angle = Math.atan2(FOG_FAR, y);
+        this.light.angle = Math.atan2(LIGHT_RANGE, y);
     }
 
     // Height (world units) along a staircase move `along` (0..1) of the way
@@ -560,9 +500,9 @@ export class BrainMazeScene extends Scene {
         }
     }
 
-    // Pose the cones (spin, bob) and fade them with the fog, by distance
-    // from the head at (bx, bz), and with their level's crossfade.
-    update_cones(bx, bz, fade) {
+    // Pose the cones (spin, bob) and fade them with their level's crossfade
+    // (fade: 0..1 of the way to the next level).
+    update_cones(fade) {
         if (this.cones === null) {
             return;
         }
@@ -576,10 +516,7 @@ export class BrainMazeScene extends Scene {
             const lift = BOB_HEIGHT * (0.5 - 0.5 * Math.cos(bob_angle + phase));
             dummy.position.set(x, offset * this.rise_h - CONE_TIP_Z * CONE_SCALE + lift, z);
             dummy.updateMatrix();
-            const d = Math.hypot(x - bx, z - bz);
-            const level_alpha = offset == 0 ? 1 - fade : fade;
-            const alpha = ease(clamp((FOG_FAR - d) / (FOG_FAR - FOG_NEAR), 0, 1)) * level_alpha;
-            this.cones.add_instance(dummy.matrix, alpha);
+            this.cones.add_instance(dummy.matrix, offset == 0 ? 1 - fade : fade);
         }
         this.cones.end();
     }
@@ -601,7 +538,7 @@ export class BrainMazeScene extends Scene {
             this.ring_tracer_scale[i] = scale;
             this.ring_tracer_opacity[i] = opacity;
         }
-        const { ring_scale, ring_alpha } = this.outline_quad.material.uniforms;
+        const { ring_scale, ring_alpha } = this.head_outline.uniforms;
         ring_scale.value[0] = scale;
         ring_alpha.value[0] = opacity;
         this.rings_live = opacity > 0;

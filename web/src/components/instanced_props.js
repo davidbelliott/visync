@@ -5,7 +5,7 @@ import { ResourceLoader } from '../util.js';
 // A batch of one prop shape (a ramp, an archway, a cone...) drawn in two
 // calls however many there are: a lit fill shaded through the house dither,
 // outlined along its edges in the same colour. Each instance is posed by a
-// matrix and has its own opacity (e.g. fog of war times a level's fade): the
+// matrix and has its own opacity (e.g. a level's fade): the
 // fill dissolves through the dither (so it stays opaque, needing no
 // sorting), the edges blend. Fill and edges both draw once the dither
 // chunks load; add_instance() before then is ignored.
@@ -14,9 +14,10 @@ import { ResourceLoader } from '../util.js';
 export class InstancedProps extends THREE.Group {
     // geometry: the prop's shape. color: THREE.Color of fill and edges.
     // max: instances at once. edge_angle: deg; neighbouring faces meeting
-    // at more than this get an edge (EdgesGeometry). shadows: whether the
+    // at more than this get an edge (EdgesGeometry); edges: false for none
+    // (e.g. outlined some other way). shadows: whether the
     // fill casts and receives shadows (cast_shadows() switches casting).
-    constructor(geometry, { color, max, edge_angle = 30, shadows = false }) {
+    constructor(geometry, { color, max, edge_angle = 30, edges = true, shadows = false }) {
         super();
         this.max = max;
         this.count = 0;
@@ -73,6 +74,9 @@ export class InstancedProps extends THREE.Group {
                 this.fill.frustumCulled = false;
                 this.add(this.fill);
 
+                if (!edges) {
+                    return;
+                }
                 this.edges = new InstancedGeometryCollection(this,
                     new THREE.EdgesGeometry(geometry, edge_angle), 'Lines', max);
                 for (let k = 0; k < max; k++) {
@@ -103,20 +107,22 @@ export class InstancedProps extends THREE.Group {
     }
 
     // Draw an instance posed by matrix (THREE.Matrix4: translation,
-    // rotation and scale, no shear) at alpha (0..1), its edges at edge_alpha
-    // (the same by default); both 0 skips it.
-    add_instance(matrix, alpha, edge_alpha = alpha) {
-        if (this.fill === null || (alpha <= 0 && edge_alpha <= 0) || this.count >= this.max) {
+    // rotation and scale, no shear) at alpha (0..1, fill and edges); 0 skips
+    // it.
+    add_instance(matrix, alpha) {
+        if (this.fill === null || alpha <= 0 || this.count >= this.max) {
             return;
         }
         const k = this.count++;
         this.fill.setMatrixAt(k, matrix);
         this.alphas.setX(k, alpha);
-        matrix.decompose(this.tmp_pos, this.tmp_quat, this.tmp_scale);
-        this.edges.set_pos(k, this.tmp_pos);
-        this.edges.set_quaternion(k, this.tmp_quat);
-        this.edges.set_scale(k, this.tmp_scale);
-        this.edges.set_color(k, this.edge_color, edge_alpha);
+        if (this.edges !== null) {
+            matrix.decompose(this.tmp_pos, this.tmp_quat, this.tmp_scale);
+            this.edges.set_pos(k, this.tmp_pos);
+            this.edges.set_quaternion(k, this.tmp_quat);
+            this.edges.set_scale(k, this.tmp_scale);
+            this.edges.set_color(k, this.edge_color, alpha);
+        }
     }
 
     end() {
@@ -126,6 +132,6 @@ export class InstancedProps extends THREE.Group {
         this.fill.count = this.count;
         this.fill.instanceMatrix.needsUpdate = true;
         this.alphas.needsUpdate = true;
-        this.edges.set_num_instances(this.count);
+        this.edges?.set_num_instances(this.count);
     }
 }

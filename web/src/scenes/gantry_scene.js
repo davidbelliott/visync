@@ -24,27 +24,27 @@ const NUM_CUBES_PER_SIDE = 32;
 // Cube heights are superimposed damped ripples (src/ripple_field.js), one
 // spreading from each recent strike: its cube dips first, then rings move
 // out at RIPPLE_SPEED cells/s, RIPPLE_WAVELENGTH cells apart, starting
-// RIPPLE_AMPLITUDE world units deep and dying away over RIPPLE_DECAY_S s
-// (1/e), so a few beats' strikes overlap, thinning from RIPPLE_SPREAD cells
-// out (still ~0.6 deep ten cells out). RIPPLE_MAX strikes are remembered.
-const RIPPLE_AMPLITUDE = 3;
-const RIPPLE_SPEED = 10;
-const RIPPLE_WAVELENGTH = 6;
-const RIPPLE_DECAY_S = 1.0;
+// RIPPLE_AMPLITUDE world units deep and dying away over RIPPLE_DECAY_BEATS
+// (1/e), thinning from RIPPLE_SPREAD cells out. RIPPLE_MAX strikes are
+// remembered. The decay is short against the beat (down to ~14% by the next
+// strike) so each strike dominates its cube's motion: the struck cube moves
+// down fastest at the moment of impact (a lone ripple's -amplitude * 2 pi *
+// speed / wavelength), rather than earlier ripples still ringing there
+// pulling it out of phase, as a 1 s decay did with a strike every beat.
+const RIPPLE_AMPLITUDE = 4.5;
+const RIPPLE_SPEED = 16;
+const RIPPLE_WAVELENGTH = 8;
+const RIPPLE_DECAY_BEATS = 0.75;
 const RIPPLE_SPREAD = 4;
 const RIPPLE_MAX = 8;
 
-// Strike sparks: a ring of SPARKS_PER_STRIKE at SPARK_SPEED (units/s) and
-// SPARK_ELEVATION, slightly jittered (speed +-10%, elevation +-4 deg, azimuth
-// +-1/8 of the ring spacing), carrying on with the striking gantry's velocity.
+// Strike sparks: an even ring of SPARKS_PER_STRIKE at SPARK_SPEED (units/s)
+// and SPARK_ELEVATION, carrying on with the striking gantry's velocity.
 const MAX_SPARKS = 64;
 const SPARKS_PER_STRIKE = 16;
 const SPARK_SPEED = 25 * Math.SQRT1_2;
 const SPARK_GRAVITY = 40;
 const SPARK_ELEVATION = Math.PI / 4;
-const SPARK_SPEED_JITTER = 0.1;
-const SPARK_ELEVATION_JITTER = Math.PI / 45;
-const SPARK_AZIMUTH_JITTER = 0.125;
 const SPARK_INHERIT_VEL = 1.0;
 const SPARK_LIFE_S = 0.8;
 const SPARK_FLICKER_FRAMES = 3;
@@ -101,14 +101,13 @@ const IDLE_SMOOTH_S = 0.8;
 const IDLE_MAX_CELLS_PER_S = 12;
 const ACTION_VEL_SMOOTH_S = 0.3;
 
-// Paddle height h: 0 = up, 1 = on the block. The assignee's paddle eases down
-// to READY_H over the ANTICIPATE_S before the predicted slam (holding until
-// SLAM_GRACE_S after it); others glide back up (PADDLE_SMOOTH_S). A kick slams
-// it onto the block over the drop time (MAX_POUND_S, shrunk towards
-// MIN_POUND_S when there's no lookahead), accelerating into the hit.
-const ANTICIPATE_S = 0.2;
+// Paddle height h: 0 = up, 1 = on the block. Paddles stay fully up; a kick
+// slams one from there onto the block in one stroke over the drop time
+// (MAX_POUND_S, shrunk towards MIN_POUND_S when there's no lookahead),
+// accelerating into the hit, after which it glides back up
+// (PADDLE_SMOOTH_S). SLAM_GRACE_S: how long the assignee may coast past its
+// target without a kick before easing back onto it.
 const SLAM_GRACE_S = 0.1;
-const READY_H = 0.6;
 const PADDLE_SMOOTH_S = 0.1;
 const MAX_POUND_S = 0.15;
 const MIN_POUND_S = 0.06;
@@ -211,10 +210,9 @@ class Gantry {
         this.x_beam.position.y = this.base_y;
         parent_obj.add(this.x_beam);
 
-        // Paddle (see ANTICIPATE_S).
+        // Paddle (see PADDLE_SMOOTH_S).
         this.paddle_h = 0;
         this.paddle_glide = new EasedFollower(0, 1);
-        this.paddle_goal = 0;
         this.striking = false;
         this.slam_from = 0;
         this.pound_secs = MAX_POUND_S;
@@ -275,7 +273,7 @@ class Gantry {
                 this.scene.on_contact(this);
             }
         } else {
-            this.paddle_h = this.paddle_glide.track(this.paddle_goal, dt, PADDLE_SMOOTH_S, Infinity);
+            this.paddle_h = this.paddle_glide.track(0, dt, PADDLE_SMOOTH_S, Infinity);
         }
         this.paddle.position.y = lerp_scalar(this.paddle_up_y, this.paddle_down_y, this.paddle_h);
     }
@@ -395,7 +393,7 @@ export class GantryScene extends Scene {
 
         this.ripples = new RippleField({
             amplitude: RIPPLE_AMPLITUDE, speed: RIPPLE_SPEED,
-            wavelength: RIPPLE_WAVELENGTH, decay_s: RIPPLE_DECAY_S,
+            wavelength: RIPPLE_WAVELENGTH, decay_s: RIPPLE_DECAY_BEATS * 60 / this.get_local_bpm(),
             spread: RIPPLE_SPREAD, max: RIPPLE_MAX,
         });
 
@@ -499,7 +497,6 @@ export class GantryScene extends Scene {
         this.struck = null;
         this.assignee = null;
         this.last_striker = null;
-        this.last_drop_s = MAX_POUND_S; // drop time of the last kick's slam
         this.kick_td_s = null;          // scheduled touchdown of the latest kick
         this.kick_intervals = [];       // recent kick-to-kick intervals, s
         // Idle formation anchor: slides from `from` (row, col) at t0 to the
@@ -543,6 +540,7 @@ export class GantryScene extends Scene {
         const half = NUM_CUBES_PER_SIDE >> 1;
         this.win_row = Math.round(this.scroll_z.value / CELL) - half;
         this.win_col = Math.round(this.scroll_x.value / CELL) - half;
+        this.ripples.decay_s = RIPPLE_DECAY_BEATS / beats_per_sec;
         this.ripples.update(dt);
 
         const pos = this.cube_pos;
@@ -563,7 +561,6 @@ export class GantryScene extends Scene {
             g_a.move_to(this.target[1] * CELL, this.target[0] * CELL);
         }
         this.update_idle_goals(dt);
-        this.update_paddle_goals();
         for (const g of this.gantries) {
             g.anim_frame(dt);
             g.x_beam.position.x = this.scroll_x.value;
@@ -705,7 +702,7 @@ export class GantryScene extends Scene {
         }
         const delay = this.get_beat_delay();
         const drop_secs = clamp(delay, MIN_POUND_S, MAX_POUND_S);
-        this.record_kick(this.clock.getElapsedTime() + Math.max(delay, drop_secs), drop_secs);
+        this.record_kick(this.clock.getElapsedTime() + Math.max(delay, drop_secs));
         setTimeout(() => {
             const g = this.assignee;
             if (g === null || g.striking) {
@@ -850,8 +847,8 @@ export class GantryScene extends Scene {
         return best;
     }
 
-    // Note a kick whose slam (drop_secs long) touches down at td_s.
-    record_kick(td_s, drop_secs) {
+    // Note a kick whose slam touches down at td_s.
+    record_kick(td_s) {
         if (this.kick_td_s !== null) {
             const interval = td_s - this.kick_td_s;
             if (interval >= MIN_KICK_PERIOD_S && interval <= MAX_KICK_PERIOD_S) {
@@ -862,7 +859,6 @@ export class GantryScene extends Scene {
             }
         }
         this.kick_td_s = td_s;
-        this.last_drop_s = drop_secs;
     }
 
     // Kick period (s): median of recent intervals, or the scene's beat.
@@ -911,20 +907,6 @@ export class GantryScene extends Scene {
             x: (x - g.mover.position.x) / arrive_secs,
             z: clamp((z - g.mover.position.z) / arrive_secs, -vz_limit(row - lo), vz_limit(hi - row)),
         });
-    }
-
-    // Paddles stay up except the assignee's (see ANTICIPATE_S).
-    update_paddle_goals() {
-        const now = this.clock.getElapsedTime();
-        let anticipation = 0;
-        const td = this.next_touchdown_s(now - SLAM_GRACE_S + this.last_drop_s);
-        if (td !== null) {
-            const to_ready = td - this.last_drop_s - PADDLE_SMOOTH_S - now;
-            anticipation = ease(clamp(1 - to_ready / ANTICIPATE_S, 0, 1));
-        }
-        for (const g of this.gantries) {
-            g.paddle_goal = g === this.assignee ? READY_H * anticipation : 0;
-        }
     }
 
     // The idle formation's anchor (fractional [row, col]) at scene time t:
@@ -1047,14 +1029,11 @@ export class GantryScene extends Scene {
     create_sparks(x, z, vx, vz) {
         for (let i = 0; i < SPARKS_PER_STRIKE; i++) {
             const spark = this.spark_pool.spawn(SPARK_LIFE_S);
-            const speed = SPARK_SPEED * (1 + SPARK_SPEED_JITTER * (2 * Math.random() - 1));
-            const elev = SPARK_ELEVATION + SPARK_ELEVATION_JITTER * (2 * Math.random() - 1);
-            const azim = 2 * Math.PI / SPARKS_PER_STRIKE *
-                (i + SPARK_AZIMUTH_JITTER * (2 * Math.random() - 1));
-            const horiz = speed * Math.cos(elev);
+            const azim = 2 * Math.PI * i / SPARKS_PER_STRIKE;
+            const horiz = SPARK_SPEED * Math.cos(SPARK_ELEVATION);
             spark.velocity.set(
                 horiz * Math.cos(azim) + SPARK_INHERIT_VEL * vx,
-                speed * Math.sin(elev),
+                SPARK_SPEED * Math.sin(SPARK_ELEVATION),
                 -horiz * Math.sin(azim) + SPARK_INHERIT_VEL * vz);
             spark.position.set(x, 1.5, z);
         }

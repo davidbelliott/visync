@@ -167,6 +167,21 @@ const FLOOR_SHADOW_OPACITY = 0.6;
 const OUTLINE = true;
 const OUTLINE_COLOR = new THREE.Color('cyan');
 const OUTLINE_LAYER = 1;
+// Eating a cone sends a 1 px white outline of the head's silhouette out from
+// it, as cubetubes' kick outline: after PICKUP_RING_HOLD beats it grows to
+// PICKUP_RING_SCALE times the head's size over PICKUP_RING_BEATS, fading from
+// PICKUP_RING_OPACITY to nothing, dropping a faded copy (a tracer, its scale
+// and opacity then) every PICKUP_TRACER_INTERVAL beats that fades out over
+// PICKUP_TRACER_LIFETIME. Drawn by the outline pass, scaling the silhouette
+// about the head's centre on screen (exactly the head scaled in 3D, under the
+// orthographic camera); PICKUP_RINGS is the ring and its tracers.
+const PICKUP_RING_HOLD = 0.1;
+const PICKUP_RING_BEATS = 1;
+const PICKUP_RING_SCALE = 2;
+const PICKUP_RING_OPACITY = 0.8;
+const PICKUP_TRACER_INTERVAL = 1 / 32;
+const PICKUP_TRACER_LIFETIME = 1 / 4;
+const PICKUP_RINGS = Math.ceil(PICKUP_TRACER_LIFETIME / PICKUP_TRACER_INTERVAL) + 2;
 
 export class BrainMazeScene extends Scene {
     constructor(context) {
@@ -317,24 +332,48 @@ export class BrainMazeScene extends Scene {
         this.outline_mask = null;
         this.mask_mat = new THREE.MeshBasicMaterial({ color: 'white' });
         this.outline_quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-            uniforms: { mask: { value: null }, color: { value: OUTLINE_COLOR } },
+            uniforms: {
+                mask: { value: null },
+                color: { value: OUTLINE_COLOR },
+                outline_on: { value: OUTLINE ? 1 : 0 },
+                center: { value: new THREE.Vector2() },     // head's centre, px
+                ring_scale: { value: new Float32Array(PICKUP_RINGS).fill(1) },
+                ring_alpha: { value: new Float32Array(PICKUP_RINGS) },
+            },
             vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
             fragmentShader: [
+                `#define RINGS ${PICKUP_RINGS}`,
                 'uniform sampler2D mask;',
                 'uniform vec3 color;',
-                'float inside(ivec2 p) {',
+                'uniform float outline_on;',
+                'uniform vec2 center;',
+                'uniform float ring_scale[RINGS];',
+                'uniform float ring_alpha[RINGS];',
+                // Whether pixel p is inside the silhouette scaled by s about center.
+                'float inside(vec2 p, float s) {',
                 '    ivec2 size = textureSize(mask, 0);',
-                '    return texelFetch(mask, clamp(p, ivec2(0), size - 1), 0).r;',
+                '    ivec2 q = ivec2(floor(center + (p - center) / s));',
+                '    return texelFetch(mask, clamp(q, ivec2(0), size - 1), 0).r;',
+                '}',
+                // Whether p is on that silhouette's 1 px outline: just outside it.
+                'float ring(vec2 p, float s) {',
+                '    if (inside(p, s) > 0.5) return 0.0;',
+                '    float n = inside(p + vec2(1.0, 0.0), s) + inside(p - vec2(1.0, 0.0), s) +',
+                '        inside(p + vec2(0.0, 1.0), s) + inside(p - vec2(0.0, 1.0), s);',
+                '    return n > 0.5 ? 1.0 : 0.0;',
                 '}',
                 'void main() {',
-                '    ivec2 p = ivec2(gl_FragCoord.xy);',
-                '    if (inside(p) > 0.5) discard;',
-                '    float n = inside(p + ivec2(1, 0)) + inside(p - ivec2(1, 0)) +',
-                '        inside(p + ivec2(0, 1)) + inside(p - ivec2(0, 1));',
-                '    if (n < 0.5) discard;',
-                '    gl_FragColor = vec4(color, 1.0);',
+                '    vec2 p = gl_FragCoord.xy;',
+                '    float base = outline_on * ring(p, 1.0);',
+                '    float a = 0.0;',
+                '    for (int i = 0; i < RINGS; i++) {',
+                '        if (ring_alpha[i] > 0.0) a = max(a, ring_alpha[i] * ring(p, ring_scale[i]));',
+                '    }',
+                '    if (base < 0.5 && a <= 0.0) discard;',
+                '    gl_FragColor = base > 0.5 ? vec4(mix(color, vec3(1.0), a), 1.0) : vec4(vec3(1.0), a);',
                 '}',
             ].join('\n'),
+            transparent: true,
             depthTest: false,
             depthWrite: false,
         }));
@@ -344,6 +383,19 @@ export class BrainMazeScene extends Scene {
         this.outline_cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         this.tmp_size = new THREE.Vector2();
         this.tmp_clear = new THREE.Color();
+        this.tmp_center = new THREE.Vector3();
+
+        // The pickup ring (see PICKUP_RING_HOLD): beats since the last cone
+        // was eaten, and its tracers' birth (beats on ring_time), scale and
+        // opacity, in a ring buffer.
+        this.ring_beats = Infinity;
+        this.ring_time = 0;
+        this.last_ring_tracer = -Infinity;
+        this.next_ring_tracer = 0;
+        this.ring_tracer_birth = new Float32Array(PICKUP_RINGS - 1).fill(-Infinity);
+        this.ring_tracer_scale = new Float32Array(PICKUP_RINGS - 1).fill(1);
+        this.ring_tracer_opacity = new Float32Array(PICKUP_RINGS - 1);
+        this.rings_live = false;
 
         // The shared view zoom scales this camera (see Scene.bind_zoom).
         this.bind_zoom();
@@ -351,7 +403,7 @@ export class BrainMazeScene extends Scene {
 
     render(renderer, underlying_buffer) {
         super.render(renderer, underlying_buffer);
-        if (OUTLINE && this.head.fill !== null) {
+        if ((OUTLINE || this.rings_live) && this.head.fill !== null) {
             this.draw_outline(renderer);
         }
     }
@@ -389,7 +441,12 @@ export class BrainMazeScene extends Scene {
         renderer.shadowMap.autoUpdate = auto_shadows;
         renderer.setClearColor(this.tmp_clear, clear_alpha);
 
-        // The outline, over the scene as drawn.
+        // The outline (and any pickup rings, scaled about the head's centre in
+        // the target's pixels), over the scene as drawn.
+        const c = this.tmp_center.set(0, this.head.height / 2, 0);
+        this.head_group.localToWorld(c).project(this.camera);
+        this.outline_quad.material.uniforms.center.value.set(
+            (c.x * 0.5 + 0.5) * size.x, (c.y * 0.5 + 0.5) * size.y);
         renderer.setRenderTarget(target);
         renderer.render(this.outline_scene, this.outline_cam);
     }
@@ -432,6 +489,7 @@ export class BrainMazeScene extends Scene {
         this.base_group.rotation.y = YAW_BASE + this.stepped_yaw();
         this.update_cones(bx, bz, fade);
         this.spark_pool.anim_frame(dt);
+        this.update_pickup_ring(d_beats);
     }
 
     // Set the light LIGHT_ABOVE_WALLS over the walls of the head's level,
@@ -519,6 +577,36 @@ export class BrainMazeScene extends Scene {
         this.cones.end();
     }
 
+    // Grow and fade the pickup ring, drop its tracers (as cubetubes'
+    // update_outline_tracers), and hand the lot to the outline pass: ring 0,
+    // then the tracers, each a scale and an opacity (0: off).
+    update_pickup_ring(d_beats) {
+        this.ring_beats += d_beats;
+        this.ring_time += d_beats;
+        const frac = clamp(this.ring_beats / PICKUP_RING_BEATS - PICKUP_RING_HOLD, 0, 1);
+        const opacity = Number.isFinite(this.ring_beats) ? PICKUP_RING_OPACITY * (1 - frac) : 0;
+        const scale = 1 + (PICKUP_RING_SCALE - 1) * frac;
+        if (opacity > 0 && this.ring_time - this.last_ring_tracer >= PICKUP_TRACER_INTERVAL) {
+            const i = this.next_ring_tracer;
+            this.next_ring_tracer = (i + 1) % (PICKUP_RINGS - 1);
+            this.last_ring_tracer = this.ring_time;
+            this.ring_tracer_birth[i] = this.ring_time;
+            this.ring_tracer_scale[i] = scale;
+            this.ring_tracer_opacity[i] = opacity;
+        }
+        const { ring_scale, ring_alpha } = this.outline_quad.material.uniforms;
+        ring_scale.value[0] = scale;
+        ring_alpha.value[0] = opacity;
+        this.rings_live = opacity > 0;
+        for (let i = 0; i < PICKUP_RINGS - 1; i++) {
+            const age = this.ring_time - this.ring_tracer_birth[i];
+            const alpha = this.ring_tracer_opacity[i] * clamp(1 - age / PICKUP_TRACER_LIFETIME, 0, 1);
+            ring_scale.value[i + 1] = this.ring_tracer_scale[i];
+            ring_alpha.value[i + 1] = alpha;
+            this.rings_live = this.rings_live || alpha > 0;
+        }
+    }
+
     // Burst plus signs from the head's centre, at maze_group's origin.
     spawn_sparks() {
         const beats_per_sec = this.get_local_bpm() / 60;
@@ -566,6 +654,7 @@ export class BrainMazeScene extends Scene {
             }
             this.head.flash();
             this.spawn_sparks();
+            this.ring_beats = 0;
         }
 
         this.facing_from = this.facing_to;

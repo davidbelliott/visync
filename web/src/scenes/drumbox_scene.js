@@ -30,42 +30,31 @@ const PITCH_BASE = ISOMETRIC_TILT;
 // wind up for beat 1.
 const JUMP_DELAY_BEATS = 0.25;
 const JUMP_DURATION_BEATS = 0.5;
-// Paddle strikes (see PaddleStroke), swung like a hammer. Each paddle rests
-// at _REST (world units from contact) and, given the beat's lead (delayed
-// mode: an eighth note), draws back to _APEX over WINDUP_S (s, eased), then
-// falls from rest there at constant acceleration into contact at
-// _STRIKE_VEL (world units/s), so its swing takes 2 _APEX / _STRIKE_VEL (a
-// slow strike swings slowly). With too little lead for the swing and at
-// least MIN_WINDUP_S of wind-up (a slow strike, a strike hard on another's
-// heels, immediate mode) it skips the wind-up and swings from wherever it
-// is over the whole lead, a cubic easing into contact at _STRIKE_VEL (or as
-// near as it can from there without dipping past it). Contact gives the drum _KICK (world
-// units/s, down; the drum's velocity clamped to +-MAX_DRUM_VEL). Then it
-// follows through, carrying on at its strike speed and settling back to
-// rest as a critically damped spring with time constant RECOIL_TAU (s; ~0.4 s
-// to settle): heavy rather than springy. The top
-// paddle (kick, rim) strikes straight down; the side paddles (snare) along
-// (SIDE_SPREAD, SIDE_SPREAD, 1) * r in their quarter-turn frames (their
-// offsets are that r), mostly down, ~26 deg off vertical, so a strike reads
-// as a slap down onto the face rather than closing in on it (flat to the
-// face, they still meet it flush).
-const WINDUP_S = 0.12;
-const MIN_WINDUP_S = 0.06;
-const RECOIL_TAU = 0.08;
+// Paddle strikes (see stroke_offset): each paddle rests _REST (world units)
+// off the drum, falls from there at constant acceleration to meet it at
+// _STRIKE_VEL (world units/s; so the fall takes 2 _REST / _STRIKE_VEL),
+// giving it _KICK (world units/s, down; the drum's velocity clamped to
+// +-MAX_DRUM_VEL), holds there STRIKE_HOLD (s; so the contact always shows,
+// rather than falling between frames) and rebounds to rest over REBOUND_S
+// (s), fast off the drum and easing in. The top paddle (kick, rim) strikes straight down; the
+// side paddles (snare) along (SIDE_SPREAD, SIDE_SPREAD, 1) * r in their
+// quarter-turn frames (their offsets are that r), mostly down, ~26 deg off
+// vertical, so a strike reads as a slap down onto the face rather than
+// closing in on it (flat to the face, they still meet it flush).
+const STRIKE_HOLD = 0.04;
+const REBOUND_S = 0.1;
 const TOP_CHANNELS = [1, 3];
-const TOP_REST = 4.2;
-const TOP_APEX = 7;
-const TOP_STRIKE_VEL = 60;
-const TOP_KICK = 40;
+const TOP_REST = 3;
+const TOP_STRIKE_VEL = 100;
+const TOP_KICK = 20;
 const SIDE_CHANNELS = [4];
 const SIDE_REST = 1.8;
-const SIDE_APEX = 3;
-const SIDE_STRIKE_VEL = 10;
-const SIDE_KICK = 10;
+const SIDE_STRIKE_VEL = 100;
+const SIDE_KICK = 5;
 const SIDE_SPREAD = 0.35;
 const MAX_DRUM_VEL = 60;
 // How long an impact is kept for its follow-through (s): settled by then.
-const IMPACT_KEEP_S = 10 * RECOIL_TAU;
+const IMPACT_KEEP_S = 1;
 // Hi-hat slaps: four small cubes, SLAP_SIZE across (the paddle plates'
 // thickness), one over each of the drum's upper square faces at 45 deg (its
 // smallest; centres SQUARE_AT out and SQUARE_AT up, from the truncated
@@ -92,84 +81,11 @@ const TILT_QUAT = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, Math.PI / 4);
 // A striking paddle's offset from contact, s seconds before it (negative:
 // after), for a strike of t_strike seconds each way from rest offset rest,
 // staying in contact for `hold` seconds before rebounding.
-// One paddle's strokes (see TOP_REST): its offset from contact (world
-// units, + away from the drum) through the impacts aimed at it.
-class PaddleStroke {
-    // channels: the beats it strikes on; rest, apex, strike_vel, kick: see
-    // TOP_REST.
-    constructor({ channels, rest, apex, strike_vel, kick }) {
-        Object.assign(this, { channels, rest, apex, strike_vel, kick });
-        this.swing_s = 2 * apex / strike_vel;  // a full swing's fall (s)
-        this.h = rest;      // offset from contact (world units)
-        this.flash = 0;     // its strike's flash (see PADDLE_FLASH)
-    }
-
-    // Its offset this frame, from its impacts (see PaddleGroup.impacts,
-    // times already advanced; the start height and lead filled in here). It
-    // winds up and swings even while the group is landing from a hop (the
-    // beat after one arrives then), so every swing gets its full lead; only
-    // an impact that struck (planted) follows through.
-    update(impacts) {
-        let next = null, last = null;
-        for (const impact of impacts) {
-            if (!this.channels.includes(impact[1])) {
-                continue;
-            }
-            if (impact[0] >= 0) {
-                if (next === null || impact[0] < next[0]) {
-                    next = impact;
-                }
-            } else if (impact[5] && (last === null || impact[0] > last[0])) {
-                last = impact;
-            }
-        }
-        if (next !== null) {
-            if (next[3] === undefined) {
-                next[3] = this.h;
-                next[4] = next[0];
-            }
-            this.h = this.approach(next[0], next[4], next[3]);
-        } else if (last !== null) {
-            this.h = this.follow_through(-last[0]);
-        } else {
-            this.h = this.rest;
-        }
-        return this.h;
-    }
-
-    // s before contact, of `lead` from h0 (see TOP_REST).
-    approach(s, lead, h0) {
-        const fall = this.swing_s, windup = Math.min(WINDUP_S, lead - fall);
-        if (windup < MIN_WINDUP_S) {
-            // From h0 at rest (u = 1) to contact (u = 0) over the lead: a
-            // cubic Hermite, monotonic while its contact slope m <= 3 h0.
-            const u = s / lead, m = Math.min(this.strike_vel * lead, 3 * h0);
-            return m * u * (1 - u) * (1 - u) + h0 * u * u * (3 - 2 * u);
-        }
-        if (s >= fall + windup) {
-            return h0;
-        }
-        if (s >= fall) {
-            return h0 + (this.apex - h0) * ease((fall + windup - s) / windup);
-        }
-        // Falling from the apex at rest (u = 1) to contact at strike_vel.
-        const u = s / fall;
-        return this.apex * u * (2 - u);
-    }
-
-    // t after contact: critically damped from contact, moving at strike_vel
-    // into it, to rest.
-    follow_through(t) {
-        const x0 = -this.rest, v0 = -this.strike_vel;
-        return this.rest + (x0 + (v0 + x0 / RECOIL_TAU) * t) * Math.exp(-t / RECOIL_TAU);
-    }
-}
-
-function strike_offset(s, t_strike, rest, hold = 0) {
-    if (s < 0) {
-        s = Math.min(0, s + hold);
-    }
-    const u = 1 - Math.abs(s) / t_strike;
+// A strike's offset from contact s (s) before it (after, if negative): rest
+// off, falling over fall_s from still to contact, held there for hold (s),
+// then rebounding over rebound_s, fast at first and easing into rest.
+function stroke_offset(s, rest, fall_s, rebound_s, hold = 0) {
+    const u = s >= 0 ? 1 - s / fall_s : 1 - Math.max(0, -s - hold) / rebound_s;
     return u <= 0 ? rest : rest * (1 - u * u);
 }
 
@@ -256,15 +172,13 @@ class PaddleGroup {
         // PADDLE_FLASH; the paddles' are their strokes').
         this.slap_flash = new Float32Array(SLAP_CUBES);
 
-        // Upcoming and recent strikes: [s until contact, channel, slap cube,
-        // then (PaddleStroke) the paddle's height when it began its swing,
-        // the lead it had then, and whether it struck].
+        // Upcoming and recent strikes: [s until contact, channel, slap cube].
         this.impacts = [];
-        // The top and side paddles' swings (see TOP_REST).
-        this.top_stroke = new PaddleStroke({ channels: TOP_CHANNELS, rest: TOP_REST,
-            apex: TOP_APEX, strike_vel: TOP_STRIKE_VEL, kick: TOP_KICK });
-        this.side_stroke = new PaddleStroke({ channels: SIDE_CHANNELS, rest: SIDE_REST,
-            apex: SIDE_APEX, strike_vel: SIDE_STRIKE_VEL, kick: SIDE_KICK });
+        // The top and side paddles' strikes (see TOP_REST), and their flashes.
+        const stroke = (channels, rest, strike_vel, kick) =>
+            ({ channels, rest, fall_s: 2 * rest / strike_vel, kick, flash: 0 });
+        this.top_stroke = stroke(TOP_CHANNELS, TOP_REST, TOP_STRIKE_VEL, TOP_KICK);
+        this.side_stroke = stroke(SIDE_CHANNELS, SIDE_REST, SIDE_STRIKE_VEL, SIDE_KICK);
         this.strokes = [this.top_stroke, this.side_stroke];
 
         this.in_position = false;
@@ -329,7 +243,10 @@ class PaddleGroup {
         this.position.lerpVectors(this.movement_start_pos, this.movement_end_pos, frac);
         this.position.z = this.paddle_group_movement_y(frac);
 
-        // The slap cubes' gaps off their faces (see strike_offset).
+        // Each paddle's offset from contact: the top paddle's height above
+        // the drum's rest top, the side paddles' r (see SIDE_SPREAD), the slap
+        // cubes' gaps off their faces.
+        let top_off = TOP_REST, side_r = SIDE_REST;
         const slap_gap = this.slap_gap;
         slap_gap.fill(SLAP_REST);
 
@@ -349,25 +266,27 @@ class PaddleGroup {
             const hihat = HIHAT_CHANNELS.includes(channel);
             const stroke = this.strokes.find((st) => st.channels.includes(channel));
             impact[0] = new_time;
+            if (!this.in_position) {
+                continue;
+            }
             if (s >= 0 && new_time < 0) {
-                // Contact, if planted on the drum.
-                impact[5] = this.in_position;
-                if (this.in_position && stroke) {
+                // Contact.
+                if (stroke) {
                     drum.vel_z = clamp(drum.vel_z - stroke.kick, -MAX_DRUM_VEL, MAX_DRUM_VEL);
                     stroke.flash = 1;
-                } else if (this.in_position && hihat) {
+                } else if (hihat) {
                     this.slap_flash[cube] = 1;
                 }
             }
-            if (this.in_position && hihat) {
+            if (stroke === this.top_stroke) {
+                top_off = Math.min(top_off, stroke_offset(new_time, TOP_REST, stroke.fall_s, REBOUND_S, STRIKE_HOLD));
+            } else if (stroke === this.side_stroke) {
+                side_r = Math.min(side_r, stroke_offset(new_time, SIDE_REST, stroke.fall_s, REBOUND_S, STRIKE_HOLD));
+            } else if (hihat) {
                 slap_gap[cube] = Math.min(slap_gap[cube],
-                    strike_offset(new_time, SLAP_S, SLAP_REST, SLAP_HOLD));
+                    stroke_offset(new_time, SLAP_REST, SLAP_S, SLAP_S, SLAP_HOLD));
             }
         }
-        // The top paddle's height above the drum's rest top; the side
-        // paddles' r (see SIDE_SPREAD).
-        const top_off = this.top_stroke.update(this.impacts);
-        let side_r = this.side_stroke.update(this.impacts);
         // Never into the drum, wherever it has bobbed to: a rise of z moves
         // its top up z and its 45 deg hexagons out z / sqrt(3) along their
         // normals ((1, 1, 1) / sqrt(3)), which the side offset covers at

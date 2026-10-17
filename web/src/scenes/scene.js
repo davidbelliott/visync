@@ -16,8 +16,8 @@ import {
 // never re-divide the clock, so none drops into half-time at fast tempos.
 export const MIDI_SYNCS_PER_BEAT = 24;
 // In delayed mode, how far ahead of the beat it accompanies the hardware sends
-// each beat event, in MIDI clocks: an eighth note.
-const BEAT_LEAD_SYNCS = MIDI_SYNCS_PER_BEAT / 2;
+// each beat event, in MIDI clocks: a quarter note.
+const BEAT_LEAD_SYNCS = MIDI_SYNCS_PER_BEAT;
 
 export class Scene extends THREE.Scene {
     constructor(context, shortname='scene', num_states=1) {

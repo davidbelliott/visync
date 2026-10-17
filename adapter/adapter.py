@@ -871,8 +871,9 @@ async def main():
                         help='With --device or --rtmidi: beat notes arrive on '
                              'the beat, so show them immediately. By default '
                              'they are expected an eighth note early, and the '
-                             'frontend delays them to land on the beat. --fake '
-                             'and --audio beats are always immediate.')
+                             'frontend delays them to land on the beat.'
+                             '--fake beats are always delayed and --audio beats'
+                             'are always immediate.')
     parser.add_argument('--list-devices', action='store_true',
                         help='List audio input devices and exit')
     args = parser.parse_args()
@@ -896,7 +897,7 @@ async def main():
         exit(1)
 
     global beat_delayed
-    beat_delayed = bool(args.rtmidi or args.device) and not args.immediate
+    beat_delayed = args.fake or (bool(args.rtmidi or args.device) and not args.immediate)
 
     # Resolve the audio device up front so a bad --audio pattern fails cleanly
     # here rather than tearing down the server/TaskGroup with a SystemExit.

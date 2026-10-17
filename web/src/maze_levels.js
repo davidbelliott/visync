@@ -4,9 +4,10 @@
 // coordinates, so it is the same however it is explored.
 //
 // Each level has its own character (params()): its wall height (a multiple
-// of the standard height, usually 1, sometimes 2), how often its walls have
-// rectangular or round windows, how often its doorways are archways, and how
-// often its blocks hold rooms and how big they get.
+// of the standard height, usually 1, sometimes 2, rarely 3), how often its
+// walls have rectangular or round windows, how often its doorways are
+// archways, how often its blocks hold rooms and how big they get, and how
+// often its rooms have a plant and its walls a painting.
 //
 // A staircase joins level L to L + 1. It climbs level L's wall height, and
 // is as many cells long as that height is multiples of the standard (so its
@@ -24,17 +25,22 @@
 // used by the level pairs of one parity: alternate levels' staircases up and
 // down never compete for it.
 
-import { InfiniteMaze, BLOCK, maze_hash } from './infinite_maze.js';
+import { InfiniteMaze, BLOCK, MAZE_DIRS, maze_hash } from './infinite_maze.js';
 
 // Chance a block's stair site holds a staircase (for a level pair of its
 // parity, so each level has about half a staircase up and half down per
 // block at 1).
 const STAIRS_P = 1;
-// Levels' character (see params()): chance of double-height walls; the
-// ranges each level's window, archway, room and wide-hall chances are drawn
-// from; and the largest rooms a level can have (it picks one of
-// ROOM_LARGEST, up to the whole width of a block).
+// Levels' character (see params()): chance of double- and triple-height
+// walls; the ranges each level's window, archway, room and wide-hall chances
+// are drawn from; and the largest rooms a level can have (it picks one of
+// ROOM_LARGEST, up to the whole width of a block). Each level's chance of a
+// plant per room and a painting per wall face are drawn from PLANT_P and
+// PAINTING_P.
 const TALL_P = 0.2;
+const TALLEST_P = 0.05;
+const PLANT_P = [0.1, 0.6];
+const PAINTING_P = [0.01, 0.06];
 const WINDOW_RECT_P = [0, 0.2];
 const WINDOW_ROUND_P = [0, 0.2];
 const ARCH_P = [0.1, 0.5];
@@ -45,6 +51,7 @@ const ROOM_LARGEST = [3, 8];
 // Levels' mazes and blocks' staircases kept generated, oldest dropped first.
 const MAX_CACHED_LEVELS = 8;
 const MAX_CACHED_STAIRS = 1024;
+const MAX_CACHED_PLANTS = 4096;
 
 // Level colours: saturated, and never cyan (the brain's colour). Stepped
 // through 5 at a time (coprime with 6), so neighbouring levels always
@@ -58,6 +65,8 @@ const SALT_STAIRS_PARITY = 9900;
 const SALT_PARAMS = 7000;
 const SALT_ARCH = 8000;
 const SALT_WINDOW = 8500;
+const SALT_PLANT = 8700;
+const SALT_PAINTING = 8800;
 
 function mod2(n) {
     return ((n % 2) + 2) % 2;
@@ -73,24 +82,28 @@ export class MazeLevels {
         this.mazes = new Map();     // level -> InfiniteMaze
         this.level_params = new Map();
         this.stair_cache = new Map();
+        this.plant_cache = new Map();
     }
 
     // Level L's character: { height (wall height, in standard heights),
     // rect_p, round_p (window chances per wall), arch_p (per doorway),
     // room_p (per block), room_max (largest room side, cells), wide_p (per
-    // block: halls two cells wide) }.
+    // block: halls two cells wide), plant_p (per room), painting_p (per wall
+    // face) }.
     params(level) {
         let p = this.level_params.get(level);
         if (p === undefined) {
             const h = (k) => maze_hash(level, k, this.seed + SALT_PARAMS);
             p = {
-                height: h(0) < TALL_P ? 2 : 1,
+                height: h(0) < TALLEST_P ? 3 : h(0) < TALLEST_P + TALL_P ? 2 : 1,
                 rect_p: lerp(WINDOW_RECT_P, h(1)),
                 round_p: lerp(WINDOW_ROUND_P, h(2)),
                 arch_p: lerp(ARCH_P, h(3)),
                 room_p: lerp(ROOM_P, h(4)),
                 room_max: ROOM_LARGEST[0] + Math.floor(h(5) * (ROOM_LARGEST[1] - ROOM_LARGEST[0] + 1)),
                 wide_p: lerp(WIDE_P, h(6)),
+                plant_p: lerp(PLANT_P, h(9)),
+                painting_p: lerp(PAINTING_P, h(10)),
             };
             this.level_params.set(level, p);
         }
@@ -102,12 +115,17 @@ export class MazeLevels {
         let maze = this.mazes.get(level);
         if (maze === undefined) {
             const p = this.params(level);
+            // A three-cell staircase (up from a triple-height level, or down
+            // into this one from below one) puts three fixed cells in a row,
+            // more than a wide block can take (one per 2 x 2 square), so
+            // those levels have none.
+            const triple = p.height == 3 || this.params(level - 1).height == 3;
             maze = new InfiniteMaze(this.seed * 1000 + level, {
                 fixed: (i, j) => this.fixed(level, i, j),
                 room_p: p.room_p,
                 room_min: ROOM_SIZE_MIN,
                 room_max: p.room_max,
-                wide_p: p.wide_p,
+                wide_p: triple ? 0 : p.wide_p,
             });
             if (this.mazes.size >= MAX_CACHED_LEVELS) {
                 this.mazes.delete(this.mazes.keys().next().value);
@@ -212,15 +230,15 @@ export class MazeLevels {
     }
 
     // Moving from cell (i, j) of level L towards (i + di, j + dj): null if
-    // blocked, else { climb, cells, height, key }: up / down a staircase
+    // blocked (by a wall, or a plant filling the cell), else { climb, cells, height, key }: up / down a staircase
     // (climb +1 / -1) is one move of its k + 1 cells, rising `height`
     // standard heights, naming it by key; level ground is one cell (climb 0,
     // height 0, key null).
     step(level, i, j, di, dj) {
-        if (!this.maze(level).open(i, j, di, dj)) {
+        const ni = i + di, nj = j + dj;
+        if (!this.maze(level).open(i, j, di, dj) || this.plant_at(level, ni, nj)) {
             return null;
         }
-        const ni = i + di, nj = j + dj;
         const up = this.stairs_at(level, ni, nj);
         if (up !== null) {
             const st = up.stairs;
@@ -255,6 +273,57 @@ export class MazeLevels {
             return false;
         }
         return maze.cell_random(i, j, SALT_ARCH + side) < this.params(level).arch_p;
+    }
+
+    // The potted bonsai in a room of level L ({ i, j, w, h }, see
+    // InfiniteMaze.room), by the level's plant_p: null, or { i, j } (the cell
+    // it fills, which nothing can enter), kind (0 or 1, see MazeLevel's
+    // bonsai), turn (quarter turns, 0..3) and size (0..1). It stands against
+    // the room's edge (a perimeter cell, never its middle), in a cell with no
+    // doorway out of the room, so blocking it cuts nothing off (the rest of a
+    // room, at least 2 x 2 and open inside, stays connected); a room with no
+    // such cell has no plant.
+    plant(level, room) {
+        const cache_key = `${level},${room.i},${room.j}`;
+        let plant = this.plant_cache.get(cache_key);
+        if (plant !== undefined) {
+            return plant;
+        }
+        plant = null;
+        const maze = this.maze(level);
+        const r = (k) => maze.cell_random(room.i, room.j, SALT_PLANT + k);
+        if (r(0) < this.params(level).plant_p) {
+            const n = room.w * room.h, first = Math.floor(r(1) * n);
+            const inside = (i, j) => i >= room.i && i < room.i + room.w && j >= room.j && j < room.j + room.h;
+            for (let q = 0; q < n && plant === null; q++) {
+                const c = (first + q) % n;
+                const i = room.i + c % room.w, j = room.j + Math.floor(c / room.w);
+                const edge = i == room.i || i == room.i + room.w - 1 || j == room.j || j == room.j + room.h - 1;
+                if (edge && MAZE_DIRS.every(([di, dj]) => inside(i + di, j + dj) || !maze.open(i, j, di, dj))) {
+                    plant = { i, j, kind: r(2) < 0.5 ? 0 : 1, turn: Math.floor(r(3) * 4), size: r(4) };
+                }
+            }
+        }
+        if (this.plant_cache.size >= MAX_CACHED_PLANTS) {
+            this.plant_cache.delete(this.plant_cache.keys().next().value);
+        }
+        this.plant_cache.set(cache_key, plant);
+        return plant;
+    }
+
+    // Whether cell (i, j) of level L is filled by a plant.
+    plant_at(level, i, j) {
+        const room = this.maze(level).room(Math.floor(i / BLOCK), Math.floor(j / BLOCK));
+        const plant = room === null ? null : this.plant(level, room);
+        return plant !== null && plant.i == i && plant.j == j;
+    }
+
+    // Whether the face of the wall on edge (i, j, side) of level L facing
+    // `normal` (+1 / -1 along its axis) has a painting, by the level's
+    // painting_p, and its noise's seed (0..1).
+    painting(level, i, j, side, normal) {
+        const r = this.maze(level).cell_random(i, j, SALT_PAINTING + 2 * side + (normal > 0 ? 1 : 0));
+        return r < this.params(level).painting_p ? r / this.params(level).painting_p : null;
     }
 
     // The window in the wall on edge (i, j, side) of level L: 0 = none, 1 =

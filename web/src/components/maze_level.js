@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { ResourceLoader } from '../util.js';
 import { InstancedProps } from './instanced_props.js';
-import { LEVEL_COLORS } from '../maze_levels.js';
 
 // One level of a MazeLevels maze, drawn around a centre cell in that cell's
 // frame (so coordinates stay small however far it is explored), all in the
@@ -27,9 +26,14 @@ import { LEVEL_COLORS } from '../maze_levels.js';
 //   thick. The flight down from a level shows as a hole in the floor (cut
 //   out of the floor fill), lined down to the level below on its two sides,
 //   with the steps going down inside it.
-// - Carpets in the rooms: a rectangle in a single hue, outlined in it, either
-//   plain or patterned (see CARPET_PATTERNS), its brightness varying with
-//   simplex noise.
+// - Carpets in the rooms: a rectangle in the level's colour, outlined in it,
+//   either plain or patterned (see CARPET_PATTERNS), its brightness varying
+//   with simplex noise.
+// - Potted bonsai in some rooms (MazeLevels.plant): solid, filling the
+//   middle of a cell nothing can enter, part of the walls' fill and edges
+//   (see bonsai_templates).
+// - Paintings on some walls (MazeLevels.painting): a rectangle of noise just
+//   off the wall's face, outlined.
 // - The floor: a dithered fill whose opacity follows simplex noise.
 //
 // Fog of war: edges fade with distance from a point (set_viewer), eased
@@ -55,9 +59,9 @@ const CARPET_INSET = 2;
 const CARPET_Y = 0.02;
 const CARPET_DARK = 0.55;
 const CARPET_NOISE_SIZE = 4;
-// Carpet patterns, picked per room (world units): 0 plain; 1 a black and
-// white checkerboard of CHECKER_TILE squares from the carpet's corner (as the
-// drum kit's rug), drawn in its shader; 2 rows of zigzags, ZIGZAG_ROW apart,
+// Carpet patterns, picked per room (world units): 0 plain; 1 a checkerboard
+// of CHECKER_TILE squares from the carpet's corner, the carpet's colour and
+// black (as the drum kit's rug, in black and white), drawn in its shader; 2 rows of zigzags, ZIGZAG_ROW apart,
 // ZIGZAG_AMP deep, one zig per ZIGZAG_PERIOD; 3 ice cream cones CONE_SIZE
 // tall on an equilateral triangle grid CONE_SPACING apart (wider than a cone,
 // CONE_SIZE * 0.47, so neighbours never touch), every other one along a row
@@ -92,8 +96,32 @@ const MAX_WINDOWS = 160;
 const MAX_STAIRS = 32;      // per flight length
 const MAX_HOLES = 16;       // flights down; must match the floor shader
 // Flight lengths (cells, = the lower level's height in standard heights).
-const STAIR_LENGTHS = [1, 2];
+const STAIR_LENGTHS = [1, 2, 3];
 const MAX_CARPETS = 24;
+// Bonsai (see bonsai_templates), world units: scaled BONSAI_SCALE[0..1] by
+// their room's draw, outlined where faces meet at more than BONSAI_EDGE_ANGLE
+// deg. Up to MAX_PLANTS.
+const BONSAI_SCALE = [0.95, 1.1];
+// Their pots' half-width (at scale 1), and how far round a pot the carpet's
+// pattern lines are left out: a pot stands on the carpet, and lines just
+// behind its walls would pass the depth test there (the fills are pushed back
+// so edges on them draw), shimmering through its foot.
+const POT_HALF = 0.55;
+const POT_CLEAR = 0.25;
+const BONSAI_EDGE_ANGLE = 20;
+const MAX_PLANTS = 12;
+// Paintings: PAINTING_W of their wall span's length wide, PAINTING_H standard
+// heights tall, centred PAINTING_V standard heights up (eye level, however
+// tall the walls), PAINTING_OFFSET off the wall's face. Their noise in
+// patches PAINTING_NOISE world units across, between PAINTING_DARK and 1 of
+// the lit colour. Up to MAX_PAINTINGS.
+const PAINTING_W = 0.45;
+const PAINTING_H = 0.35;
+const PAINTING_V = 0.55;
+const PAINTING_OFFSET = 0.03;
+const PAINTING_NOISE = 0.35;
+const PAINTING_DARK = 0.1;
+const MAX_PAINTINGS = 48;
 
 // GLSL: the fog (from a point's footprint position, v_xz) and the level's
 // opacity, shared by every material here.
@@ -163,6 +191,64 @@ function carpet_pattern(pattern, x0, z0, x1, z1, seg) {
     }
 }
 
+// The two potted bonsai, origin on the floor under the pot's middle, about
+// 4.5 world units tall (taller than a standard wall), as non-indexed
+// triangles with flat normals (pos, nrm) and their edges (edges, segment
+// endpoints): 0, a topiary, an upward cone on a round bottom on a stick; 1, a
+// trunk with branches up to three spherical puffs at different heights. Both
+// in the same straight-sided square pot. Low-poly, as the house style.
+function bonsai_templates() {
+    const parts = (list) => {
+        const pos = [];
+        for (const [geom, x, y, z, quat] of list) {
+            const g = geom.index ? geom.toNonIndexed() : geom;
+            if (quat) {
+                g.applyQuaternion(quat);
+            }
+            g.translate(x, y, z);
+            pos.push(...g.getAttribute('position').array);
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geom.computeVertexNormals();        // flat: the triangles are unshared
+        return {
+            pos: geom.getAttribute('position').array,
+            nrm: geom.getAttribute('normal').array,
+            edges: new THREE.EdgesGeometry(geom, BONSAI_EDGE_ANGLE).getAttribute('position').array,
+        };
+    };
+    // The pot: a four-sided cylinder turned square to the grid, its walls
+    // vertical (1.1 across).
+    const POT_H = 1.0;
+    const pot = new THREE.CylinderGeometry(POT_HALF * Math.SQRT2, POT_HALF * Math.SQRT2, POT_H, 4)
+        .rotateY(Math.PI / 4);
+    const pot_part = [pot, 0, POT_H / 2, 0];
+    // A cylinder from a to b (radius r), for trunks and branches.
+    const limb = (a, b, r0, r1) => {
+        const d = new THREE.Vector3().subVectors(b, a);
+        const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
+        const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
+        return [new THREE.CylinderGeometry(r1, r0, d.length(), 6, 1, true), mid.x, mid.y, mid.z, quat];
+    };
+    const v = (x, y, z) => new THREE.Vector3(x, y, z);
+    const topiary = parts([
+        pot_part,
+        limb(v(0, POT_H, 0), v(0, 2.5, 0), 0.1, 0.08),
+        // Round bottom (a half sphere, cup down) under an upward cone.
+        [new THREE.SphereGeometry(0.95, 8, 3, 0, 2 * Math.PI, Math.PI / 2, Math.PI / 2), 0, 2.6, 0],
+        [new THREE.ConeGeometry(0.95, 1.9, 8, 1, true), 0, 2.6 + 0.95, 0],
+    ]);
+    const puffs = [[v(0, 4.0, 0.1), 0.85], [v(0.95, 3.05, -0.2), 0.62], [v(-0.85, 2.35, 0.3), 0.55]];
+    const tree = parts([
+        pot_part,
+        limb(v(0, POT_H, 0), v(0.05, 3.7, 0.1), 0.2, 0.12),
+        limb(v(0.04, 2.8, 0.05), puffs[1][0], 0.08, 0.06),
+        limb(v(0.02, 2.1, 0.05), puffs[2][0], 0.08, 0.06),
+        ...puffs.map(([c, r]) => [new THREE.IcosahedronGeometry(r, 1), c.x, c.y, c.z]),
+    ]);
+    return [topiary, tree];
+}
+
 export class MazeLevel extends THREE.Group {
     // levels: MazeLevels. cell: grid pitch; thickness: the walls'; height:
     // the standard wall height, which a level's own is a multiple of (world
@@ -226,9 +312,15 @@ export class MazeLevel extends THREE.Group {
         // boundary top and bottom, verticals at every crossing, and window
         // outlines.
         const boundaries = 2 * m * (m + 1);
+        // The bonsai's templates (see bonsai_templates), and the most room
+        // either takes in the fill and the edges.
+        this.bonsai = bonsai_templates();
+        const bonsai_tris = Math.max(...this.bonsai.map((b) => b.pos.length / 9));
+        const bonsai_lines = Math.max(...this.bonsai.map((b) => b.edges.length / 6));
         // A window adds its two faces' cut-round panels and its lining.
         const panel_tris = 2 * this.window_shapes[2].tris.length + 2 * WINDOW_ROUND_SEGMENTS;
-        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS + 4 * MAX_HOLES;
+        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS + 4 * MAX_HOLES +
+            bonsai_tris * MAX_PLANTS;
         this.fill_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'normal']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_tris * 9), 3);
@@ -236,7 +328,8 @@ export class MazeLevel extends THREE.Group {
             this.fill_geom.setAttribute(name, attr);
         }
         const max_lines = 2 * boundaries + (m + 1) * (m + 1) + 2 * WINDOW_ROUND_SEGMENTS * MAX_WINDOWS +
-            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES;
+            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES + 4 * MAX_PAINTINGS +
+            bonsai_lines * MAX_PLANTS;
         this.line_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'line_color']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_lines * 6), 3);
@@ -250,6 +343,18 @@ export class MazeLevel extends THREE.Group {
             attr.setUsage(THREE.DynamicDrawUsage);
             this.carpet_geom.setAttribute(name, attr);
         }
+
+        // Paintings: a quad each; painting_info: (u, v) world units from its
+        // corner, and its noise's seed.
+        this.painting_geom = new THREE.BufferGeometry();
+        for (const name of ['position', 'normal', 'painting_info']) {
+            const attr = new THREE.BufferAttribute(new Float32Array(MAX_PAINTINGS * 18), 3);
+            attr.setUsage(THREE.DynamicDrawUsage);
+            this.painting_geom.setAttribute(name, attr);
+        }
+        // Bonsai in the window, as [x, z, kind, turn (rad), scale], written
+        // into the walls' fill and the edges by emit().
+        this.plants = [];
 
         // Edges: blended, per-vertex colour (walls in the level's colour,
         // carpets in theirs), in front of the fills (which are pushed back).
@@ -382,9 +487,9 @@ export class MazeLevel extends THREE.Group {
                         // Lines (drawn as edges): a dark ground.
                         `    diffuseColor.rgb *= ${f(PATTERN_GROUND)};`,
                         '} else if (pattern > 0.5) {',
-                        // Checkerboard, black and white.
+                        // Checkerboard, the level's colour and black.
                         `    vec2 t = floor(v_carpet.xy / ${f(CHECKER_TILE)});`,
-                        '    diffuseColor.rgb = vec3(mod(t.x + t.y, 2.0));',
+                        '    diffuseColor.rgb *= mod(t.x + t.y, 2.0);',
                         '}',
                         `diffuseColor.rgb *= mix(${f(CARPET_DARK)}, 1.0, ` +
                         `0.5 + 0.5 * snoise((v_xz + maze_origin) / ${f(CARPET_NOISE_SIZE)}));`,
@@ -396,6 +501,34 @@ export class MazeLevel extends THREE.Group {
             carpets.frustumCulled = false;
             carpets.receiveShadow = true;
             this.add(carpets);
+
+            // Paintings: lit noise (see PAINTING_NOISE) in the level's colour.
+            const painting_mat = this.painting_mat = fill_material({ color: this.color }, 1, fade);
+            const painting_frag = painting_mat.onBeforeCompile;
+            painting_mat.onBeforeCompile = (shader) => {
+                painting_frag(shader);
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <common>',
+                    'attribute vec3 painting_info;\nvarying vec3 v_paint;\n#include <common>'
+                ).replace(
+                    '#include <begin_vertex>',
+                    '#include <begin_vertex>\nv_paint = painting_info;'
+                );
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <common>',
+                    '#include <common>\nvarying vec3 v_paint;'
+                ).replace(
+                    '#include <color_fragment>',
+                    '#include <color_fragment>\n' +
+                    `diffuseColor.rgb *= mix(${f(PAINTING_DARK)}, 1.0, ` +
+                    `0.5 + 0.5 * snoise(v_paint.xy / ${f(PAINTING_NOISE)} + v_paint.z * 97.0));`
+                );
+            };
+            painting_mat.customProgramCacheKey = () => 'painting' + fade;
+            const paintings = new THREE.Mesh(this.painting_geom, painting_mat);
+            paintings.frustumCulled = false;
+            paintings.receiveShadow = true;
+            this.add(paintings);
 
             // The floor: opacity from noise, faded with the fog and level.
             // Pushed back past the walls' bottom edges.
@@ -425,10 +558,12 @@ export class MazeLevel extends THREE.Group {
         for (const props of this.stairs.values()) {
             props.set_color(this.color);
         }
-        this.height = this.base_height * this.levels.params(level).height;
+        const params = this.levels.params(level);
+        this.height = this.base_height * params.height;
         this.window_shapes = this.shapes_for(this.height);
-        this.wall_mat?.color.copy(this.color);
-        this.floor_mat?.color.copy(this.color);
+        for (const mat of [this.wall_mat, this.floor_mat, this.painting_mat]) {
+            mat?.color.copy(this.color);
+        }
     }
 
     // The fog's centre, in this group's frame (x, z).
@@ -449,7 +584,8 @@ export class MazeLevel extends THREE.Group {
         }
     }
 
-    // Per frame: fade the props with the fog and the level.
+    // Per frame: fade the stairs with the level (only: they stand solid, as
+    // the walls do, however far off).
     update() {
         const { fog_centre, fog_near, fog_far, opacity_all, fog_edges } = this.uniforms;
         const fog = (x, z) => {
@@ -460,8 +596,8 @@ export class MazeLevel extends THREE.Group {
         for (const [k, props] of this.stairs) {
             props.begin();
             for (const [matrix, x, z] of this.stair_lists.get(k)) {
-                const alpha = fog(x, z);
-                props.add_instance(matrix, alpha, fog_edges.value ? alpha : opacity_all.value);
+                props.add_instance(matrix, opacity_all.value,
+                    fog_edges.value ? fog(x, z) : opacity_all.value);
             }
             props.end();
         }
@@ -665,8 +801,20 @@ export class MazeLevel extends THREE.Group {
         });
         this.uniforms.hole_count.value = this.holes.length;
 
-        // Carpets in the rooms overlapping the window.
+        // Carpets in the rooms overlapping the window, and their plants.
         this.carpets = maze.rooms_in(ci + lo, cj + lo, ci + hi, cj + hi).slice(0, MAX_CARPETS);
+        this.plants.length = 0;
+        for (const room of this.carpets) {
+            const plant = levels.plant(level, room);
+            if (plant === null || this.plants.length >= MAX_PLANTS) {
+                continue;
+            }
+            this.plants.push([(plant.i - ci) * cell, (plant.j - cj) * cell, plant.kind,
+                plant.turn * Math.PI / 2,
+                BONSAI_SCALE[0] + (BONSAI_SCALE[1] - BONSAI_SCALE[0]) * plant.size]);
+        }
+        this.ci = ci;
+        this.cj = cj;
         this.emit();
     }
 
@@ -730,13 +878,43 @@ export class MazeLevel extends THREE.Group {
         // reverse), facing `normal` (+-1), with its bottom edge: plain, or
         // cut round a window or archway, in which case the hole's outline is
         // drawn on it and, if `line_hole`, the hole lined through to the far
-        // face at `far`.
-        const face = (axis, at, s0, s1, normal, kind, far, line_hole) => {
+        // face at `far`. A plain face with a painting seed (`paint`, else
+        // null) has a painting hung on it.
+        const ppos = this.painting_geom.getAttribute('position').array;
+        const pnrm = this.painting_geom.getAttribute('normal').array;
+        const pinfo = this.painting_geom.getAttribute('painting_info').array;
+        let pc = 0;     // painting floats written
+        const face = (axis, at, s0, s1, normal, kind, far, line_hole, paint = null) => {
             const point = (u, v, plane = at) => axis == 0 ? [plane, v, s0 + u] : [s0 + u, v, plane];
             const [nx, nz] = axis == 0 ? [normal, 0] : [0, normal];
             if (kind == 0) {
                 quad(point(0, 0), point(0, h), point(s1 - s0, h), point(s1 - s0, 0), nx, 0, nz);
                 line(...point(0, 0), ...point(s1 - s0, 0));
+                if (paint !== null && pc < MAX_PAINTINGS * 18) {
+                    const len = s1 - s0, w = PAINTING_W * len;
+                    const ph = PAINTING_H * this.base_height, pv = PAINTING_V * this.base_height;
+                    const u0 = (len - w) / 2, u1 = u0 + w, v0 = pv - ph / 2, v1 = pv + ph / 2;
+                    const off = at + normal * PAINTING_OFFSET;
+                    // Two triangles, each wound to face out from the wall (as tri()).
+                    for (const t of [[[u0, v0], [u0, v1], [u1, v1]], [[u0, v0], [u1, v1], [u1, v0]]]) {
+                        const [a, b, c] = t.map(([u, v]) => point(u, v, off));
+                        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+                        const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+                        const along = (uy * vz - uz * vy) * nx + (ux * vy - uy * vx) * nz;
+                        const order = along >= 0 ? [0, 1, 2] : [0, 2, 1];
+                        for (const k of order) {
+                            const [u, v] = t[k];
+                            ppos.set(point(u, v, off), pc);
+                            pnrm[pc] = nx; pnrm[pc + 1] = 0; pnrm[pc + 2] = nz;
+                            pinfo[pc] = u - u0; pinfo[pc + 1] = v - v0; pinfo[pc + 2] = paint;
+                            pc += 3;
+                        }
+                    }
+                    line(...point(u0, v0, off), ...point(u0, v1, off));
+                    line(...point(u0, v1, off), ...point(u1, v1, off));
+                    line(...point(u1, v1, off), ...point(u1, v0, off));
+                    line(...point(u1, v0, off), ...point(u0, v0, off));
+                }
                 return;
             }
             const shape = this.window_shapes[kind];
@@ -790,18 +968,26 @@ export class MazeLevel extends THREE.Group {
                 // and b in x; then the same with x and z swapped. A window
                 // is lined once, from its wall's west / south face.
                 // (Only a wall's long faces take its window, not its ends.)
+                // A long wall face's wall is the east / north edge of an
+                // absolute cell (see build's spans), which fixes its painting.
                 const west = solid(b - 1, a), east = solid(b, a);
                 if (west != east) {
-                    const ws = west ? b - 1 : b;
-                    const kind = ws % 2 == 0 && a % 2 == 1 ? this.window_kind[ws + a * m] : 0;
-                    face(0, e[b], e[a], e[a + 1], west ? 1 : -1, kind, e[east ? b + 1 : b - 1], east);
+                    const ws = west ? b - 1 : b, normal = west ? 1 : -1;
+                    const long = ws % 2 == 0 && a % 2 == 1;
+                    const kind = long ? this.window_kind[ws + a * m] : 0;
+                    const paint = long && kind == 0 ? this.levels.painting(this.level,
+                        this.ci + this.lo - 1 + ws / 2, this.cj + this.lo + (a - 1) / 2, 0, normal) : null;
+                    face(0, e[b], e[a], e[a + 1], normal, kind, e[east ? b + 1 : b - 1], east, paint);
                     line(e[b], h, e[a], e[b], h, e[a + 1]);
                 }
                 const south = solid(a, b - 1), north = solid(a, b);
                 if (south != north) {
-                    const ws = south ? b - 1 : b;
-                    const kind = a % 2 == 1 && ws % 2 == 0 ? this.window_kind[a + ws * m] : 0;
-                    face(1, e[b], e[a], e[a + 1], south ? 1 : -1, kind, e[north ? b + 1 : b - 1], north);
+                    const ws = south ? b - 1 : b, normal = south ? 1 : -1;
+                    const long = a % 2 == 1 && ws % 2 == 0;
+                    const kind = long ? this.window_kind[a + ws * m] : 0;
+                    const paint = long && kind == 0 ? this.levels.painting(this.level,
+                        this.ci + this.lo + (a - 1) / 2, this.cj + this.lo - 1 + ws / 2, 1, normal) : null;
+                    face(1, e[b], e[a], e[a + 1], normal, kind, e[north ? b + 1 : b - 1], north, paint);
                     line(e[a], h, e[b], e[a + 1], h, e[b]);
                 }
             }
@@ -816,6 +1002,22 @@ export class MazeLevel extends THREE.Group {
                 if (count == 1 || count == 3 || (count == 2 && sw == ne)) {
                     line(e[bx], 0, e[bz], e[bx], h, e[bz]);
                 }
+            }
+        }
+
+        // Bonsai: their templates turned, scaled and stood in their cells,
+        // solid with the walls.
+        for (const [x, z, kind, turn, scale] of this.plants) {
+            const { pos: tp, nrm: tn, edges: te } = this.bonsai[kind];
+            const cs = Math.cos(turn), sn = Math.sin(turn);
+            const place = (src, k) => [x + (src[k] * cs + src[k + 2] * sn) * scale,
+                src[k + 1] * scale, z + (src[k + 2] * cs - src[k] * sn) * scale];
+            for (let k = 0; k < tp.length; k += 9) {
+                tri(place(tp, k), place(tp, k + 3), place(tp, k + 6),
+                    tn[k] * cs + tn[k + 2] * sn, tn[k + 1], tn[k + 2] * cs - tn[k] * sn);
+            }
+            for (let k = 0; k < te.length; k += 6) {
+                line(...place(te, k), ...place(te, k + 3));
             }
         }
 
@@ -841,20 +1043,17 @@ export class MazeLevel extends THREE.Group {
             }
         }
 
-        // Carpets: a quad each in its hue (a palette colour other than the
-        // level's) and pattern, both fixed per room, outlined in the hue.
+        // Carpets: a quad each in the level's colour and a pattern fixed per
+        // room, outlined in it.
         const cpos = this.carpet_geom.getAttribute('position').array;
         const cnrm = this.carpet_geom.getAttribute('normal').array;
         const ccol = this.carpet_geom.getAttribute('color').array;
         const cinfo = this.carpet_geom.getAttribute('carpet_info').array;
         const origin = this.uniforms.maze_origin.value;
         const maze = this.levels.maze(this.level);
-        const own = LEVEL_COLORS.indexOf(this.levels.color(this.level));
-        const hue = new THREE.Color();
+        const hue = this.color;
         let c = 0, pattern_lines = 0;
         for (const room of this.carpets) {
-            const pick = Math.floor(maze.cell_random(room.i, room.j, 77) * (LEVEL_COLORS.length - 1));
-            hue.set(LEVEL_COLORS[pick >= own ? pick + 1 : pick]);
             let pattern = Math.floor(maze.cell_random(room.i, room.j, 79) * CARPET_PATTERNS);
             const x0 = (room.i - 0.5) * this.cell - origin.x + this.thickness / 2 + CARPET_INSET;
             const z0 = (room.j - 0.5) * this.cell - origin.y + this.thickness / 2 + CARPET_INSET;
@@ -869,7 +1068,17 @@ export class MazeLevel extends THREE.Group {
             } else {
                 pattern_lines += n;
                 line_color = hue;
-                carpet_pattern(pattern, x0, z0, x1, z1, (ax, az, bx, bz) => line(ax, y, az, bx, y, bz));
+                // Not under the pots (see POT_CLEAR).
+                const under_pot = (ax, az, bx, bz) => this.plants.some(([px, pz, , , scale]) => {
+                    const r = POT_HALF * scale + POT_CLEAR;
+                    return Math.max(ax, bx) > px - r && Math.min(ax, bx) < px + r &&
+                        Math.max(az, bz) > pz - r && Math.min(az, bz) < pz + r;
+                });
+                carpet_pattern(pattern, x0, z0, x1, z1, (ax, az, bx, bz) => {
+                    if (!under_pot(ax, az, bx, bz)) {
+                        line(ax, y, az, bx, y, bz);
+                    }
+                });
                 line_color = this.color;
             }
             for (const [px, pz] of [[x0, z0], [x0, z1], [x1, z1], [x0, z0], [x1, z1], [x1, z0]]) {
@@ -885,6 +1094,11 @@ export class MazeLevel extends THREE.Group {
             line(x1, y, z1, x1, y, z0);
             line(x1, y, z0, x0, y, z0);
             line_color = this.color;
+        }
+
+        this.painting_geom.setDrawRange(0, pc / 3);
+        for (const name of ['position', 'normal', 'painting_info']) {
+            this.painting_geom.getAttribute(name).needsUpdate = true;
         }
 
         this.fill_geom.setDrawRange(0, f / 3);

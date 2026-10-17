@@ -114,6 +114,9 @@ const SPARK_COLOR = 'white';
 // VISIT_PENALTY per earlier visit so it backs out of dead ends and doesn't
 // circle; a little JITTER keeps the route from being too predictable.
 const MOVE_BEATS = 1;
+// The walk starts on a random level in -START_LEVELS..START_LEVELS - 1, so
+// each show opens somewhere new.
+const START_LEVELS = 1000;
 // false: each step at constant speed, so steps chain into one continuous
 // glide through the maze. true: each step eases from rest to rest, pausing
 // in every cell on the beat.
@@ -308,7 +311,11 @@ export class BrainMazeScene extends Scene {
         this.heading = DEFAULT_HEADING;
         this.bind(CH_EXPAND_Y, (a) => { this.heading = a; },
             (norm) => norm * 2 * Math.PI);
-        this.level = 0;
+        // A random level to start on, at cell (0, 0): never a staircase's,
+        // and drawn again on the odd level where a bonsai fills it.
+        do {
+            this.level = Math.floor(Math.random() * 2 * START_LEVELS) - START_LEVELS;
+        } while (this.levels.plant_at(this.level, 0, 0));
         this.cell_i = 0;
         this.cell_j = 0;
         this.step = [0, 0];
@@ -688,7 +695,8 @@ export class BrainMazeScene extends Scene {
     // cell, which the head can't stand in).
     has_cone(level, i, j) {
         return this.levels.maze(level).cell_random(i, j) < CONE_P &&
-            !this.collected.has(`${level},${i},${j}`) && !this.levels.stairs_cell(level, i, j);
+            !this.collected.has(`${level},${i},${j}`) && !this.levels.stairs_cell(level, i, j) &&
+            !this.levels.plant_at(level, i, j);
     }
 
     // The ways on from the current cell: [di, dj, climb, stairs key, cells,

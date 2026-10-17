@@ -14,10 +14,16 @@ import * as THREE from 'three';
 //   then carries a depth texture, and each outline pixel takes the nearest
 //   depth among its silhouette neighbours as gl_FragDepth. Without it, the
 //   outline is drawn over everything.
-// - fade: the mask's red is each silhouette pixel's opacity (0..1, e.g. a
+// - fade: the mask's blue is each silhouette pixel's opacity (0..1, e.g. a
 //   prop fading with the fog), and the outline dissolves by its neighbours'
 //   through a 4x4 Bayer dither, as dithered props do (the mask itself stays
 //   whole, or its holes would all outline).
+// - ids (with depth): outline each part of the layer round its own
+//   silhouette, wherever it is in front of another or of nothing, not just
+//   round their union. The mask's red is each pixel's part id (/255, unique
+//   among the parts), green whether that part is outlined (0: it only hides
+//   what is behind it); an outline pixel is one next to a nearer outlined
+//   part with another id, at that part's depth.
 // - rings: that many extra outlines of the silhouette scaled about a centre
 //   (ring_scale[i] times, at opacity ring_alpha[i]; 0: off), white, blended
 //   over the scene and into the outline where they cross it.
@@ -31,7 +37,8 @@ export class SilhouetteOutline {
     // layer: the objects' extra layer (callers enable it on them). color:
     // THREE.Color. enabled: whether the outline itself draws (rings draw
     // either way).
-    constructor({ layer, color, enabled = true, depth = false, fade = false, rings = 0, mask_material = null }) {
+    constructor({ layer, color, enabled = true, depth = false, fade = false, ids = false, rings = 0,
+                  mask_material = null }) {
         this.layer = layer;
         this.depth = depth;
         this.rings = rings;
@@ -49,7 +56,7 @@ export class SilhouetteOutline {
         this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
             uniforms: this.uniforms,
             defines: Object.assign({ RINGS: rings, RING_N: Math.max(1, rings) },
-                depth ? { DEPTH: 1 } : {}, fade ? { FADE: 1 } : {}),
+                depth ? { DEPTH: 1 } : {}, fade ? { FADE: 1 } : {}, ids ? { IDS: 1 } : {}),
             vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
             fragmentShader: [
                 'uniform sampler2D mask;',
@@ -88,14 +95,37 @@ export class SilhouetteOutline {
                 '#ifdef DEPTH',
                 '            e.x = min(e.x, texelFetch(mask_depth, texel(q, 1.0), 0).r);',
                 '#endif',
-                '            e.y = max(e.y, texelFetch(mask, texel(q, 1.0), 0).r);',
+                '            e.y = max(e.y, texelFetch(mask, texel(q, 1.0), 0).b);',
                 '        }',
                 '    }',
                 '    return e;',
                 '}',
+                '#ifdef IDS',
+                // Whether p is next to a nearer outlined part (x), and that
+                // part's nearest depth (y) and most opaque opacity (z).
+                'vec3 id_edge(vec2 p) {',
+                '    vec4 m = texelFetch(mask, texel(p, 1.0), 0);',
+                '    float dp = m.a > 0.5 ? texelFetch(mask_depth, texel(p, 1.0), 0).r : 1.0;',
+                '    vec3 e = vec3(0.0, 1.0, 0.0);',
+                '    vec2 steps[4] = vec2[4](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));',
+                '    for (int k = 0; k < 4; k++) {',
+                '        ivec2 q = texel(p + steps[k], 1.0);',
+                '        vec4 n = texelFetch(mask, q, 0);',
+                '        if (n.a < 0.5 || n.g < 0.5 || abs(n.r - m.r) < 0.5 / 255.0) continue;',
+                '        float dq = texelFetch(mask_depth, q, 0).r;',
+                '        if (dq < dp) e = vec3(1.0, min(e.y, dq), max(e.z, n.b));',
+                '    }',
+                '    return e;',
+                '}',
+                '#endif',
                 'void main() {',
                 '    vec2 p = gl_FragCoord.xy;',
+                '#ifdef IDS',
+                '    vec3 ie = id_edge(p);',
+                '    float base = outline_on * ie.x;',
+                '#else',
                 '    float base = outline_on * ring(p, 1.0);',
+                '#endif',
                 '    float a = 0.0;',
                 '#if RINGS > 0',
                 '    for (int i = 0; i < RINGS; i++) {',
@@ -103,7 +133,11 @@ export class SilhouetteOutline {
                 '    }',
                 '#endif',
                 '    if (base < 0.5 && a <= 0.0) discard;',
+                '#ifdef IDS',
+                '    vec2 e = ie.yz;',
+                '#else',
                 '    vec2 e = edge_of(p);',
+                '#endif',
                 '#ifdef FADE',
                 '    const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,',
                 '        3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);',
@@ -114,6 +148,8 @@ export class SilhouetteOutline {
                 '    gl_FragDepth = e.x;',
                 '#endif',
                 '    gl_FragColor = base > 0.5 ? vec4(mix(color, vec3(1.0), a), 1.0) : vec4(vec3(1.0), a);',
+                // Colours are linear, as for the scene's own lines.
+                '    #include <colorspace_fragment>',
                 '}',
             ].join('\n'),
             transparent: true,

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ResourceLoader } from '../util.js';
 import { InstancedProps } from './instanced_props.js';
+import { SilhouetteOutline } from './silhouette_outline.js';
 
 // One level of a MazeLevels maze, drawn around a centre cell in that cell's
 // frame (so coordinates stay small however far it is explored), all in the
@@ -99,8 +100,10 @@ const MAX_HOLES = 16;       // flights down; must match the floor shader
 const STAIR_LENGTHS = [1, 2, 3];
 const MAX_CARPETS = 24;
 // Bonsai (see bonsai_templates), world units: scaled BONSAI_SCALE[0..1] by
-// their room's draw, outlined where faces meet at more than BONSAI_EDGE_ANGLE
-// deg. Up to MAX_PLANTS.
+// their room's draw, standing on the carpet (CARPET_Y: their pots' bottom
+// edges on its top, not buried in it). Pots are outlined where faces meet at
+// more than BONSAI_EDGE_ANGLE deg; foliage and trunks only round their
+// silhouettes, each its own (see the silhouette edges). Up to MAX_PLANTS.
 const BONSAI_SCALE = [0.95, 1.1];
 // Their pots' half-width (at scale 1), and how far round a pot the carpet's
 // pattern lines are left out: a pot stands on the carpet, and lines just
@@ -109,28 +112,30 @@ const BONSAI_SCALE = [0.95, 1.1];
 const POT_HALF = 0.55;
 const POT_CLEAR = 0.25;
 const BONSAI_EDGE_ANGLE = 20;
-const MAX_PLANTS = 12;
-// Paintings, of two kinds, half each: a rectangle of noise PAINTING_W of
-// its wall span's length wide, PAINTING_H standard heights tall, centred
-// PAINTING_V standard heights up, its noise in patches RECT_NOISE world units
-// across between RECT_DARK and 1 of the lit colour; and a smiley: a disc as
-// big as fits the wall span
-// and its first standard height less PAINTING_MARGIN all round (centred in
-// that first height, so at eye level however tall the walls),
-// PAINTING_OFFSET off the wall's face, in PAINTING_SEGMENTS; filled a darker
-// value of the level's colour (PAINTING_VALUE of it) with subtle noise (as
-// the carpets': between PAINTING_NOISE_LO and 1 of that, in patches
-// PAINTING_NOISE world units across). Outlined, with SMILEY_EYE (of the
-// disc's radius) circle eyes at (+-SMILEY_EYE_X, SMILEY_EYE_Y) from its
-// centre, and a smile: that circle swept along the lower half of a circle
-// SMILEY_SMILE across, concentric with the face, drawn as the tube's outline
-// (outer and inner arcs, round caps at its ends). Up to MAX_PAINTINGS.
-const PAINTING_W = 0.45;
-const PAINTING_H = 0.35;
-const PAINTING_V = 0.55;
+const MAX_PLANTS = 24;
+// Parts a bonsai has at most (pot, trunk, two branches, three puffs: 7), so
+// ids 1 + plant * PLANT_PARTS + part fit the outline mask's 8 bits.
+const PLANT_PARTS = 8;
+// Paintings, each one of PAINTING_DESIGNS (equally often, its own noise
+// seed): a rectangle of noise, its noise in patches RECT_NOISE world units
+// across between RECT_DARK and 1 of the lit colour; a smiley; or a line
+// drawing (see painting_designs). Rectangles and drawings are the size of a
+// rectangular window (WINDOW_SCALE of the span's length and of a standard
+// height), the smiley a disc as big as fits the span and its first standard
+// height less PAINTING_MARGIN all round; all centred in that first height,
+// so at eye level however tall the walls, PAINTING_OFFSET off the wall's
+// face. The smiley's disc (in PAINTING_SEGMENTS) and the drawings' canvases
+// are filled a darker value of the level's colour (PAINTING_VALUE of it)
+// with subtle noise (as the carpets': between PAINTING_NOISE_LO and 1 of
+// that, in patches PAINTING_NOISE world units across), their lines in the
+// level's colour. The smiley has SMILEY_EYE (of the disc's radius) circle
+// eyes at (+-SMILEY_EYE_X, SMILEY_EYE_Y) from its centre, and a smile: that
+// circle swept along the lower half of a circle SMILEY_SMILE across,
+// concentric with the face, drawn as the tube's outline (outer and inner
+// arcs, round caps at its ends). Up to MAX_PAINTINGS.
 const RECT_NOISE = 0.35;
 const RECT_DARK = 0.1;
-const PAINTING_MARGIN = 0.4;
+const PAINTING_MARGIN = 0.6;
 const PAINTING_OFFSET = 0.03;
 const PAINTING_SEGMENTS = 48;
 const PAINTING_VALUE = 0.35;
@@ -142,7 +147,7 @@ const SMILEY_EYE_Y = 0.42;
 const SMILEY_SMILE = 0.55;
 const SMILEY_EYE_SEGMENTS = 16;
 // Lines per smiley: the face, two eyes, the smile's two arcs and two caps.
-const PAINTING_LINES = PAINTING_SEGMENTS + 2 * SMILEY_EYE_SEGMENTS +
+const SMILEY_LINES = PAINTING_SEGMENTS + 2 * SMILEY_EYE_SEGMENTS +
     PAINTING_SEGMENTS + SMILEY_EYE_SEGMENTS;
 const MAX_PAINTINGS = 48;
 
@@ -207,60 +212,261 @@ function carpet_pattern(pattern, x0, z0, x1, z1, seg) {
     }
 }
 
-// The two potted bonsai, origin on the floor under the pot's middle, about
-// 4.5 world units tall (taller than a standard wall), as non-indexed
-// triangles with flat normals (pos, nrm) and their edges (edges, segment
-// endpoints): 0, a topiary, an upward cone on a round bottom on a stick; 1, a
-// trunk with branches up to three spherical puffs at different heights. Both
-// in the same straight-sided square pot. Low-poly, as the house style.
-function bonsai_templates() {
-    const parts = (list) => {
-        const pos = [];
-        for (const [geom, x, y, z, quat] of list) {
-            const g = geom.index ? geom.toNonIndexed() : geom;
-            if (quat) {
-                g.applyQuaternion(quat);
-            }
-            g.translate(x, y, z);
-            pos.push(...g.getAttribute('position').array);
+// A pen for PAINTING_DESIGNS on a canvas hw by hh half-size, drawing
+// through seg(x0, y0, x1, y1).
+function drawing_pen(hw, hh, seg) {
+    const poly = (points, closed) => {
+        for (let k = 0; k + 1 < points.length; k++) {
+            seg(...points[k], ...points[k + 1]);
         }
-        const geom = new THREE.BufferGeometry();
-        geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        geom.computeVertexNormals();        // flat: the triangles are unshared
-        return {
-            pos: geom.getAttribute('position').array,
-            nrm: geom.getAttribute('normal').array,
-            edges: new THREE.EdgesGeometry(geom, BONSAI_EDGE_ANGLE).getAttribute('position').array,
-        };
+        if (closed) {
+            seg(...points[points.length - 1], ...points[0]);
+        }
+    };
+    const ellipse = (x, y, rx, ry, n) => {
+        const points = [];
+        for (let k = 0; k < n; k++) {
+            const a = 2 * Math.PI * k / n;
+            points.push([x + rx * Math.cos(a), y + ry * Math.sin(a)]);
+        }
+        poly(points, true);
+    };
+    return {
+        hw, hh, seg, poly, ellipse,
+        circle: (x, y, r, n) => ellipse(x, y, r, r, n),
+        curve: ([ax, ay], [cx, cy], [bx, by], n) => {
+            const points = [];
+            for (let k = 0; k <= n; k++) {
+                const t = k / n, s = 1 - t;
+                points.push([s * s * ax + 2 * s * t * cx + t * t * bx, s * s * ay + 2 * s * t * cy + t * t * by]);
+            }
+            poly(points, false);
+        },
+    };
+}
+
+// The paintings' line drawings, each a function of a pen drawing on a
+// canvas centred on (0, 0), hw by hh half-size (world units, y up; ~1.43 by
+// 1 on a standard wall): seg(x0, y0, x1, y1), poly(points, closed),
+// circle(x, y, r, n), ellipse(x, y, rx, ry, n), curve(a, control, b, n) (a
+// quadratic Bezier). The pen may mirror them left to right. Liminal, a little
+// wrong: a maze's idea of art.
+const PAINTING_DESIGNS = [
+    // The hall: a corridor in one-point perspective, its seams receding to
+    // a doorway in the end wall, and someone small standing in it.
+    (pen) => {
+        const { hw, hh } = pen;
+        const vx = 0, vy = -0.05 * hh;
+        const at = (x, y, s) => [vx + (x - vx) * s, vy + (y - vy) * s];
+        const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+        const END = 0.2;
+        for (const [x, y] of corners) {
+            pen.seg(x, y, ...at(x, y, END));
+        }
+        for (const s of [0.62, 0.38, END]) {
+            pen.poly(corners.map(([x, y]) => at(x, y, s)), true);
+        }
+        // The doorway in the end wall; the figure on its threshold, a head
+        // and a body, no arms.
+        const [dx0, dy0] = at(-0.25 * hw, -hh, END), [dx1, dy1] = at(0.25 * hw, 0.25 * hh, END);
+        pen.poly([[dx0, dy0], [dx0, dy1], [dx1, dy1], [dx1, dy0]], false);
+        const fx = (dx0 + dx1) / 2, fh = 0.6 * (dy1 - dy0);
+        pen.circle(fx, dy0 + fh, 0.08 * fh, 8);
+        pen.seg(fx, dy0 + 0.92 * fh, fx, dy0);
+    },
+    // The eye: a lidded eye staring straight out, its pupil a goat's slit,
+    // lashes along its upper lid and three drips from its lower.
+    (pen) => {
+        const { hw, hh } = pen;
+        const ex = 0.72 * hw, open = 0.62 * hh;
+        const lid = (k, n) => pen.curve([-ex, 0], [0, k * open], [ex, 0], n);
+        lid(1, 16);
+        lid(-1, 16);
+        const ix = 0, ir = 0.27 * hh;
+        pen.circle(ix, 0, ir, 24);
+        pen.curve([ix, 0.8 * ir], [ix + 0.22 * ir, 0], [ix, -0.8 * ir], 8);
+        pen.curve([ix, 0.8 * ir], [ix - 0.22 * ir, 0], [ix, -0.8 * ir], 8);
+        // Lashes square to the upper lid (the curve y = (1 - t^2) open / 2).
+        for (let k = 1; k < 10; k++) {
+            const t = -1 + 2 * k / 10, x = t * ex, y = (1 - t * t) * open / 2;
+            const nx = t * open / ex, ny = 1, n = Math.hypot(nx, ny), len = 0.16 * hh;
+            pen.seg(x, y, x + nx / n * len, y + ny / n * len);
+        }
+        for (const [t, len] of [[-0.3, 0.28], [0, 0.5], [0.3, 0.28]]) {
+            const x = t * ex, y = -(1 - t * t) * open / 2;
+            pen.seg(x, y, x, y - len * hh);
+            pen.circle(x, y - len * hh - 0.035 * hh, 0.035 * hh, 6);
+        }
+    },
+    // The sitter: a formal portrait in an inner border, head and shoulders,
+    // its face a keyhole.
+    (pen) => {
+        const { hw, hh } = pen;
+        const b = 0.1 * hh;
+        pen.poly([[-hw + b, -hh + b], [hw - b, -hh + b], [hw - b, hh - b], [-hw + b, hh - b]], true);
+        const hy = 0.17 * hh, rx = 0.38 * hh, ry = 0.53 * hh;
+        pen.ellipse(0, hy, rx, ry, 24);
+        const neck = 0.16 * hh, sy = -0.5 * hh;
+        pen.seg(-neck, hy - 0.94 * ry, -neck, sy);
+        pen.seg(neck, hy - 0.94 * ry, neck, sy);
+        pen.curve([-0.75 * hw, -hh + b], [-0.7 * hw, sy + 0.1 * hh], [-neck, sy], 10);
+        pen.curve([0.75 * hw, -hh + b], [0.7 * hw, sy + 0.1 * hh], [neck, sy], 10);
+        const kr = 0.11 * hh, ky = hy + 0.08 * hh;
+        pen.circle(0, ky, kr, 12);
+        pen.poly([[-0.5 * kr, ky - 0.8 * kr], [-1.1 * kr, ky - 3.2 * kr], [1.1 * kr, ky - 3.2 * kr],
+            [0.5 * kr, ky - 0.8 * kr]], false);
+    },
+    // Two moons: a grid plain to a horizon under two moons, and on it a lone
+    // doorway, nothing behind it, its shadow long.
+    (pen) => {
+        const { hw, hh } = pen;
+        const hy = -0.2 * hh;
+        pen.seg(-hw, hy, hw, hy);
+        // Rays from the vanishing point to the bottom edge, cut at the sides.
+        for (let k = -4; k <= 4; k++) {
+            const x = k * hw / 2, t = Math.min(1, hw / Math.abs(x || 1));
+            pen.seg(0, hy, x * t, hy + (-hh - hy) * t);
+        }
+        for (let k = 1; k <= 3; k++) {
+            const y = hy - (hh + hy) * Math.pow(k / 3, 2);
+            pen.seg(-hw, y, hw, y);
+        }
+        pen.circle(-0.5 * hw, 0.42 * hh, 0.3 * hh, 24);
+        pen.circle(0.62 * hw, 0.6 * hh, 0.09 * hh, 12);
+        // The doorway, far off on the horizon against the sky, and its
+        // shadow cast from the big moon, laid on the ground towards the
+        // viewer.
+        const dx = 0.3 * hw, dy = hy, dw = 0.08 * hw, dh = 0.4 * hh;
+        const sx = 0.3 * hw, sy = -0.16 * hh;
+        pen.poly([[dx - dw, dy], [dx - dw, dy + dh], [dx + dw, dy + dh], [dx + dw, dy]], false);
+        pen.poly([[dx - dw, dy], [dx - dw + sx, dy + sy], [dx + dw + sx, dy + sy], [dx + dw, dy]], false);
+    },
+    // Ascent: a staircase climbing out of the corner and stopping in mid-air,
+    // a bare bulb hung over its last step, and past it a door, floating.
+    (pen) => {
+        const { hw, hh } = pen;
+        const steps = 7, x0 = -0.9 * hw, y0 = -hh, run = 0.2 * hw, rise = 0.17 * hh;
+        const zig = [[x0, y0]];
+        for (let k = 0; k < steps; k++) {
+            zig.push([x0 + k * run, y0 + (k + 1) * rise], [x0 + (k + 1) * run, y0 + (k + 1) * rise]);
+        }
+        const [tx, ty] = zig[zig.length - 1];
+        zig.push([tx, ty - 0.12 * hh], [x0 + 1.2 * run, y0]);
+        pen.poly(zig, false);
+        const bx = tx - 0.5 * run;
+        pen.seg(bx, hh, bx, ty + 0.55 * hh);
+        pen.circle(bx, ty + 0.5 * hh, 0.05 * hh, 10);
+        const fx = tx + 0.22 * hw, fy = ty + 0.12 * hh, fw = 0.13 * hw, fh = 0.5 * hh;
+        pen.poly([[fx, fy], [fx, fy + fh], [fx + fw, fy + fh], [fx + fw, fy]], true);
+        pen.poly([[fx, fy], [fx + 0.6 * fw, fy + 0.06 * fh], [fx + 0.6 * fw, fy + 0.94 * fh], [fx, fy + fh]], false);
+    },
+];
+
+// The two potted bonsai, origin on the floor under the pot's middle, about
+// 4.5 world units tall (taller than a standard wall): 0, a topiary, an upward
+// cone on a round bottom (one blob) on a stick; 1, a trunk with branches up to
+// three spherical puffs at different heights. Both in the same straight-sided
+// square pot. As non-indexed triangles with flat normals (pos, nrm), each
+// vertex's part (part: 0 the pot, then 1.. a trunk, branch or blob each; see
+// the plants' outline), and the pot's crease edges (edges, segment
+// endpoints). Foliage is about as fine as the ice cream cone (~16 facets
+// round), so its outline follows a round silhouette rather than a
+// polyhedron's.
+function bonsai_templates() {
+    let pos = [], nrm = [], part = [];
+    const face = new THREE.Vector3(), ab = new THREE.Vector3(), ac = new THREE.Vector3();
+    const middle = new THREE.Vector3(), va = new THREE.Vector3(), vb = new THREE.Vector3(),
+        vc = new THREE.Vector3();
+    // Posed geometry's triangles as part k, each with its flat normal
+    // (outwards: flipped, and the triangle rewound to face it, if most point
+    // towards the part's middle), skipping degenerate ones (at lathe poles).
+    const add = (geom, k) => {
+        const p = (geom.index ? geom.toNonIndexed() : geom).getAttribute('position');
+        geom.computeBoundingBox();
+        geom.boundingBox.getCenter(middle);
+        const normals = [];
+        let outwards = 0;
+        for (let t = 0; t < p.count; t += 3) {
+            va.fromBufferAttribute(p, t); vb.fromBufferAttribute(p, t + 1); vc.fromBufferAttribute(p, t + 2);
+            face.crossVectors(ab.subVectors(vb, va), ac.subVectors(vc, va));
+            const n = face.length() < 1e-8 ? null : face.normalize().clone();
+            normals.push(n);
+            outwards += n === null ? 0 : Math.sign(n.dot(va.sub(middle)));
+        }
+        for (let t = 0; t < p.count; t += 3) {
+            const n = normals[t / 3];
+            if (n === null) {
+                continue;
+            }
+            if (outwards < 0) {
+                n.negate();
+            }
+            for (const q of outwards < 0 ? [t, t + 2, t + 1] : [t, t + 1, t + 2]) {
+                pos.push(p.getX(q), p.getY(q), p.getZ(q));
+                nrm.push(n.x, n.y, n.z);
+                part.push(k);
+            }
+        }
     };
     // The pot: a four-sided cylinder turned square to the grid, its walls
-    // vertical (1.1 across).
+    // vertical (1.1 across), without the bottom (on the carpet, never seen).
     const POT_H = 1.0;
-    const pot = new THREE.CylinderGeometry(POT_HALF * Math.SQRT2, POT_HALF * Math.SQRT2, POT_H, 4)
-        .rotateY(Math.PI / 4);
-    const pot_part = [pot, 0, POT_H / 2, 0];
-    // A cylinder from a to b (radius r), for trunks and branches.
+    const pot_geom = () => {
+        const pot = new THREE.CylinderGeometry(POT_HALF * Math.SQRT2, POT_HALF * Math.SQRT2, POT_H, 4,
+            1, false).rotateY(Math.PI / 4).translate(0, POT_H / 2, 0).toNonIndexed();
+        const all = pot.getAttribute('position').array, kept = [];
+        for (let k = 0; k < all.length; k += 9) {
+            // The bottom cap: all three corners on the floor.
+            if (all[k + 1] > 1e-6 || all[k + 4] > 1e-6 || all[k + 7] > 1e-6) {
+                kept.push(...all.slice(k, k + 9));
+            }
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(kept, 3));
+        return g;
+    };
+    // A cylinder from a to b (radius r0 to r1), open-ended, for trunks and
+    // branches (their ends inside the pot or a blob).
     const limb = (a, b, r0, r1) => {
         const d = new THREE.Vector3().subVectors(b, a);
         const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
         const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-        return [new THREE.CylinderGeometry(r1, r0, d.length(), 6, 1, true), mid.x, mid.y, mid.z, quat];
+        return new THREE.CylinderGeometry(r1, r0, d.length(), 8, 1, true)
+            .applyQuaternion(quat).translate(mid.x, mid.y, mid.z);
     };
     const v = (x, y, z) => new THREE.Vector3(x, y, z);
-    const topiary = parts([
-        pot_part,
+    const template = (parts) => {
+        pos = []; nrm = []; part = [];
+        const pot = pot_geom();
+        add(pot, 0);
+        parts.forEach((g, k) => add(g, k + 1));
+        return {
+            pos: new Float32Array(pos),
+            nrm: new Float32Array(nrm),
+            part: new Uint8Array(part),
+            edges: new THREE.EdgesGeometry(pot, BONSAI_EDGE_ANGLE).getAttribute('position').array,
+        };
+    };
+    // The topiary's blob, turned about the vertical: a quarter circle (radius
+    // R, centre at y c) from its bottom pole out to its equator, then
+    // straight up to the cone's tip.
+    const R = 0.95, c = 2.6;
+    const profile = [];
+    for (let k = 0; k <= 6; k++) {
+        const a = -Math.PI / 2 + k * Math.PI / 12;
+        profile.push(new THREE.Vector2(R * Math.cos(a), c + R * Math.sin(a)));
+    }
+    profile.push(new THREE.Vector2(0, c + 2 * R));
+    const topiary = template([
         limb(v(0, POT_H, 0), v(0, 2.5, 0), 0.1, 0.08),
-        // Round bottom (a half sphere, cup down) under an upward cone.
-        [new THREE.SphereGeometry(0.95, 8, 3, 0, 2 * Math.PI, Math.PI / 2, Math.PI / 2), 0, 2.6, 0],
-        [new THREE.ConeGeometry(0.95, 1.9, 8, 1, true), 0, 2.6 + 0.95, 0],
+        new THREE.LatheGeometry(profile, 16),
     ]);
     const puffs = [[v(0, 4.0, 0.1), 0.85], [v(0.95, 3.05, -0.2), 0.62], [v(-0.85, 2.35, 0.3), 0.55]];
-    const tree = parts([
-        pot_part,
+    const tree = template([
         limb(v(0, POT_H, 0), v(0.05, 3.7, 0.1), 0.2, 0.12),
         limb(v(0.04, 2.8, 0.05), puffs[1][0], 0.08, 0.06),
         limb(v(0.02, 2.1, 0.05), puffs[2][0], 0.08, 0.06),
-        ...puffs.map(([c, r]) => [new THREE.IcosahedronGeometry(r, 1), c.x, c.y, c.z]),
+        ...puffs.map(([p, r]) => new THREE.SphereGeometry(r, 16, 12).translate(p.x, p.y, p.z)),
     ]);
     return [topiary, tree];
 }
@@ -269,7 +475,9 @@ export class MazeLevel extends THREE.Group {
     // levels: MazeLevels. cell: grid pitch; thickness: the walls'; height:
     // the standard wall height, which a level's own is a multiple of (world
     // units). half: cells drawn either side of the centre cell.
-    constructor(levels, { cell, thickness, height, half }) {
+    // outline_layer: a layer of its own for its plants' outline (see
+    // draw_outline).
+    constructor(levels, { cell, thickness, height, half, outline_layer }) {
         super();
         this.levels = levels;
         this.level = 0;
@@ -324,28 +532,45 @@ export class MazeLevel extends THREE.Group {
         // outlines.
         const boundaries = 2 * m * (m + 1);
         // The bonsai's templates (see bonsai_templates), and the most room
-        // either takes in the fill and the edges.
+        // either takes in the edges.
         this.bonsai = bonsai_templates();
-        const bonsai_tris = Math.max(...this.bonsai.map((b) => b.pos.length / 9));
         const bonsai_lines = Math.max(...this.bonsai.map((b) => b.edges.length / 6));
         // A window adds its two faces' cut-round panels and its lining.
         const panel_tris = 2 * this.window_shapes[2].tris.length + 2 * WINDOW_ROUND_SEGMENTS;
-        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS + 4 * MAX_HOLES +
-            bonsai_tris * MAX_PLANTS;
+        const max_tris = 2 * (m * m + boundaries) + panel_tris * MAX_WINDOWS + 4 * MAX_HOLES;
         this.fill_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'normal']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_tris * 9), 3);
             attr.setUsage(THREE.DynamicDrawUsage);
             this.fill_geom.setAttribute(name, attr);
         }
+        // The most lines a painting takes: a smiley's, or a drawing's and
+        // its frame (counted on a canvas the size of a standard wall's).
+        const span = this.cell - this.thickness;
+        this.painting_lines = Math.max(SMILEY_LINES, ...PAINTING_DESIGNS.map((design) => {
+            let n = 4;
+            design(drawing_pen(span * WINDOW_SCALE / 2, this.base_height * WINDOW_SCALE / 2, () => n++));
+            return n;
+        }));
         const max_lines = 2 * boundaries + (m + 1) * (m + 1) + 2 * WINDOW_ROUND_SEGMENTS * MAX_WINDOWS +
-            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES + PAINTING_LINES * MAX_PAINTINGS +
+            4 * MAX_CARPETS + 2 * MAX_HOLES + MAX_PATTERN_LINES + this.painting_lines * MAX_PAINTINGS +
             bonsai_lines * MAX_PLANTS;
         this.line_geom = new THREE.BufferGeometry();
         for (const name of ['position', 'line_color']) {
             const attr = new THREE.BufferAttribute(new Float32Array(max_lines * 6), 3);
             attr.setUsage(THREE.DynamicDrawUsage);
             this.line_geom.setAttribute(name, attr);
+        }
+        // The bonsai's fill, apart from the walls' for their outline (see
+        // plant_outline): plant_part is (id, outlined) per vertex, id 1.. a
+        // part of a plant in the window (pot, trunk, branch, blob), unique
+        // among them; outlined 0 for pots (edged instead).
+        const max_plant_tris = Math.max(...this.bonsai.map((b) => b.pos.length / 9)) * MAX_PLANTS;
+        this.plant_geom = new THREE.BufferGeometry();
+        for (const [name, size] of [['position', 3], ['normal', 3], ['plant_part', 2]]) {
+            const attr = new THREE.BufferAttribute(new Float32Array(max_plant_tris * 3 * size), size);
+            attr.setUsage(THREE.DynamicDrawUsage);
+            this.plant_geom.setAttribute(name, attr);
         }
         this.carpet_geom = new THREE.BufferGeometry();
         // carpet_info: (u, v) world units from the carpet's corner, pattern.
@@ -396,6 +621,33 @@ export class MazeLevel extends THREE.Group {
         const lines = new THREE.LineSegments(this.line_geom, line_mat);
         lines.frustumCulled = false;
         this.add(lines);
+
+        // The bonsai's outline: 1 px in the level's colour round each trunk,
+        // branch and blob (each round its own silhouette, over whatever part
+        // is behind it), at its depth, from a mask of their parts' ids (see
+        // SilhouetteOutline's ids), as the cones' and head's are; on
+        // outline_layer, fading with the level.
+        this.plant_outline = new SilhouetteOutline({
+            layer: outline_layer, color: this.color, depth: true, fade: true, ids: true,
+            mask_material: new THREE.ShaderMaterial({
+                uniforms: this.uniforms,
+                vertexShader: [
+                    'attribute vec2 plant_part;',
+                    'varying vec2 v_part;',
+                    'void main() {',
+                    '    v_part = plant_part;',
+                    '    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+                    '}',
+                ].join('\n'),
+                fragmentShader: [
+                    'uniform float opacity_all;',
+                    'varying vec2 v_part;',
+                    'void main() {',
+                    '    gl_FragColor = vec4(v_part.x / 255.0, v_part.y, opacity_all, 1.0);',
+                    '}',
+                ].join('\n'),
+            }),
+        });
 
         // Staircases: a unit flight per length (steps as tall as the walls
         // are thick, so twice as many on a two-cell flight), posed and
@@ -468,6 +720,12 @@ export class MazeLevel extends THREE.Group {
             this.walls.castShadow = this.casting;
             this.walls.receiveShadow = true;
             this.add(this.walls);
+            this.plant_mesh = new THREE.Mesh(this.plant_geom, this.wall_mat);
+            this.plant_mesh.frustumCulled = false;
+            this.plant_mesh.castShadow = this.casting;
+            this.plant_mesh.receiveShadow = true;
+            this.plant_mesh.layers.enable(outline_layer);
+            this.add(this.plant_mesh);
 
             // Carpets: per-vertex hue and pattern (see CARPET_PATTERNS),
             // darkened by noise in maze coordinates.
@@ -583,6 +841,14 @@ export class MazeLevel extends THREE.Group {
         }
     }
 
+    // Draw its plants' outline (see plant_outline) over the scene just
+    // drawn (scene, from camera) into the current target.
+    draw_outline(renderer, scene, camera) {
+        if (this.visible && this.plants.length) {
+            this.plant_outline.draw(renderer, scene, camera);
+        }
+    }
+
     // Fade the whole level, 0..1.
     set_opacity(opacity) {
         this.uniforms.opacity_all.value = opacity;
@@ -590,6 +856,7 @@ export class MazeLevel extends THREE.Group {
         this.casting = opacity > 0.5;
         if (this.walls) {
             this.walls.castShadow = this.casting;
+            this.plant_mesh.castShadow = this.casting;
         }
         for (const props of this.stairs.values()) {
             props.cast_shadows(this.casting);
@@ -807,13 +1074,13 @@ export class MazeLevel extends THREE.Group {
         });
         this.uniforms.hole_count.value = this.holes.length;
 
-        // Carpets in the rooms overlapping the window, and their plants.
+        // Carpets in the rooms overlapping the window, and the plants in
+        // them and in the wide halls.
         this.carpets = maze.rooms_in(ci + lo, cj + lo, ci + hi, cj + hi).slice(0, MAX_CARPETS);
         this.plants.length = 0;
-        for (const room of this.carpets) {
-            const plant = levels.plant(level, room);
-            if (plant === null || this.plants.length >= MAX_PLANTS) {
-                continue;
+        for (const plant of levels.plants_in(level, ci + lo, cj + lo, ci + hi, cj + hi)) {
+            if (this.plants.length >= MAX_PLANTS) {
+                break;
             }
             this.plants.push([(plant.i - ci) * cell, (plant.j - cj) * cell, plant.kind,
                 plant.turn * Math.PI / 2,
@@ -860,18 +1127,40 @@ export class MazeLevel extends THREE.Group {
         return pc;
     }
 
-    // A rectangle of noise (see PAINTING_W) on a wall span len long, as
-    // smiley(); the next pc.
+    // A painting's canvas (see RECT_NOISE) on a wall span len long, (u0, v0)
+    // to (u1, v1) on it.
+    canvas(len) {
+        const bh = this.base_height, w = len * WINDOW_SCALE, ch = bh * WINDOW_SCALE;
+        return [(len - w) / 2, (bh - ch) / 2, (len + w) / 2, (bh + ch) / 2];
+    }
+
+    // A rectangle of noise on a wall span len long, as smiley(); the next pc.
     rect_painting(point, len, off, nx, nz, seed, pnrm, ppos, pinfo, pc, line) {
-        const w = PAINTING_W * len, ph = PAINTING_H * this.base_height, pv = PAINTING_V * this.base_height;
-        const u0 = (len - w) / 2, u1 = u0 + w, v0 = pv - ph / 2, v1 = pv + ph / 2;
-        pc = this.paint_tris(point, off, nx, nz, 2 + seed, pnrm, ppos, pinfo, pc,
+        return this.framed(point, len, off, nx, nz, 2 + seed, pnrm, ppos, pinfo, pc, line);
+    }
+
+    // A canvas (see canvas()) filled with painting_info z info_z, framed; the
+    // next pc.
+    framed(point, len, off, nx, nz, info_z, pnrm, ppos, pinfo, pc, line) {
+        const [u0, v0, u1, v1] = this.canvas(len);
+        pc = this.paint_tris(point, off, nx, nz, info_z, pnrm, ppos, pinfo, pc,
             [[[u0, v0], [u0, v1], [u1, v1]], [[u0, v0], [u1, v1], [u1, v0]]]);
         const at = (u, v) => point(u, v, off);
         line(...at(u0, v0), ...at(u0, v1));
         line(...at(u0, v1), ...at(u1, v1));
         line(...at(u1, v1), ...at(u1, v0));
         line(...at(u1, v0), ...at(u0, v0));
+        return pc;
+    }
+
+    // Line drawing `design` (see PAINTING_DESIGNS) on a dark canvas, as
+    // smiley(), mirrored if seed >= 0.5; the next pc.
+    line_painting(design, point, len, off, nx, nz, seed, pnrm, ppos, pinfo, pc, line) {
+        pc = this.framed(point, len, off, nx, nz, seed, pnrm, ppos, pinfo, pc, line);
+        const [u0, v0, u1, v1] = this.canvas(len);
+        const cu = (u0 + u1) / 2, cv = (v0 + v1) / 2, flip = seed < 0.5 ? 1 : -1;
+        design(drawing_pen((u1 - u0) / 2, (v1 - v0) / 2, (x0, y0, x1, y1) =>
+            line(...point(cu + flip * x0, cv + y0, off), ...point(cu + flip * x1, cv + y1, off))));
         return pc;
     }
 
@@ -968,10 +1257,13 @@ export class MazeLevel extends THREE.Group {
                 quad(point(0, 0), point(0, h), point(s1 - s0, h), point(s1 - s0, 0), nx, 0, nz);
                 line(...point(0, 0), ...point(s1 - s0, 0));
                 if (paint !== null && pc < MAX_PAINTINGS * PAINTING_SEGMENTS * 9) {
-                    // Half rectangles, half smileys, each its own noise seed.
-                    const painter = paint < 0.5 ? this.rect_painting : this.smiley;
-                    pc = painter.call(this, point, s1 - s0, at + normal * PAINTING_OFFSET, nx, nz,
-                        (2 * paint) % 1, pnrm, ppos, pinfo, pc, line);
+                    // One of the kinds equally often (rectangle, smiley, the
+                    // drawings), each its own noise seed.
+                    const kinds = 2 + PAINTING_DESIGNS.length, kind = Math.floor(paint * kinds);
+                    const args = [point, s1 - s0, at + normal * PAINTING_OFFSET, nx, nz,
+                        (kinds * paint) % 1, pnrm, ppos, pinfo, pc, line];
+                    pc = kind == 0 ? this.rect_painting(...args) : kind == 1 ? this.smiley(...args) :
+                        this.line_painting(PAINTING_DESIGNS[kind - 2], ...args);
                 }
                 return;
             }
@@ -1063,20 +1355,32 @@ export class MazeLevel extends THREE.Group {
             }
         }
 
-        // Bonsai: their templates turned, scaled and stood in their cells,
-        // solid with the walls.
-        for (const [x, z, kind, turn, scale] of this.plants) {
-            const { pos: tp, nrm: tn, edges: te } = this.bonsai[kind];
+        // Bonsai: their templates turned, scaled and stood on the carpet in
+        // their cells, solid with the walls, their pots edged.
+        const plant_pos = this.plant_geom.getAttribute('position').array;
+        const plant_nrm = this.plant_geom.getAttribute('normal').array;
+        const plant_ids = this.plant_geom.getAttribute('plant_part').array;
+        let pv = 0;     // plant vertices written
+        this.plants.forEach(([x, z, kind, turn, scale], n) => {
+            const { pos: tp, nrm: tn, part: tpart, edges: te } = this.bonsai[kind];
             const cs = Math.cos(turn), sn = Math.sin(turn);
             const place = (src, k) => [x + (src[k] * cs + src[k + 2] * sn) * scale,
-                src[k + 1] * scale, z + (src[k + 2] * cs - src[k] * sn) * scale];
-            for (let k = 0; k < tp.length; k += 9) {
-                tri(place(tp, k), place(tp, k + 3), place(tp, k + 6),
-                    tn[k] * cs + tn[k + 2] * sn, tn[k + 1], tn[k + 2] * cs - tn[k] * sn);
+                CARPET_Y + src[k + 1] * scale, z + (src[k + 2] * cs - src[k] * sn) * scale];
+            for (let k = 0; k < tp.length; k += 3, pv++) {
+                [plant_pos[3 * pv], plant_pos[3 * pv + 1], plant_pos[3 * pv + 2]] = place(tp, k);
+                plant_nrm[3 * pv] = tn[k] * cs + tn[k + 2] * sn;
+                plant_nrm[3 * pv + 1] = tn[k + 1];
+                plant_nrm[3 * pv + 2] = tn[k + 2] * cs - tn[k] * sn;
+                plant_ids[2 * pv] = 1 + n * PLANT_PARTS + tpart[k / 3];
+                plant_ids[2 * pv + 1] = tpart[k / 3] > 0 ? 1 : 0;
             }
             for (let k = 0; k < te.length; k += 6) {
                 line(...place(te, k), ...place(te, k + 3));
             }
+        });
+        this.plant_geom.setDrawRange(0, pv);
+        for (const name of ['position', 'normal', 'plant_part']) {
+            this.plant_geom.getAttribute(name).needsUpdate = true;
         }
 
         // The holes down to staircases: their two sides lined down to the

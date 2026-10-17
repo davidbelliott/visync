@@ -217,7 +217,9 @@ for bar in range(0, NUM_BARS):
         fake_beat[16 * bar + i].append(1)
     for i in [4, 12]:
         fake_beat[16 * bar + i].append(4)
-    for i in range(0, 16, 2):
+    # Hi-hats on every sixteenth: open (channel 10) on the off-beat eighths,
+    # closed (9) on the rest.
+    for i in range(0, 16):
         if i in [2, 6, 10, 14]:
             fake_beat[16 * bar + i].append(10)
         else:

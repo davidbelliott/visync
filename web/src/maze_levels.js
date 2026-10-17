@@ -36,11 +36,14 @@ const STAIRS_P = 1;
 // are drawn from; and the largest rooms a level can have (it picks one of
 // ROOM_LARGEST, up to the whole width of a block). Each level's chance of a
 // plant per room and a painting per wall face are drawn from PLANT_P and
-// PAINTING_P.
+// PAINTING_P; each 2 x 2 square of a wide hall has HALL_PLANT_SHARE of the
+// room chance (of a wide block's 16 squares, few have a corner to spare: ~0.5
+// plants per wide block on average).
 const TALL_P = 0.2;
 const TALLEST_P = 0.05;
-const PLANT_P = [0.1, 0.6];
-const PAINTING_P = [0.0025, 0.015];
+const PLANT_P = [0.2, 0.75];
+const HALL_PLANT_SHARE = 0.25;
+const PAINTING_P = [0.004, 0.025];
 const WINDOW_RECT_P = [0, 0.2];
 const WINDOW_ROUND_P = [0, 0.2];
 const ARCH_P = [0.1, 0.5];
@@ -66,6 +69,7 @@ const SALT_PARAMS = 7000;
 const SALT_ARCH = 8000;
 const SALT_WINDOW = 8500;
 const SALT_PLANT = 8700;
+const SALT_HALL_PLANT = 8800;
 const SALT_PAINTING = 8800;
 
 function mod2(n) {
@@ -311,11 +315,77 @@ export class MazeLevels {
         return plant;
     }
 
+    // The potted bonsai in 2 x 2 square (si, sj) (cells 2 si.., 2 sj..) of a
+    // wide block's halls on level L, by HALL_PLANT_SHARE of the level's
+    // plant_p: null, or as plant() gives. It stands in a corner cell of the
+    // square walled on both its outer sides, so its only ways out are into
+    // the square's other cells, which stay joined round it: it never cuts a
+    // path or narrows a doorway. None in a square with a stairwell cell or
+    // overlapping a room (which has its own).
+    hall_plant(level, si, sj) {
+        const cache_key = `h${level},${si},${sj}`;
+        let plant = this.plant_cache.get(cache_key);
+        if (plant !== undefined) {
+            return plant;
+        }
+        plant = null;
+        const maze = this.maze(level);
+        const i0 = 2 * si, j0 = 2 * sj;
+        const bi = Math.floor(i0 / BLOCK), bj = Math.floor(j0 / BLOCK);
+        const r = (k) => maze.cell_random(i0, j0, SALT_HALL_PLANT + k);
+        if (r(0) < this.params(level).plant_p * HALL_PLANT_SHARE && maze.wide(bi, bj)) {
+            const room = maze.room(bi, bj);
+            const in_room = room !== null && i0 + 1 >= room.i && i0 < room.i + room.w &&
+                j0 + 1 >= room.j && j0 < room.j + room.h;
+            let fixed = false;
+            for (let c = 0; c < 4; c++) {
+                fixed = fixed || this.fixed(level, i0 + (c & 1), j0 + (c >> 1)) !== null;
+            }
+            const first = Math.floor(r(1) * 4);
+            for (let q = 0; q < 4 && plant === null && !in_room && !fixed; q++) {
+                const c = (first + q) % 4, ox = c & 1, oy = c >> 1;
+                const i = i0 + ox, j = j0 + oy;
+                if (!maze.open(i, j, ox ? 1 : -1, 0) && !maze.open(i, j, 0, oy ? 1 : -1)) {
+                    plant = { i, j, kind: r(2) < 0.5 ? 0 : 1, turn: Math.floor(r(3) * 4), size: r(4) };
+                }
+            }
+        }
+        if (this.plant_cache.size >= MAX_CACHED_PLANTS) {
+            this.plant_cache.delete(this.plant_cache.keys().next().value);
+        }
+        this.plant_cache.set(cache_key, plant);
+        return plant;
+    }
+
+    // Level L's plants (see plant(), hall_plant()) in rooms and wide halls
+    // overlapping cells i0..i1, j0..j1.
+    plants_in(level, i0, j0, i1, j1) {
+        const maze = this.maze(level);
+        const plants = [];
+        for (const room of maze.rooms_in(i0, j0, i1, j1)) {
+            const plant = this.plant(level, room);
+            if (plant !== null) {
+                plants.push(plant);
+            }
+        }
+        for (let si = Math.floor(i0 / 2); si <= Math.floor(i1 / 2); si++) {
+            for (let sj = Math.floor(j0 / 2); sj <= Math.floor(j1 / 2); sj++) {
+                const plant = this.hall_plant(level, si, sj);
+                if (plant !== null) {
+                    plants.push(plant);
+                }
+            }
+        }
+        return plants;
+    }
+
     // Whether cell (i, j) of level L is filled by a plant.
     plant_at(level, i, j) {
         const room = this.maze(level).room(Math.floor(i / BLOCK), Math.floor(j / BLOCK));
         const plant = room === null ? null : this.plant(level, room);
-        return plant !== null && plant.i == i && plant.j == j;
+        const hall = this.hall_plant(level, Math.floor(i / 2), Math.floor(j / 2));
+        return (plant !== null && plant.i == i && plant.j == j) ||
+            (hall !== null && hall.i == i && hall.j == j);
     }
 
     // Whether the face of the wall on edge (i, j, side) of level L facing

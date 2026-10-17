@@ -31,9 +31,12 @@ const WALL_H = 4;
 const HEAD_MODEL_HEIGHT = 27.9;
 const HEAD_SCALE = WALL_H / HEAD_MODEL_HEIGHT;
 // Corridors CORRIDOR_W world units between the walls, which sets the cell
-// pitch (~6.2): sized for the brain this scene first walked (1.5 times its
-// width), kept so the light's reach and maze window (below) stay tuned.
-const CORRIDOR_W = 5.7;
+// pitch (~6.2): WALL_H / tan(PITCH_BASE) (sqrt 2 wall heights at the
+// isometric tilt), so looking straight down a corridor (yaw a multiple of
+// 90 deg) a wall's top edge and the bottom edge of the wall across from it
+// fall on the same screen line, not two lines a fraction of a pixel apart.
+// (About the 5.7 it was sized to, for the brain this scene first walked.)
+const CORRIDOR_W = WALL_H / Math.tan(PITCH_BASE);
 const CELL = CORRIDOR_W + WALL_T;
 // Fog of war, world units: nothing fades with distance; the maze is lit by
 // nothing but the head's light, whose range ends LIGHT_RANGE away, so it
@@ -169,6 +172,9 @@ const OUTLINE_LAYER = 1;
 // level's crossfade (see cone_mask_material), so it takes its outline with
 // it. They have no edges.
 const CONE_OUTLINE_LAYER = 2;
+// The two maze views' plants' outlines (see MazeLevel.draw_outline): a layer
+// each, as they differ in colour on the stairs.
+const PLANT_OUTLINE_LAYERS = [3, 4];
 // Eating a cone sends a 1 px white outline of the head's silhouette out from
 // it, as cubetubes' kick outline: after PICKUP_RING_HOLD beats it grows to
 // PICKUP_RING_SCALE times the head's size over PICKUP_RING_BEATS, fading from
@@ -187,7 +193,7 @@ const PICKUP_RINGS = Math.ceil(PICKUP_TRACER_LIFETIME / PICKUP_TRACER_INTERVAL) 
 
 // The cones' mask material: whole silhouettes (their own lit material would
 // vanish there, unlit, through the house dither), each instance's opacity
-// (InstancedProps' instance_alpha) in red, for the outline to dissolve by
+// (InstancedProps' instance_alpha) in blue, for the outline to dissolve by
 // (SilhouetteOutline's fade).
 function cone_mask_material() {
     const mat = new THREE.MeshBasicMaterial({ color: 'white' });
@@ -204,7 +210,7 @@ function cone_mask_material() {
             '#include <common>\nvarying float v_alpha;'
         ).replace(
             '#include <opaque_fragment>',
-            'gl_FragColor = vec4(v_alpha, 0.0, 0.0, 1.0);'
+            'gl_FragColor = vec4(0.0, 0.0, v_alpha, 1.0);'
         );
     };
     return mat;
@@ -264,8 +270,8 @@ export class BrainMazeScene extends Scene {
             height: WALL_H,
             half: WINDOW_HALF,
         };
-        this.view = new MazeLevel(this.levels, view_options);
-        this.next_view = new MazeLevel(this.levels, view_options);
+        this.view = new MazeLevel(this.levels, { ...view_options, outline_layer: PLANT_OUTLINE_LAYERS[0] });
+        this.next_view = new MazeLevel(this.levels, { ...view_options, outline_layer: PLANT_OUTLINE_LAYERS[1] });
         this.next_view.set_opacity(0);
         this.maze_group.add(this.view, this.next_view);
 
@@ -384,6 +390,8 @@ export class BrainMazeScene extends Scene {
 
     render(renderer, underlying_buffer) {
         super.render(renderer, underlying_buffer);
+        this.view.draw_outline(renderer, this, this.camera);
+        this.next_view.draw_outline(renderer, this, this.camera);
         if (this.cones?.fill) {
             this.cones.fill.layers.enable(CONE_OUTLINE_LAYER);
             this.cone_outline.draw(renderer, this, this.camera);

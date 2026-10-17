@@ -1127,6 +1127,10 @@ class GraphicsContext {
             this.cur_scene_bank = Math.min(this.cur_scene_bank + 1, this.num_scene_banks - 1);
         } else if (e.key == "ArrowDown") {
             this.cur_scene_bank = Math.max(this.cur_scene_bank - 1, 0);
+        } else if (e.key == "Delete" || e.key == "Backspace") {
+            // Clear the active slot, as a double-tap does (a Mac's delete
+            // key is Backspace).
+            this.set_slot(this.active_slot, 0);
         } else {
             this.for_each_shown_scene((scene) => scene.handle_key(e.key));
         }

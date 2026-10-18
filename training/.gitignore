@@ -1,0 +1,24 @@
+# Audio and its derived feature cache: bulky, and the audio is not ours to
+# commit. The label database IS committed -- it is the one irreplaceable thing
+# here (~23 MB at a full 30-track collection, under 10 MB of git history, so
+# plain git handles it; LFS would be all friction and no benefit).
+training_data/*.wav
+training_data/*.flac
+training_data/*.aiff
+training_data/*.aif
+training_data/*.mp3
+training_data/*.ogg
+training_data/*.features.npz
+
+# python bytecode from running the tools in place
+__pycache__/
+
+# SQLite's WAL sidecars. db.py runs in WAL mode, so until the last connection
+# closes, recently written labels may still live in -wal rather than in the
+# database file. Never commit these: a -wal committed alongside a database is a
+# torn pair, and a database committed without its pending -wal is missing the
+# sessions it has not checkpointed yet. Corollary: only commit the database
+# when label.py is not running, which is when SQLite has checkpointed and
+# removed these.
+training_data/*.db-wal
+training_data/*.db-shm
